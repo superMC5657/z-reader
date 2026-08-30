@@ -1,0 +1,93 @@
+{
+  "nav": {
+    "all": "全部文章",
+    "addSource": "添加订阅",
+    "refresh": "刷新全部",
+    "settings": "设置",
+    "noSources": "暂无订阅源",
+    "addHint": "点击左下角按钮添加订阅"
+  },
+  "filter": {
+    "all": "全部",
+    "unread": "未读",
+    "starred": "收藏"
+  },
+  "toolbar": {
+    "search": "搜索文章",
+    "markAllRead": "全部标为已读",
+    "view": "视图",
+    "views": { "cards": "卡片", "list": "列表", "magazine": "杂志", "compact": "紧凑" }
+  },
+  "item": {
+    "markRead": "标为已读",
+    "markUnread": "标为未读",
+    "star": "收藏",
+    "unstar": "取消收藏",
+    "openWeb": "在浏览器中打开",
+    "fetchFull": "抓取全文",
+    "fetching": "抓取中…",
+    "noContent": "此文章没有内容",
+    "noContentHint": "可尝试抓取全文或打开原网页"
+  },
+  "addSource": {
+    "title": "添加订阅",
+    "urlLabel": "订阅源 URL",
+    "urlPlaceholder": "例如 https://example.com/feed.xml",
+    "group": "分组",
+    "none": "不分组",
+    "submit": "订阅",
+    "cancel": "取消",
+    "adding": "正在添加…"
+  },
+  "settings": {
+    "title": "设置",
+    "tabs": { "sources": "订阅源", "app": "应用", "data": "数据", "about": "关于" },
+    "sources": {
+      "title": "订阅源管理",
+      "group": "所属分组",
+      "ungrouped": "未分组",
+      "remove": "删除",
+      "confirmRemove": "确定删除此订阅源及其全部文章？"
+    },
+    "app": {
+      "theme": "主题",
+      "themeSystem": "跟随系统",
+      "themeLight": "浅色",
+      "themeDark": "深色",
+      "view": "默认视图",
+      "fontSize": "字号",
+      "fetchInterval": "后台刷新间隔(分钟)",
+      "language": "语言",
+      "showCover": "显示封面图",
+      "showSnippet": "显示摘要",
+      "fadeRead": "淡化已读文章"
+    },
+    "data": {
+      "importOpml": "导入 OPML",
+      "exportOpml": "导出 OPML",
+      "imported": "导入完成:新增 {sources} 个订阅源,{groups} 个分组,{existing} 个已存在",
+      "exported": "已导出"
+    },
+    "about": {
+      "version": "版本",
+      "desc": "现代桌面 RSS 阅读器 · Rust + Tauri 2 重构自 Fluent Reader"
+    }
+  },
+  "group": {
+    "new": "新建分组",
+    "namePlaceholder": "分组名称",
+    "create": "创建",
+    "rename": "重命名",
+    "delete": "删除分组",
+    "confirmDelete": "确定删除分组？(分组内订阅源将移至未分组)",
+    "moveTo": "移动到分组"
+  },
+  "common": {
+    "cancel": "取消",
+    "confirm": "确定",
+    "loading": "加载中…",
+    "empty": "没有文章",
+    "emptyHint": "换个筛选条件或稍后再试",
+    "error": "出错了"
+  }
+}

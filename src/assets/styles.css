@@ -1,0 +1,232 @@
+/* Fluent-style design tokens */
+:root {
+  --accent: #0067c0;
+  --accent-hover: #0078d4;
+  --bg: #f3f3f3;
+  --bg-card: #ffffff;
+  --bg-nav: rgba(243, 243, 243, 0.86);
+  --bg-hover: rgba(0, 0, 0, 0.046);
+  --bg-active: rgba(0, 0, 0, 0.08);
+  --bg-input: rgba(255, 255, 255, 0.7);
+  --text-primary: #1a1a1a;
+  --text-secondary: #616161;
+  --text-tertiary: #9d9d9d;
+  --border: rgba(0, 0, 0, 0.08);
+  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --danger: #c42b1c;
+  --radius: 6px;
+  --nav-width: 264px;
+  --app-font-size: 16px;
+}
+
+[data-theme='dark'] {
+  --accent: #4cc2ff;
+  --accent-hover: #6cc8f5;
+  --bg: #202020;
+  --bg-card: #2b2b2b;
+  --bg-nav: rgba(32, 32, 32, 0.86);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --bg-input: rgba(255, 255, 255, 0.06);
+  --text-primary: #ffffff;
+  --text-secondary: #c8c8c8;
+  --text-tertiary: #8d8d8d;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.14);
+  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --danger: #ff99a4;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: var(--app-font-size);
+}
+
+body {
+  font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
+  color: var(--text-primary);
+  background: var(--bg);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-bottom-color: var(--text-tertiary);
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Fluent-ish buttons */
+.f-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.34rem 0.85rem;
+  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.f-btn:hover {
+  background: var(--bg-hover);
+}
+
+.f-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.f-btn.primary:hover {
+  background: var(--accent-hover);
+}
+
+.f-btn.danger {
+  color: var(--danger);
+}
+
+.f-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.f-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  transition: background 0.1s;
+  flex-shrink: 0;
+}
+
+.f-icon-btn:hover {
+  background: var(--bg-hover);
+}
+
+.f-icon-btn.active {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+/* Unread dot */
+.unread-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.faded {
+  opacity: 0.55;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-tertiary);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Modal */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-card {
+  background: var(--bg);
+  border-radius: 8px;
+  box-shadow: var(--shadow-flyout);
+  border: 1px solid var(--border);
+  min-width: 26rem;
+  max-width: min(44rem, 90vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 1rem 1.25rem 0.6rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.modal-body {
+  padding: 0.6rem 1.25rem;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  padding: 0.9rem 1.25rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* Form rows */
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.9rem;
+}
+
+.form-row > label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}

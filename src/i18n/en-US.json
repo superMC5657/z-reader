@@ -1,0 +1,93 @@
+{
+  "nav": {
+    "all": "All Articles",
+    "addSource": "Add Subscription",
+    "refresh": "Refresh All",
+    "settings": "Settings",
+    "noSources": "No subscriptions yet",
+    "addHint": "Use the + button below to add one"
+  },
+  "filter": {
+    "all": "All",
+    "unread": "Unread",
+    "starred": "Starred"
+  },
+  "toolbar": {
+    "search": "Search articles",
+    "markAllRead": "Mark all as read",
+    "view": "View",
+    "views": { "cards": "Cards", "list": "List", "magazine": "Magazine", "compact": "Compact" }
+  },
+  "item": {
+    "markRead": "Mark as read",
+    "markUnread": "Mark as unread",
+    "star": "Star",
+    "unstar": "Unstar",
+    "openWeb": "Open in browser",
+    "fetchFull": "Fetch full content",
+    "fetching": "Fetching…",
+    "noContent": "This article has no content",
+    "noContentHint": "Try fetching full content or opening the web page"
+  },
+  "addSource": {
+    "title": "Add Subscription",
+    "urlLabel": "Feed URL",
+    "urlPlaceholder": "e.g. https://example.com/feed.xml",
+    "group": "Group",
+    "none": "No group",
+    "submit": "Subscribe",
+    "cancel": "Cancel",
+    "adding": "Adding…"
+  },
+  "settings": {
+    "title": "Settings",
+    "tabs": { "sources": "Subscriptions", "app": "App", "data": "Data", "about": "About" },
+    "sources": {
+      "title": "Manage Subscriptions",
+      "group": "Group",
+      "ungrouped": "Ungrouped",
+      "remove": "Remove",
+      "confirmRemove": "Remove this source and all its articles?"
+    },
+    "app": {
+      "theme": "Theme",
+      "themeSystem": "System",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "view": "Default view",
+      "fontSize": "Font size",
+      "fetchInterval": "Background refresh interval (min)",
+      "language": "Language",
+      "showCover": "Show cover images",
+      "showSnippet": "Show snippets",
+      "fadeRead": "Fade read articles"
+    },
+    "data": {
+      "importOpml": "Import OPML",
+      "exportOpml": "Export OPML",
+      "imported": "Imported: {sources} sources, {groups} groups, {existing} already existed",
+      "exported": "Exported"
+    },
+    "about": {
+      "version": "Version",
+      "desc": "Modern desktop RSS reader · A Rust + Tauri 2 rebuild of Fluent Reader"
+    }
+  },
+  "group": {
+    "new": "New Group",
+    "namePlaceholder": "Group name",
+    "create": "Create",
+    "rename": "Rename",
+    "delete": "Delete group",
+    "confirmDelete": "Delete this group? (sources will move to ungrouped)",
+    "moveTo": "Move to group"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading…",
+    "empty": "No articles",
+    "emptyHint": "Try another filter or come back later",
+    "error": "Something went wrong"
+  }
+}
