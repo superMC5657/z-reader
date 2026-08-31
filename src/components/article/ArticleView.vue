@@ -6,6 +6,7 @@ import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
 import { formatFullTime } from '../../lib/time'
+import Icon from '../ui/Icon.vue'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -16,7 +17,7 @@ const extractError = ref('')
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
 
-// Match the reader iframe's palette to the app theme (the iframe can't inherit CSS vars).
+// Match the reader iframe's palette to the app theme
 const isDark = computed(() => {
   const theme = app.s.theme
   return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -26,22 +27,80 @@ const docHtml = computed(() => {
   if (!item.value?.content) return ''
   const fg = isDark.value ? '#f5f5f7' : '#1d1d1f'
   const muted = isDark.value ? '#a1a1a6' : '#6e6e73'
-  const border = isDark.value ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'
-  const chip = isDark.value ? 'rgba(120,120,128,0.32)' : 'rgba(120,120,128,0.14)'
+  const border = isDark.value ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'
+  const chip = isDark.value ? 'rgba(120,120,128,0.25)' : 'rgba(120,120,128,0.12)'
+  const codeBg = isDark.value ? '#1e1e20' : '#f2f2f7'
+  const accent = isDark.value ? '#0a84ff' : '#007aff'
+
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    body { font-family: 'Inter Variable', -apple-system, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
-           letter-spacing: -0.01em; color: ${fg}; line-height: 1.8; padding: 0 1.5rem 2.5rem;
-           max-width: 40rem; margin: 0 auto; font-size: 1rem; }
-    h1, h2, h3 { letter-spacing: -0.02em; line-height: 1.3; margin: 1.6em 0 0.5em; }
-    img, video { max-width: 100%; height: auto; border-radius: 10px; margin: 0.5rem 0; }
-    pre { overflow-x: auto; background: ${chip}; padding: 0.9rem 1.1rem; border-radius: 10px; font-size: 0.85rem; line-height: 1.6; }
-    code { font-family: 'SF Mono', Consolas, 'JetBrains Mono', monospace; }
-    p > code, li > code { background: ${chip}; padding: 0.1em 0.35em; border-radius: 5px; font-size: 0.85em; }
-    blockquote { border-left: 3px solid #0a84ff; margin: 0.8rem 0; padding: 0.1rem 1.1rem; color: ${muted}; }
-    a { color: #0a84ff; text-decoration: none; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+      letter-spacing: -0.015em;
+      color: ${fg};
+      line-height: 1.82;
+      padding: 0 2rem 3.5rem;
+      max-width: 42rem;
+      margin: 0 auto;
+      font-size: 1.05rem;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      letter-spacing: -0.025em;
+      line-height: 1.35;
+      margin: 1.8em 0 0.6em;
+      font-weight: 700;
+    }
+    h1 { font-size: 1.65rem; }
+    h2 { font-size: 1.35rem; }
+    h3 { font-size: 1.15rem; }
+    p { margin: 1em 0; }
+    img, video {
+      max-width: 100%;
+      height: auto;
+      border-radius: 12px;
+      margin: 1rem 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      display: block;
+    }
+    pre {
+      overflow-x: auto;
+      background: ${codeBg};
+      border: 1px solid ${border};
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      line-height: 1.6;
+      margin: 1.2rem 0;
+    }
+    code {
+      font-family: 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+    }
+    p > code, li > code {
+      background: ${chip};
+      padding: 0.15em 0.4em;
+      border-radius: 6px;
+      font-size: 0.88em;
+    }
+    blockquote {
+      border-left: 3.5px solid ${accent};
+      margin: 1.2rem 0;
+      padding: 0.2rem 1.2rem;
+      color: ${muted};
+      font-style: normal;
+      background: ${isDark.value ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'};
+      border-radius: 0 8px 8px 0;
+    }
+    a { color: ${accent}; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid ${border}; padding: 0.35rem 0.7rem; }
-    hr { border: none; border-top: 0.5px solid ${border}; margin: 1.6rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; }
+    td, th { border: 1px solid ${border}; padding: 0.45rem 0.85rem; text-align: left; }
+    th { background: ${chip}; font-weight: 600; }
+    hr { border: none; border-top: 0.5px solid ${border}; margin: 2rem 0; }
+    ul, ol { padding-left: 1.6rem; margin: 0.8rem 0; }
+    li { margin: 0.35rem 0; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, 0.3); border-radius: 10px; }
   </style></head><body>${item.value.content}</body></html>`
 })
 
@@ -56,7 +115,6 @@ async function onFetchFull() {
   try {
     await fetchFullContent(item.value.id)
     await data.selectItem(item.value.id)
-    // reload the freshly stored item in the list too
     data.loadItems().catch(() => {})
   } catch (e) {
     extractError.value = String(e)
@@ -66,7 +124,6 @@ async function onFetchFull() {
 }
 
 function onIframeLoad(e: Event) {
-  // sandboxed with allow-same-origin (no allow-scripts): intercept link clicks
   const doc = (e.target as HTMLIFrameElement).contentDocument
   if (!doc) return
   doc.addEventListener('click', (ev) => {
@@ -81,65 +138,98 @@ function onIframeLoad(e: Event) {
 
 <template>
   <section v-if="item" class="article-view">
-    <header class="head">
-      <div class="head-top">
+    <!-- Safari Reader Header -->
+    <header class="reader-head" data-tauri-drag-region>
+      <div class="head-top" data-tauri-drag-region>
         <div class="head-meta">
-          <span class="source">{{ source?.title }}</span>
-          <span class="dot">·</span>
-          <span>{{ formatFullTime(item.publishedAt) }}</span>
-          <span v-if="item.author" class="dot">·</span>
-          <span v-if="item.author">{{ item.author }}</span>
-        </div>
-        <div class="actions">
           <button
-            class="f-icon-btn"
+            class="f-icon-btn mobile-back-btn"
+            title="Back"
+            @click="data.selectedItem = null; data.selectedId = null"
+          >
+            <Icon name="chevron-right" :size="15" style="transform: rotate(180deg)" />
+          </button>
+          <span class="source-tag">{{ source?.title }}</span>
+          <span class="dot">·</span>
+          <span class="time">{{ formatFullTime(item.publishedAt) }}</span>
+          <template v-if="item.author">
+            <span class="dot">·</span>
+            <span class="author">{{ item.author }}</span>
+          </template>
+        </div>
+
+        <div class="action-group">
+          <!-- Fetch Full Text -->
+          <button
+            class="f-icon-btn reader-action-btn"
             :title="t('item.fetchFull')"
             :disabled="fetchingFull"
             @click="onFetchFull"
           >
-            <span :class="{ spin: fetchingFull }">⟳</span>
+            <Icon
+              :name="fetchingFull ? 'arrow-clockwise' : 'sparkles'"
+              :size="15"
+              :class="{ spin: fetchingFull }"
+            />
           </button>
+
+          <!-- Open in Browser -->
           <button
             v-if="item.url"
-            class="f-icon-btn"
+            class="f-icon-btn reader-action-btn"
             :title="t('item.openWeb')"
             @click="openUrl(item.url)"
           >
-            ↗
+            <Icon name="open-web" :size="15" />
           </button>
+
+          <!-- Star -->
           <button
-            class="f-icon-btn"
-            :class="{ active: item.starred }"
+            class="f-icon-btn reader-action-btn"
+            :class="{ 'active-star': item.starred }"
             :title="t(item.starred ? 'item.unstar' : 'item.star')"
             @click="data.toggleStar(item)"
           >
-            {{ item.starred ? '★' : '☆' }}
+            <Icon :name="item.starred ? 'star-fill' : 'star'" :size="15" />
           </button>
+
+          <!-- Mark Unread -->
           <button
-            class="f-icon-btn"
+            class="f-icon-btn reader-action-btn"
             :title="t('item.markUnread')"
             @click="data.setItemRead(item, false)"
           >
-            ○
+            <Icon name="circle" :size="15" />
           </button>
         </div>
       </div>
+
       <h1 class="title">{{ item.title }}</h1>
     </header>
 
-    <div v-if="extractError" class="error">{{ t('common.error') }}: {{ extractError }}</div>
+    <div v-if="extractError" class="error-banner">
+      <Icon name="info" :size="15" />
+      <span>{{ t('common.error') }}: {{ extractError }}</span>
+    </div>
 
+    <!-- Reader Iframe -->
     <iframe
       v-if="item.content"
-      class="content"
+      class="reader-frame"
       sandbox="allow-same-origin"
       :srcdoc="docHtml"
       @load="onIframeLoad"
     ></iframe>
-    <div v-else class="state">
-      <p>{{ t('item.noContent') }}</p>
-      <p class="sub">{{ t('item.noContentHint') }}</p>
-      <button class="f-btn" :disabled="fetchingFull" @click="onFetchFull">
+
+    <!-- No Content Empty State -->
+    <div v-else class="empty-reader">
+      <div class="empty-icon-circle">
+        <Icon name="sparkles" :size="32" color="var(--text-quaternary)" />
+      </div>
+      <p class="empty-title">{{ t('item.noContent') }}</p>
+      <p class="empty-sub">{{ t('item.noContentHint') }}</p>
+      <button class="f-btn primary" :disabled="fetchingFull" @click="onFetchFull">
+        <Icon name="arrow-clockwise" :size="14" :class="{ spin: fetchingFull }" />
         {{ fetchingFull ? t('item.fetching') : t('item.fetchFull') }}
       </button>
     </div>
@@ -155,85 +245,128 @@ function onIframeLoad(e: Event) {
   background: var(--bg-card);
 }
 
-.head {
-  padding: 1rem 1.6rem 0.8rem;
+.reader-head {
+  padding: 1.1rem 1.8rem 1rem;
   border-bottom: 0.5px solid var(--border);
   background: var(--bg-card);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .head-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.8rem;
+  gap: 1rem;
 }
 
 .head-meta {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   min-width: 0;
   overflow: hidden;
   flex-wrap: wrap;
   font-variant-numeric: tabular-nums;
 }
 
-.source {
+.source-tag {
   color: var(--accent);
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .dot {
-  color: var(--text-tertiary);
+  color: var(--text-quaternary);
 }
 
-.actions {
+.author {
+  color: var(--text-secondary);
+}
+
+.action-group {
   display: flex;
-  gap: 0.1rem;
+  gap: 0.2rem;
+  align-items: center;
   flex-shrink: 0;
 }
 
-.actions .active {
-  color: var(--star);
+.reader-action-btn {
+  border-radius: 8px;
+}
+
+.reader-action-btn:hover {
+  background: var(--bg-hover-strong);
 }
 
 .title {
-  font-size: 1.65rem;
-  font-weight: 800;
-  line-height: 1.25;
-  letter-spacing: -0.025em;
-  margin-top: 0.55rem;
-  max-width: 40rem;
+  font-size: 1.7rem;
+  font-weight: 750;
+  line-height: 1.28;
+  letter-spacing: -0.03em;
+  margin-top: 0.7rem;
+  max-width: 44rem;
+  color: var(--text-primary);
 }
 
-.content {
+.reader-frame {
   flex: 1;
   border: none;
   width: 100%;
   user-select: text;
+  background: transparent;
 }
 
-.state {
+.error-banner {
+  padding: 0.65rem 1.8rem;
+  font-size: 0.82rem;
+  color: var(--danger);
+  background: var(--danger-tint);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.empty-reader {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
   color: var(--text-secondary);
+  padding: 2rem;
 }
 
-.state .sub {
-  font-size: 0.82rem;
-  color: var(--text-tertiary);
+.empty-icon-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.2rem;
+  height: 4.2rem;
+  border-radius: 50%;
+  background: var(--bg-track);
+  margin-bottom: 0.4rem;
 }
 
-.error {
-  padding: 0.5rem 1.6rem;
-  font-size: 0.8rem;
-  color: var(--danger);
+.empty-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mobile-back-btn {
+  display: none;
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-right: 0.2rem;
+}
+
+@media (max-width: 980px) {
+  .mobile-back-btn {
+    display: inline-flex;
+  }
 }
 </style>

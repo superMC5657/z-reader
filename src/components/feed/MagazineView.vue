@@ -3,6 +3,7 @@ import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { formatTime } from '../../lib/time'
 import type { Item } from '../../types'
+import Icon from '../ui/Icon.vue'
 
 defineProps<{ items: Item[] }>()
 const emit = defineEmits<{ select: [Item]; context: [MouseEvent, Item] }>()
@@ -12,33 +13,46 @@ const app = useAppStore()
 </script>
 
 <template>
-  <div class="magazine">
+  <div class="magazine-list">
     <article
       v-for="item in items"
       :key="item.id"
-      class="row"
-      :class="{ faded: app.fadeRead && item.hasBeenRead, selected: data.selectedId === item.id }"
+      class="magazine-card"
+      :class="{
+        faded: app.fadeRead && item.hasBeenRead,
+        selected: data.selectedId === item.id,
+      }"
       @click="emit('select', item)"
       @contextmenu.prevent="emit('context', $event, item)"
     >
+      <!-- Thumbnail -->
       <div v-if="app.showCover && item.image" class="thumb">
         <img :src="item.image" loading="lazy" alt="" />
       </div>
-      <div class="row-main">
+
+      <!-- Content Area -->
+      <div class="card-content">
         <div class="meta">
           <span class="source">{{ data.sourceById(item.sourceId)?.title }}</span>
           <span class="dot">·</span>
-          <span>{{ formatTime(item.publishedAt) }}</span>
+          <span class="time">{{ formatTime(item.publishedAt) }}</span>
           <div class="spacer"></div>
           <span v-if="!item.hasBeenRead" class="unread-dot"></span>
         </div>
+
         <h3 class="title">{{ item.title }}</h3>
+
         <p v-if="app.showSnippet && item.snippet" class="snippet">{{ item.snippet }}</p>
-        <div class="foot">
-          <span class="author">{{ item.author }}</span>
+
+        <div class="footer">
+          <span class="author">{{ item.author || '' }}</span>
           <div class="spacer"></div>
-          <button class="f-icon-btn star" :class="{ active: item.starred }" @click.stop="data.toggleStar(item)">
-            {{ item.starred ? '★' : '☆' }}
+          <button
+            class="f-icon-btn star-btn"
+            :class="{ 'active-star': item.starred }"
+            @click.stop="data.toggleStar(item)"
+          >
+            <Icon :name="item.starred ? 'star-fill' : 'star'" :size="15" />
           </button>
         </div>
       </div>
@@ -47,38 +61,39 @@ const app = useAppStore()
 </template>
 
 <style scoped>
-.magazine {
-  padding: 0.6rem 1.2rem;
+.magazine-list {
+  padding: 0.8rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
-.row {
+.magazine-card {
   display: flex;
-  gap: 0.9rem;
+  gap: 1.1rem;
   background: var(--bg-card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  padding: 0.75rem 1rem;
+  border: 0.5px solid var(--border-card);
+  padding: 0.85rem 1.1rem;
   cursor: pointer;
-  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  transition: transform 0.22s var(--ease), box-shadow 0.22s var(--ease);
 }
 
-.row:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), var(--shadow-card);
+.magazine-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover);
 }
 
-.row.selected {
-  outline: 2.5px solid var(--accent);
-  outline-offset: -2.5px;
+.magazine-card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .thumb {
-  width: 9.5rem;
+  width: 10.5rem;
   aspect-ratio: 16 / 10;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   flex-shrink: 0;
   background: var(--bg-track);
@@ -91,24 +106,35 @@ const app = useAppStore()
   display: block;
 }
 
-.row-main {
+.card-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .meta {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   font-size: 0.72rem;
   font-weight: 500;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 
 .source {
   color: var(--accent);
+  font-weight: 600;
+}
+
+.dot {
+  color: var(--text-quaternary);
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
 }
 
 .spacer {
@@ -116,38 +142,53 @@ const app = useAppStore()
 }
 
 .title {
-  font-size: 1rem;
+  font-size: 1.02rem;
   font-weight: 600;
-  margin: 0.25rem 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.snippet {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  margin: 0.3rem 0;
+  color: var(--text-primary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.foot {
+.snippet {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 0.35rem;
+}
+
+.footer {
   display: flex;
   align-items: center;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   color: var(--text-tertiary);
-  margin-top: 0.35rem;
 }
 
-.star {
-  width: 1.6rem;
-  height: 1.6rem;
+.author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
 }
 
-.star.active {
+.star-btn {
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+}
+
+.star-btn:hover {
   color: var(--star);
+  background: var(--bg-hover);
 }
 </style>

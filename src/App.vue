@@ -20,6 +20,7 @@ const showAdd = ref(false)
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  if (e.ctrlKey || e.metaKey || e.altKey) return
   const items = data.items
   const idx = items.findIndex((i) => i.id === data.selectedId)
   if (e.key === 'j' || e.key === 'k') {

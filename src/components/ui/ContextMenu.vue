@@ -5,8 +5,8 @@ import { useUiStore } from '../../stores/data'
 const ui = useUiStore()
 
 const style = computed(() => ({
-  left: `${Math.min(ui.x, window.innerWidth - 230)}px`,
-  top: `${Math.min(ui.y, window.innerHeight - ui.items.length * 38 - 16)}px`,
+  left: `${Math.min(ui.x, window.innerWidth - 240)}px`,
+  top: `${Math.min(ui.y, window.innerHeight - ui.items.length * 36 - 20)}px`,
 }))
 
 function onAction(action: () => void) {
@@ -31,7 +31,7 @@ function onAction(action: () => void) {
           :class="{ danger: item.danger }"
           @click="onAction(item.action)"
         >
-          {{ item.label }}
+          <span class="ctx-label">{{ item.label }}</span>
         </button>
       </div>
     </div>
@@ -42,32 +42,38 @@ function onAction(action: () => void) {
 .ctx-mask {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 2000;
 }
 
 .ctx-menu {
   position: fixed;
-  min-width: 13rem;
+  min-width: 14rem;
   background: var(--bg-card);
-  backdrop-filter: blur(28px) saturate(1.6);
-  border-radius: 8px;
-  box-shadow: var(--shadow-pop), 0 0 0 0.5px var(--border);
-  padding: 0.3rem;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  border: 0.5px solid var(--border);
+  padding: 0.35rem;
+  animation: appleMenuIn 0.15s var(--ease);
 }
 
 .ctx-item {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   text-align: left;
-  padding: 0.32rem 0.75rem;
-  border-radius: 5px;
-  font-size: 0.88rem;
-  transition: background 0.1s var(--ease);
+  padding: 0.38rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 450;
+  color: var(--text-primary);
+  transition: all 0.12s var(--ease);
 }
 
 .ctx-item:hover {
   background: var(--accent);
-  color: #fff;
+  color: #ffffff;
 }
 
 .ctx-item.danger {
@@ -76,6 +82,17 @@ function onAction(action: () => void) {
 
 .ctx-item.danger:hover {
   background: var(--danger);
-  color: #fff;
+  color: #ffffff;
+}
+
+@keyframes appleMenuIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 </style>
