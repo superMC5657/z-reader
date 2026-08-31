@@ -79,6 +79,17 @@ const pixelSize = computed(() => {
       />
     </template>
 
+    <!-- Chevron Left -->
+    <template v-else-if="name === 'chevron-left'">
+      <path
+        d="M14.5 7L9.5 12L14.5 17"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
     <!-- Chevron Right -->
     <template v-else-if="name === 'chevron-right'">
       <path
@@ -236,16 +247,43 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Clear / X Mark -->
-    <template v-else-if="name === 'xmark' || name === 'clear'">
-      <circle cx="12" cy="12" r="9" fill="currentColor" opacity="0.2" />
+    <!-- Clear / X Mark / Close -->
+    <template v-else-if="name === 'close' || name === 'xmark' || name === 'x'">
       <path
-        d="M9 9L15 15M15 9L9 15"
-        stroke="currentColor"
+        d="M6 6L18 18M18 6L6 18"
+        :stroke="props.color"
         :stroke-width="props.strokeWidth"
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+    </template>
+
+    <!-- Focus Mode (Expand to Center Focus Modal) -->
+    <template v-else-if="name === 'focus' || name === 'expand'">
+      <path
+        d="M15 3H21V9M9 21H3V15M21 3L14 10M3 21L10 14"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
+    <!-- Split Mode / Columns / Exit Focus -->
+    <template v-else-if="name === 'split' || name === 'collapse'">
+      <path
+        d="M4 14H10V20M20 10H14V4M10 14L3 21M14 10L21 3"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
+    <!-- Reader Layout / Split View -->
+    <template v-else-if="name === 'layout-split' || name === 'sidebar-right'">
+      <rect x="3" y="4" width="18" height="16" rx="3" :stroke="props.color" :stroke-width="props.strokeWidth" />
+      <path d="M14 4V20" :stroke="props.color" :stroke-width="props.strokeWidth" />
     </template>
 
     <!-- Checkmark -->

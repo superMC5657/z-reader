@@ -71,6 +71,7 @@ pub struct Settings {
     /// bit0 = showCover, bit1 = showSnippet, bit2 = fadeRead
     pub view_configs: u32,
     pub menu_on: bool,
+    pub reader_mode: String,
     pub shortcuts: std::collections::HashMap<String, String>,
 }
 
@@ -99,6 +100,7 @@ impl Default for Settings {
             filter_type: 0,
             view_configs: 0b111,
             menu_on: true,
+            reader_mode: "split".into(),
             shortcuts,
         }
     }

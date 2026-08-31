@@ -26,6 +26,7 @@ const DEFAULTS: Settings = {
   filterType: 0,
   viewConfigs: 0b111,
   menuOn: true,
+  readerMode: 'split',
   shortcuts: DEFAULT_SHORTCUTS,
 }
 
@@ -58,6 +59,9 @@ export const useAppStore = defineStore('app', {
       }
       return theme === 'dark'
     },
+    isFocusMode(state): boolean {
+      return (state.settings ?? DEFAULTS).readerMode === 'focus'
+    },
     shortcuts(state): Record<string, string> {
       return { ...DEFAULT_SHORTCUTS, ...(state.settings?.shortcuts ?? {}) }
     },
@@ -82,12 +86,19 @@ export const useAppStore = defineStore('app', {
       if (!this.s.shortcuts || Object.keys(this.s.shortcuts).length === 0) {
         this.settings.shortcuts = { ...DEFAULT_SHORTCUTS }
       }
+      if (!this.s.readerMode) {
+        this.settings.readerMode = 'split'
+      }
       apply(this.s)
       const mql = window.matchMedia('(prefers-color-scheme: dark)')
       mql.addEventListener('change', (e) => {
         this.systemDark = e.matches
         if (this.s.theme === 'system') apply(this.s)
       })
+    },
+    async toggleFocusMode() {
+      const next = this.s.readerMode === 'focus' ? 'split' : 'focus'
+      await this.patch({ readerMode: next })
     },
     async setShortcut(actionKey: string, key: string) {
       const shortcuts = { ...this.shortcuts, [actionKey]: key }

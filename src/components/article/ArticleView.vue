@@ -8,6 +8,10 @@ import { fetchFullContent } from '../../lib/tauri'
 import { formatFullTime } from '../../lib/time'
 import Icon from '../ui/Icon.vue'
 
+defineProps<{
+  isFocusModal?: boolean
+}>()
+
 const { t } = useI18n()
 const data = useDataStore()
 const app = useAppStore()
@@ -241,6 +245,25 @@ function onIframeLoad(e: Event) {
           >
             <Icon name="circle" :size="15" />
           </button>
+
+          <!-- Toggle Focus Mode -->
+          <button
+            class="f-icon-btn reader-action-btn focus-toggle-btn"
+            :class="{ 'active-focus': app.isFocusMode }"
+            :title="t(app.isFocusMode ? 'item.splitMode' : 'item.focusMode')"
+            @click="app.toggleFocusMode()"
+          >
+            <Icon :name="app.isFocusMode ? 'split' : 'focus'" :size="14.5" />
+          </button>
+
+          <!-- Explicit Close Button -->
+          <button
+            class="f-icon-btn reader-action-btn close-article-btn"
+            :title="t('item.close')"
+            @click="data.selectedItem = null; data.selectedId = null"
+          >
+            <Icon name="close" :size="13" />
+          </button>
         </div>
       </div>
 
@@ -339,6 +362,16 @@ function onIframeLoad(e: Event) {
 
 .reader-action-btn:hover {
   background: var(--bg-hover-strong);
+}
+
+.reader-action-btn.active-focus {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.reader-action-btn.close-article-btn:hover {
+  background: var(--bg-hover-strong);
+  color: var(--danger);
 }
 
 .title {
