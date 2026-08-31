@@ -95,7 +95,17 @@
     },
     "about": {
       "version": "Version",
-      "desc": "Modern desktop RSS reader · A Rust + Tauri 2 rebuild of Fluent Reader"
+      "desc": "Modern desktop RSS reader · A Rust + Tauri 2 rebuild of Fluent Reader",
+      "checkUpdate": "Check for Updates",
+      "checking": "Checking for updates…",
+      "latest": "You are on the latest version",
+      "newVersion": "New version available",
+      "updateNow": "Update Now",
+      "downloading": "Downloading update",
+      "downloaded": "Update downloaded, click to restart",
+      "relaunch": "Restart & Apply",
+      "updateError": "Update check failed",
+      "retry": "Retry"
     }
   },
   "group": {

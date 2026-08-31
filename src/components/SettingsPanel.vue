@@ -10,6 +10,12 @@ import FeedIcon from './ui/FeedIcon.vue'
 import AppleSelect from './ui/AppleSelect.vue'
 import Switch from './ui/Switch.vue'
 import { LOCALES } from '../i18n'
+import {
+  updateState,
+  checkForUpdates,
+  startDownloadAndInstall,
+  restartApp,
+} from '../lib/updater'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -430,6 +436,77 @@ function adjustFontSize(delta: number) {
         <h3 class="about-title">ZReader</h3>
         <p class="about-ver">{{ t('settings.about.version') }} {{ app.s.version }}</p>
         <p class="about-desc">{{ t('settings.about.desc') }}</p>
+
+        <!-- Updater Box -->
+        <div class="updater-box">
+          <!-- Idle -->
+          <div v-if="updateState.status === 'idle'" class="updater-action">
+            <button class="f-btn compact-updater-btn" @click="checkForUpdates()">
+              <Icon name="refresh" :size="13" />
+              <span>{{ t('settings.about.checkUpdate') }}</span>
+            </button>
+          </div>
+
+          <!-- Checking -->
+          <div v-else-if="updateState.status === 'checking'" class="updater-status checking">
+            <Icon name="refresh" :size="14" class="spinning" />
+            <span>{{ t('settings.about.checking') }}</span>
+          </div>
+
+          <!-- Up to date -->
+          <div v-else-if="updateState.status === 'up-to-date'" class="updater-status up-to-date">
+            <div class="status-badge success">
+              <Icon name="checkmark" :size="13" color="var(--success)" />
+              <span>{{ t('settings.about.latest') }}</span>
+            </div>
+            <button class="f-btn compact-updater-btn secondary" @click="checkForUpdates()">
+              <Icon name="refresh" :size="12" />
+              <span>{{ t('settings.about.checkUpdate') }}</span>
+            </button>
+          </div>
+
+          <!-- Available -->
+          <div v-else-if="updateState.status === 'available'" class="updater-available-card">
+            <div class="update-badge-row">
+              <span class="new-ver-badge">{{ t('settings.about.newVersion') }} v{{ updateState.newVersion }}</span>
+            </div>
+            <p v-if="updateState.releaseNotes" class="release-notes">{{ updateState.releaseNotes }}</p>
+            <button class="f-btn primary compact-updater-btn" @click="startDownloadAndInstall()">
+              <Icon name="import" :size="13" />
+              <span>{{ t('settings.about.updateNow') }}</span>
+            </button>
+          </div>
+
+          <!-- Downloading -->
+          <div v-else-if="updateState.status === 'downloading'" class="updater-downloading">
+            <div class="progress-info">
+              <span>{{ t('settings.about.downloading') }}…</span>
+              <span class="progress-pct">{{ updateState.progress }}%</span>
+            </div>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" :style="{ width: `${updateState.progress}%` }"></div>
+            </div>
+          </div>
+
+          <!-- Downloaded: Ready to Restart -->
+          <div v-else-if="updateState.status === 'downloaded'" class="updater-status ready">
+            <div class="status-badge success">
+              <Icon name="checkmark" :size="13" color="var(--success)" />
+              <span>{{ t('settings.about.downloaded') }}</span>
+            </div>
+            <button class="f-btn primary compact-updater-btn" @click="restartApp()">
+              <span>{{ t('settings.about.relaunch') }}</span>
+            </button>
+          </div>
+
+          <!-- Error -->
+          <div v-else-if="updateState.status === 'error'" class="updater-status error">
+            <span class="error-text">{{ t('settings.about.updateError') }}: {{ updateState.error }}</span>
+            <button class="f-btn compact-updater-btn secondary" @click="checkForUpdates()">
+              <span>{{ t('settings.about.retry') }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -727,5 +804,145 @@ function adjustFontSize(delta: number) {
     opacity: 0.65;
     transform: scale(0.97);
   }
+}
+
+/* Updater Styles */
+.updater-box {
+  margin-top: 1rem;
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.compact-updater-btn {
+  padding: 0.32rem 0.9rem;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.updater-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.updater-status.checking {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-secondary);
+}
+
+.spinning {
+  animation: spinIcon 1s linear infinite;
+}
+
+@keyframes spinIcon {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+}
+
+.status-badge.success {
+  background: var(--success-tint, rgba(52, 199, 89, 0.12));
+  color: var(--success, #34c759);
+  font-weight: 500;
+}
+
+.updater-available-card {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 0.5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.new-ver-badge {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-tint);
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-pill);
+}
+
+.release-notes {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  max-height: 5rem;
+  overflow-y: auto;
+  text-align: left;
+  width: 100%;
+  white-space: pre-wrap;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.updater-downloading {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.progress-pct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.progress-bar-track {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-track);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.78rem;
+  text-align: center;
+  word-break: break-word;
 }
 </style>
