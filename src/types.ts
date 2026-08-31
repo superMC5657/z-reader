@@ -45,6 +45,7 @@ export interface Settings {
   /** bit0 = showCover, bit1 = showSnippet, bit2 = fadeRead */
   viewConfigs: number
   menuOn: boolean
+  shortcuts: Record<string, string>
 }
 
 export interface GetItemsParams {

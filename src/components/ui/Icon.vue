@@ -101,6 +101,76 @@ const pixelSize = computed(() => {
       />
     </template>
 
+    <!-- Chevrons Up Down (macOS PopUp button indicator) -->
+    <template v-else-if="name === 'chevrons-up-down' || name === 'chevron-up-down'">
+      <path
+        d="M7 15L12 20L17 15M7 9L12 4L17 9"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
+    <!-- Sun (Light Theme) -->
+    <template v-else-if="name === 'sun'">
+      <circle cx="12" cy="12" r="4" :stroke="props.color" :stroke-width="props.strokeWidth" />
+      <path
+        d="M12 2V4M12 20V22M4 12H2M22 12H20M19.07 4.93L17.66 6.34M6.34 17.66L4.93 19.07M19.07 19.07L17.66 17.66M6.34 6.34L4.93 4.93"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+      />
+    </template>
+
+    <!-- Moon (Dark Theme) -->
+    <template v-else-if="name === 'moon'">
+      <path
+        d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
+    <!-- Display (System Theme) -->
+    <template v-else-if="name === 'display' || name === 'desktop'">
+      <rect
+        x="2"
+        y="3"
+        width="20"
+        height="14"
+        rx="2"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+      />
+      <path
+        d="M8 21H16M12 17V21"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+      />
+    </template>
+
+    <!-- Globe (Language) -->
+    <template v-else-if="name === 'globe'">
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+      />
+      <path
+        d="M3.6 9H20.4M3.6 15H20.4M12 3C14.5 5.5 15.8 8.6 15.8 12C15.8 15.4 14.5 18.5 12 21C9.5 18.5 8.2 15.4 8.2 12C8.2 8.6 9.5 5.5 12 3Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
     <!-- Plus -->
     <template v-else-if="name === 'plus'">
       <path
@@ -489,6 +559,26 @@ const pixelSize = computed(() => {
         :stroke="props.color"
         :stroke-width="props.strokeWidth"
         stroke-linecap="round"
+      />
+    </template>
+
+    <!-- Keyboard / Shortcuts -->
+    <template v-else-if="name === 'keyboard'">
+      <rect
+        x="2.5"
+        y="5.5"
+        width="19"
+        height="13"
+        rx="2.5"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+      />
+      <path
+        d="M6 9H6.01M10 9H10.01M14 9H14.01M18 9H18.01M6 12H6.01M10 12H10.01M14 12H14.01M18 12H18.01M8 15H16"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       />
     </template>
 

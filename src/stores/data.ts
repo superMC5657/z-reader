@@ -163,5 +163,10 @@ export const useDataStore = defineStore('data', {
       }
       await Promise.all([this.loadSources(), this.loadItems()])
     },
+    async fetchFullContent(id: number) {
+      await api.fetchFullContent(id)
+      await this.selectItem(id)
+      this.loadItems().catch(() => {})
+    },
   },
 })

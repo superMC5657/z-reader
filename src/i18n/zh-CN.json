@@ -41,7 +41,7 @@
   },
   "settings": {
     "title": "设置",
-    "tabs": { "sources": "订阅源", "app": "应用", "data": "数据", "about": "关于" },
+    "tabs": { "sources": "订阅源", "app": "应用", "shortcuts": "快捷键", "data": "数据", "about": "关于" },
     "sources": {
       "title": "订阅源管理",
       "group": "所属分组",
@@ -62,6 +62,25 @@
       "showSnippet": "显示摘要",
       "fadeRead": "淡化已读文章"
     },
+    "shortcuts": {
+      "title": "快捷键设置",
+      "hint": "点击快捷键按钮即可按下键盘按键进行自定义修改",
+      "reset": "恢复默认快捷键",
+      "pressKey": "请按下按键…",
+      "navSection": "文章导航",
+      "nextArticle": "下一篇文章",
+      "prevArticle": "上一篇文章",
+      "closeArticle": "关闭文章 / 清除选择",
+      "actionSection": "文章操作",
+      "toggleRead": "切换已读 / 未读",
+      "toggleStar": "切换收藏 / 取消收藏",
+      "fetchFull": "智能抓取全文",
+      "openInBrowser": "在浏览器中打开",
+      "globalSection": "全局与导航",
+      "refresh": "刷新全部订阅",
+      "addSource": "添加新订阅",
+      "toggleSidebar": "显示 / 隐藏左侧栏"
+    },
     "data": {
       "importOpml": "导入 OPML",
       "exportOpml": "导出 OPML",
@@ -81,6 +100,11 @@
     "delete": "删除分组",
     "confirmDelete": "确定删除分组？(分组内订阅源将移至未分组)",
     "moveTo": "移动到分组"
+  },
+  "feed": {
+    "refreshIcon": "重新获取图标",
+    "changeIcon": "更换自定义图标",
+    "iconUpdated": "图标已更新"
   },
   "common": {
     "cancel": "取消",

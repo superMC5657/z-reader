@@ -6,6 +6,8 @@ import { useAppStore } from '../stores/app'
 import * as api from '../lib/tauri'
 import Modal from './ui/Modal.vue'
 import Icon from './ui/Icon.vue'
+import FeedIcon from './ui/FeedIcon.vue'
+import AppleSelect from './ui/AppleSelect.vue'
 import Switch from './ui/Switch.vue'
 import { LOCALES } from '../i18n'
 
@@ -15,23 +17,106 @@ const app = useAppStore()
 
 const emit = defineEmits<{ close: [] }>()
 
-const tab = ref<'sources' | 'app' | 'data' | 'about'>('sources')
+const tab = ref<'sources' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
 const tabs = computed(() => [
   { value: 'sources', label: t('settings.tabs.sources'), icon: 'sources' },
   { value: 'app', label: t('settings.tabs.app'), icon: 'app' },
+  { value: 'shortcuts', label: t('settings.tabs.shortcuts'), icon: 'keyboard' },
   { value: 'data', label: t('settings.tabs.data'), icon: 'data' },
   { value: 'about', label: t('settings.tabs.about'), icon: 'info' },
 ])
 
-const dataMsg = ref('')
-const opmlInput = ref<HTMLInputElement | null>(null)
+const recordingAction = ref<string | null>(null)
 
-function setSourceGroup(id: number, e: Event) {
-  const value = (e.target as HTMLSelectElement).value
+function startRecording(actionKey: string) {
+  recordingAction.value = actionKey
+  window.addEventListener('keydown', onRecordKeydown, { capture: true, once: true })
+}
+
+function onRecordKeydown(e: KeyboardEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (!recordingAction.value) return
+
+  let keyName = e.key
+  if (keyName === ' ') keyName = 'Space'
+  else if (keyName.length === 1) keyName = keyName.toLowerCase()
+
+  app.setShortcut(recordingAction.value, keyName)
+  recordingAction.value = null
+}
+
+function formatKeyDisplay(k?: string): string {
+  if (!k) return '—'
+  if (k === 'Escape') return '⎋ Esc'
+  if (k === 'Space' || k === ' ') return '␣ Space'
+  if (k === 'ArrowUp') return '↑'
+  if (k === 'ArrowDown') return '↓'
+  if (k === 'ArrowLeft') return '←'
+  if (k === 'ArrowRight') return '→'
+  if (k === 'Enter') return '↵ Enter'
+  return k.toUpperCase()
+}
+
+const shortcutGroups = computed(() => [
+  {
+    title: t('settings.shortcuts.navSection'),
+    items: [
+      { key: 'nextArticle', label: t('settings.shortcuts.nextArticle') },
+      { key: 'prevArticle', label: t('settings.shortcuts.prevArticle') },
+      { key: 'closeArticle', label: t('settings.shortcuts.closeArticle') },
+    ],
+  },
+  {
+    title: t('settings.shortcuts.actionSection'),
+    items: [
+      { key: 'toggleRead', label: t('settings.shortcuts.toggleRead') },
+      { key: 'toggleStar', label: t('settings.shortcuts.toggleStar') },
+      { key: 'fetchFull', label: t('settings.shortcuts.fetchFull') },
+      { key: 'openInBrowser', label: t('settings.shortcuts.openInBrowser') },
+    ],
+  },
+  {
+    title: t('settings.shortcuts.globalSection'),
+    items: [
+      { key: 'refresh', label: t('settings.shortcuts.refresh') },
+      { key: 'addSource', label: t('settings.shortcuts.addSource') },
+      { key: 'toggleSidebar', label: t('settings.shortcuts.toggleSidebar') },
+    ],
+  },
+])
+
+const themeOptions = computed(() => [
+  { value: 'system', label: t('settings.app.themeSystem'), icon: 'display' },
+  { value: 'light', label: t('settings.app.themeLight'), icon: 'sun' },
+  { value: 'dark', label: t('settings.app.themeDark'), icon: 'moon' },
+])
+
+const viewOptions = computed(() => [
+  { value: 'cards', label: t('toolbar.views.cards'), icon: 'view-cards' },
+  { value: 'list', label: t('toolbar.views.list'), icon: 'view-list' },
+  { value: 'magazine', label: t('toolbar.views.magazine'), icon: 'view-magazine' },
+  { value: 'compact', label: t('toolbar.views.compact'), icon: 'view-compact' },
+])
+
+const localeOptions = computed(() =>
+  LOCALES.map((l) => ({ value: l.value, label: l.label, icon: 'globe' }))
+)
+
+const groupOptions = computed(() => [
+  { value: '', label: t('settings.sources.ungrouped'), icon: 'rss' },
+  ...data.groups.map((g) => ({ value: String(g.id), label: g.name, icon: 'folder' })),
+])
+
+function onSourceGroupChange(id: number, val: string) {
+  const gid = val === '' ? null : Number(val)
   api
-    .setSourceGroup(id, value === '' ? null : Number(value))
+    .setSourceGroup(id, gid)
     .then(() => Promise.all([data.loadSources(), data.loadGroups()]))
 }
+
+const dataMsg = ref('')
+const opmlInput = ref<HTMLInputElement | null>(null)
 
 function removeSource(id: number) {
   if (confirm(t('settings.sources.confirmRemove'))) {
@@ -107,14 +192,19 @@ function adjustFontSize(delta: number) {
       <div v-if="data.sources.length" class="grouped-inset-box">
         <div v-for="s in data.sources" :key="s.id" class="grouped-inset-row">
           <div class="source-info">
-            <span class="source-title">{{ s.title }}</span>
+            <div class="source-title-row">
+              <FeedIcon :source="s" :size="16" />
+              <span class="source-title">{{ s.title }}</span>
+            </div>
             <span class="source-url">{{ s.url }}</span>
           </div>
           <div class="source-actions">
-            <select :value="s.groupId ?? ''" class="group-select" @change="setSourceGroup(s.id, $event)">
-              <option value="">{{ t('settings.sources.ungrouped') }}</option>
-              <option v-for="g in data.groups" :key="g.id" :value="String(g.id)">{{ g.name }}</option>
-            </select>
+            <AppleSelect
+              compact
+              :model-value="s.groupId !== null ? String(s.groupId) : ''"
+              :options="groupOptions"
+              @update:model-value="onSourceGroupChange(s.id, $event)"
+            />
             <button class="f-icon-btn remove-btn" :title="t('settings.sources.remove')" @click="removeSource(s.id)">
               <Icon name="trash" :size="15" color="var(--danger)" />
             </button>
@@ -135,11 +225,11 @@ function adjustFontSize(delta: number) {
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.theme') }}</span>
           </div>
-          <select :value="app.s.theme" @change="app.patch({ theme: ($event.target as HTMLSelectElement).value as any })">
-            <option value="system">{{ t('settings.app.themeSystem') }}</option>
-            <option value="light">{{ t('settings.app.themeLight') }}</option>
-            <option value="dark">{{ t('settings.app.themeDark') }}</option>
-          </select>
+          <AppleSelect
+            :model-value="app.s.theme"
+            :options="themeOptions"
+            @update:model-value="app.patch({ theme: $event })"
+          />
         </div>
 
         <!-- Default View -->
@@ -147,12 +237,11 @@ function adjustFontSize(delta: number) {
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.view') }}</span>
           </div>
-          <select :value="app.s.view" @change="app.patch({ view: ($event.target as HTMLSelectElement).value as any })">
-            <option value="cards">{{ t('toolbar.views.cards') }}</option>
-            <option value="list">{{ t('toolbar.views.list') }}</option>
-            <option value="magazine">{{ t('toolbar.views.magazine') }}</option>
-            <option value="compact">{{ t('toolbar.views.compact') }}</option>
-          </select>
+          <AppleSelect
+            :model-value="app.s.view"
+            :options="viewOptions"
+            @update:model-value="app.patch({ view: $event })"
+          />
         </div>
 
         <!-- Language -->
@@ -160,9 +249,11 @@ function adjustFontSize(delta: number) {
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.language') }}</span>
           </div>
-          <select :value="app.s.locale" @change="app.patch({ locale: ($event.target as HTMLSelectElement).value })">
-            <option v-for="l in LOCALES" :key="l.value" :value="l.value">{{ l.label }}</option>
-          </select>
+          <AppleSelect
+            :model-value="app.s.locale"
+            :options="localeOptions"
+            @update:model-value="app.patch({ locale: $event })"
+          />
         </div>
 
         <!-- Font Size Slider -->
@@ -249,6 +340,37 @@ function adjustFontSize(delta: number) {
       </div>
     </div>
 
+    <!-- Tab: Shortcuts -->
+    <div v-else-if="tab === 'shortcuts'" class="tab-body">
+      <div class="shortcuts-header-bar">
+        <p class="shortcuts-hint">{{ t('settings.shortcuts.hint') }}</p>
+        <button class="f-btn compact-btn" @click="app.resetShortcuts()">
+          {{ t('settings.shortcuts.reset') }}
+        </button>
+      </div>
+
+      <div v-for="group in shortcutGroups" :key="group.title" class="shortcut-group-wrapper">
+        <div class="shortcut-group-title">{{ group.title }}</div>
+        <div class="grouped-inset-box">
+          <div v-for="item in group.items" :key="item.key" class="grouped-inset-row">
+            <span class="label-title">{{ item.label }}</span>
+            <button
+              class="keycap-btn"
+              :class="{ recording: recordingAction === item.key }"
+              @click="startRecording(item.key)"
+            >
+              <span v-if="recordingAction === item.key" class="recording-text">
+                {{ t('settings.shortcuts.pressKey') }}
+              </span>
+              <kbd v-else class="apple-keycap">
+                {{ formatKeyDisplay(app.shortcuts[item.key]) }}
+              </kbd>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Tab: Data (OPML) -->
     <div v-else-if="tab === 'data'" class="tab-body">
       <div class="grouped-inset-box">
@@ -327,7 +449,22 @@ function adjustFontSize(delta: number) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.18rem;
+}
+
+.source-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.settings-favicon {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .source-title {
@@ -472,5 +609,106 @@ function adjustFontSize(delta: number) {
   color: var(--text-secondary);
   max-width: 22rem;
   line-height: 1.5;
+}
+
+/* Shortcuts Tab Styles */
+.shortcuts-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0 0.2rem;
+}
+
+.shortcuts-hint {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.compact-btn {
+  font-size: 0.76rem;
+  padding: 0.24rem 0.65rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.shortcut-group-wrapper {
+  margin-bottom: 1.1rem;
+}
+
+.shortcut-group-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  margin-bottom: 0.4rem;
+  padding-left: 0.4rem;
+}
+
+.keycap-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+}
+
+.apple-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2rem;
+  height: 1.7rem;
+  padding: 0 0.6rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom: 2px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  transition: all 0.15s var(--ease);
+}
+
+.keycap-btn:hover .apple-keycap {
+  background: var(--bg-hover-strong);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.keycap-btn:active .apple-keycap {
+  transform: translateY(1px);
+  border-bottom-width: 1px;
+}
+
+.keycap-btn.recording .recording-text {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-tint);
+  padding: 0.24rem 0.7rem;
+  border-radius: 6px;
+  border: 1.5px dashed var(--accent);
+  animation: pulseRecord 1.2s infinite ease-in-out;
+}
+
+@keyframes pulseRecord {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.97);
+  }
 }
 </style>

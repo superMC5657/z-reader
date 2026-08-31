@@ -3,6 +3,19 @@ import { getSettings, saveSettings } from '../lib/tauri'
 import type { Settings } from '../types'
 import { i18n } from '../i18n'
 
+export const DEFAULT_SHORTCUTS: Record<string, string> = {
+  nextArticle: 'j',
+  prevArticle: 'k',
+  toggleRead: 'm',
+  toggleStar: 's',
+  fetchFull: 'f',
+  openInBrowser: 'o',
+  refresh: 'r',
+  closeArticle: 'Escape',
+  addSource: 'a',
+  toggleSidebar: 'b',
+}
+
 const DEFAULTS: Settings = {
   version: '0.1.0',
   theme: 'system',
@@ -13,6 +26,7 @@ const DEFAULTS: Settings = {
   filterType: 0,
   viewConfigs: 0b111,
   menuOn: true,
+  shortcuts: DEFAULT_SHORTCUTS,
 }
 
 function resolveTheme(theme: Settings['theme']): 'light' | 'dark' {
@@ -31,10 +45,21 @@ function apply(s: Settings) {
 export const useAppStore = defineStore('app', {
   state: () => ({
     settings: null as Settings | null,
+    systemDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
   }),
   getters: {
     s(state): Settings {
       return state.settings ?? DEFAULTS
+    },
+    isDark(state): boolean {
+      const theme = (state.settings ?? DEFAULTS).theme
+      if (theme === 'system') {
+        return state.systemDark
+      }
+      return theme === 'dark'
+    },
+    shortcuts(state): Record<string, string> {
+      return { ...DEFAULT_SHORTCUTS, ...(state.settings?.shortcuts ?? {}) }
     },
     showCover(): boolean {
       return (this.s.viewConfigs & 1) !== 0
@@ -54,10 +79,22 @@ export const useAppStore = defineStore('app', {
         this.settings.locale = DEFAULTS.locale
         await saveSettings(this.settings).catch(() => {})
       }
+      if (!this.s.shortcuts || Object.keys(this.s.shortcuts).length === 0) {
+        this.settings.shortcuts = { ...DEFAULT_SHORTCUTS }
+      }
       apply(this.s)
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      const mql = window.matchMedia('(prefers-color-scheme: dark)')
+      mql.addEventListener('change', (e) => {
+        this.systemDark = e.matches
         if (this.s.theme === 'system') apply(this.s)
       })
+    },
+    async setShortcut(actionKey: string, key: string) {
+      const shortcuts = { ...this.shortcuts, [actionKey]: key }
+      await this.patch({ shortcuts })
+    },
+    async resetShortcuts() {
+      await this.patch({ shortcuts: { ...DEFAULT_SHORTCUTS } })
     },
     async patch(p: Partial<Settings>) {
       this.settings = { ...this.s, ...p }

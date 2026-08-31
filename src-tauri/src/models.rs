@@ -71,10 +71,23 @@ pub struct Settings {
     /// bit0 = showCover, bit1 = showSnippet, bit2 = fadeRead
     pub view_configs: u32,
     pub menu_on: bool,
+    pub shortcuts: std::collections::HashMap<String, String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
+        let mut shortcuts = std::collections::HashMap::new();
+        shortcuts.insert("nextArticle".into(), "j".into());
+        shortcuts.insert("prevArticle".into(), "k".into());
+        shortcuts.insert("toggleRead".into(), "m".into());
+        shortcuts.insert("toggleStar".into(), "s".into());
+        shortcuts.insert("fetchFull".into(), "f".into());
+        shortcuts.insert("openInBrowser".into(), "o".into());
+        shortcuts.insert("refresh".into(), "r".into());
+        shortcuts.insert("closeArticle".into(), "Escape".into());
+        shortcuts.insert("addSource".into(), "a".into());
+        shortcuts.insert("toggleSidebar".into(), "b".into());
+
         Settings {
             version: env!("CARGO_PKG_VERSION").to_string(),
             theme: "system".into(),
@@ -86,6 +99,7 @@ impl Default for Settings {
             filter_type: 0,
             view_configs: 0b111,
             menu_on: true,
+            shortcuts,
         }
     }
 }

@@ -17,28 +17,57 @@ const ui = useUiStore()
 const showSettings = ref(false)
 const showAdd = ref(false)
 
+function matchesKey(e: KeyboardEvent, shortcutKey?: string): boolean {
+  if (!shortcutKey) return false
+  if (shortcutKey === 'Escape' && e.key === 'Escape') return true
+  if ((shortcutKey === 'Space' || shortcutKey === ' ') && (e.key === ' ' || e.key === 'Space')) return true
+  if (shortcutKey === 'Enter' && e.key === 'Enter') return true
+  return e.key.toLowerCase() === shortcutKey.toLowerCase()
+}
+
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
+
+  const sc = app.shortcuts
   const items = data.items
   const idx = items.findIndex((i) => i.id === data.selectedId)
-  if (e.key === 'j' || e.key === 'k') {
+
+  if (matchesKey(e, sc.nextArticle) || e.key === 'ArrowDown') {
     e.preventDefault()
-    const next = e.key === 'j' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0)
+    const next = Math.min(idx + 1, items.length - 1)
     if (items[next]) data.selectItem(items[next].id)
-  } else if (e.key === 'm') {
+  } else if (matchesKey(e, sc.prevArticle) || e.key === 'ArrowUp') {
+    e.preventDefault()
+    const next = Math.max(idx - 1, 0)
+    if (items[next]) data.selectItem(items[next].id)
+  } else if (matchesKey(e, sc.toggleRead)) {
     const cur = data.selectedItem
     if (cur) data.setItemRead(cur, !cur.hasBeenRead)
-  } else if (e.key === 's') {
+  } else if (matchesKey(e, sc.toggleStar)) {
     const cur: Item | null = data.selectedItem
     if (cur) data.toggleStar(cur)
-  } else if (e.key === 'r') {
+  } else if (matchesKey(e, sc.fetchFull)) {
+    const cur = data.selectedItem
+    if (cur) data.fetchFullContent(cur.id)
+  } else if (matchesKey(e, sc.openInBrowser)) {
+    const cur = data.selectedItem
+    if (cur?.url) {
+      import('@tauri-apps/plugin-opener')
+        .then(({ openUrl }) => openUrl(cur.url!))
+        .catch(() => window.open(cur.url!, '_blank'))
+    }
+  } else if (matchesKey(e, sc.refresh)) {
     data.fetchAll()
-  } else if (e.key === 'Escape') {
+  } else if (matchesKey(e, sc.closeArticle) || e.key === 'Escape') {
     data.selectedItem = null
     data.selectedId = null
     ui.closeMenu()
+  } else if (matchesKey(e, sc.addSource)) {
+    showAdd.value = true
+  } else if (matchesKey(e, sc.toggleSidebar)) {
+    app.patch({ menuOn: !app.s.menuOn })
   }
 }
 
