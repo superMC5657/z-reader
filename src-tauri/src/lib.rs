@@ -58,6 +58,8 @@ pub fn run() {
             commands::save_settings,
             commands::import_opml,
             commands::export_opml,
+            commands::set_custom_favicon,
+            commands::refresh_favicon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

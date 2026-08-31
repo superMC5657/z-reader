@@ -35,3 +35,5 @@ export interface OpmlImportResult {
 }
 export const importOpml = (text: string) => invoke<OpmlImportResult>('import_opml', { text })
 export const exportOpml = () => invoke<string>('export_opml')
+export const refreshFavicon = (id: number) => invoke<string | null>('refresh_favicon', { id })
+export const setCustomFavicon = (id: number, dataBase64: string) => invoke<string>('set_custom_favicon', { id, dataBase64 })

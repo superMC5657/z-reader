@@ -272,8 +272,9 @@ function openViewMenu(e: MouseEvent) {
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   flex-shrink: 0;
+  margin-left: auto;
   min-width: 0;
 }
 
@@ -282,8 +283,8 @@ function openViewMenu(e: MouseEvent) {
   position: relative;
   display: flex;
   align-items: center;
-  width: 11rem;
-  min-width: 4.5rem;
+  width: 8rem;
+  min-width: 2rem;
   flex-shrink: 1;
   transition: width 0.2s var(--ease);
 }
@@ -340,13 +341,13 @@ function openViewMenu(e: MouseEvent) {
   background: var(--bg-hover-strong);
 }
 
+/* Default to compact single view button */
 .wide-view-switch {
-  display: inline-flex;
-  flex-shrink: 0;
+  display: none;
 }
 
 .compact-view-btn {
-  display: none;
+  display: inline-flex;
 }
 
 .view-seg {
@@ -354,31 +355,26 @@ function openViewMenu(e: MouseEvent) {
 }
 
 /* Responsive Container Queries for ArticleList */
-@container article-list (max-width: 640px) {
-  .toolbar {
-    padding: 0.55rem 0.85rem;
-    gap: 0.45rem;
-  }
-
+/* Wide container (>= 780px): show full 4-button segmented control */
+@container article-list (min-width: 780px) {
   .wide-view-switch {
-    display: none;
-  }
-
-  .compact-view-btn {
     display: inline-flex;
   }
 
+  .compact-view-btn {
+    display: none;
+  }
+
   .search-wrapper {
-    width: 8rem;
+    width: 11rem;
   }
 
   .scope h2 {
-    max-width: 9rem;
-    font-size: 1.05rem;
+    max-width: 14rem;
   }
 }
 
-@container article-list (max-width: 480px) {
+@container article-list (max-width: 520px) {
   .toolbar {
     padding: 0.5rem 0.65rem;
     gap: 0.35rem;
@@ -394,7 +390,7 @@ function openViewMenu(e: MouseEvent) {
   }
 
   .filter-seg .seg {
-    padding: 0.2rem 0.5rem;
+    padding: 0.2rem 0.48rem;
     font-size: 0.78rem;
   }
 
@@ -427,11 +423,11 @@ function openViewMenu(e: MouseEvent) {
 
 @container article-list (max-width: 360px) {
   .scope h2 {
-    max-width: 4.5rem;
+    max-width: 4rem;
   }
 
   .filter-seg .seg {
-    padding: 0.18rem 0.38rem;
+    padding: 0.18rem 0.35rem;
     font-size: 0.74rem;
   }
 }

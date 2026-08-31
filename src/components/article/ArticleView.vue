@@ -18,25 +18,33 @@ const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
 
 // Match the reader iframe's palette to the app theme
-const isDark = computed(() => {
-  const theme = app.s.theme
-  return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-})
+const isDark = computed(() => app.isDark)
 
 const docHtml = computed(() => {
   if (!item.value?.content) return ''
   const fg = isDark.value ? '#f5f5f7' : '#1d1d1f'
+  const bg = isDark.value ? '#2c2c2e' : '#ffffff'
   const muted = isDark.value ? '#a1a1a6' : '#6e6e73'
   const border = isDark.value ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)'
   const chip = isDark.value ? 'rgba(120,120,128,0.25)' : 'rgba(120,120,128,0.12)'
   const codeBg = isDark.value ? '#1e1e20' : '#f2f2f7'
   const accent = isDark.value ? '#0a84ff' : '#007aff'
 
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    * { box-sizing: border-box; }
+  return `<!doctype html><html data-theme="${isDark.value ? 'dark' : 'light'}"><head><meta charset="utf-8"><meta name="color-scheme" content="${isDark.value ? 'dark' : 'light'}"><base target="_blank"><style>
+    :root {
+      color-scheme: ${isDark.value ? 'dark' : 'light'};
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html {
+      background-color: ${bg};
+      color: ${fg};
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
       letter-spacing: -0.015em;
+      background-color: ${bg};
       color: ${fg};
       line-height: 1.82;
       padding: 0 2rem 3.5rem;
@@ -44,25 +52,55 @@ const docHtml = computed(() => {
       margin: 0 auto;
       font-size: 1.05rem;
       -webkit-font-smoothing: antialiased;
+      word-break: break-word;
     }
     h1, h2, h3, h4, h5, h6 {
       letter-spacing: -0.025em;
       line-height: 1.35;
       margin: 1.8em 0 0.6em;
       font-weight: 700;
+      color: ${fg};
     }
     h1 { font-size: 1.65rem; }
     h2 { font-size: 1.35rem; }
     h3 { font-size: 1.15rem; }
+    p, li, span, div, font {
+      color: inherit;
+    }
     p { margin: 1em 0; }
     img, video {
       max-width: 100%;
       height: auto;
       border-radius: 12px;
       margin: 1rem 0;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      box-shadow: 0 2px 10px rgba(0,0,0,${isDark.value ? '0.35' : '0.08'});
       display: block;
     }
+    ${isDark.value ? `
+      img[src$=".svg"], img[src*=".svg?"] {
+        background: rgba(255, 255, 255, 0.06);
+        padding: 4px;
+      }
+      [style*="background-color: rgb(255"],
+      [style*="background-color:#fff"],
+      [style*="background-color: #fff"],
+      [style*="background-color: white"],
+      [style*="background: rgb(255"],
+      [style*="background: #fff"],
+      [style*="background: white"] {
+        background-color: transparent !important;
+      }
+      [style*="color: rgb(0"],
+      [style*="color: rgb(34"],
+      [style*="color: rgb(51"],
+      [style*="color: #0"],
+      [style*="color: #1"],
+      [style*="color: #2"],
+      [style*="color: #3"],
+      [style*="color: black"] {
+        color: inherit !important;
+      }
+    ` : ''}
     pre {
       overflow-x: auto;
       background: ${codeBg};
@@ -72,6 +110,7 @@ const docHtml = computed(() => {
       font-size: 0.88rem;
       line-height: 1.6;
       margin: 1.2rem 0;
+      color: ${fg};
     }
     code {
       font-family: 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
@@ -81,6 +120,7 @@ const docHtml = computed(() => {
       padding: 0.15em 0.4em;
       border-radius: 6px;
       font-size: 0.88em;
+      color: ${fg};
     }
     blockquote {
       border-left: 3.5px solid ${accent};
@@ -88,12 +128,12 @@ const docHtml = computed(() => {
       padding: 0.2rem 1.2rem;
       color: ${muted};
       font-style: normal;
-      background: ${isDark.value ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'};
+      background: ${isDark.value ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'};
       border-radius: 0 8px 8px 0;
     }
     a { color: ${accent}; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; color: ${fg}; }
     td, th { border: 1px solid ${border}; padding: 0.45rem 0.85rem; text-align: left; }
     th { background: ${chip}; font-weight: 600; }
     hr { border: none; border-top: 0.5px solid ${border}; margin: 2rem 0; }

@@ -87,7 +87,9 @@ pub async fn add_source(
     };
     if source.favicon.is_none() {
         let dir = favicon_dir(&app)?;
-        if let Some(fav) = feed::fetch_favicon(&client, &url, &dir, source.id).await {
+        let icon_url = parsed.icon_url.as_deref();
+        let site_url = parsed.site_url.as_deref();
+        if let Some(fav) = feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, source.id).await {
             let conn = state.db.lock().await;
             db::set_source_favicon(&conn, source.id, fav.to_string_lossy().as_ref())?;
         }
@@ -111,6 +113,71 @@ pub async fn rename_source(state: State<'_, AppState>, id: i64, title: String) -
 pub async fn set_source_group(state: State<'_, AppState>, id: i64, group_id: Option<i64>) -> Result<(), String> {
     let conn = state.db.lock().await;
     db::set_source_group(&conn, id, group_id)
+}
+
+#[tauri::command]
+pub async fn set_custom_favicon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    data_base64: String,
+) -> Result<String, String> {
+    let dir = favicon_dir(&app)?;
+    let raw = if let Some(idx) = data_base64.find("base64,") {
+        &data_base64[idx + 7..]
+    } else {
+        &data_base64
+    };
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw.trim())
+        .map_err(|e| format!("invalid base64: {e}"))?;
+    if bytes.is_empty() || bytes.len() > 5_000_000 {
+        return Err("image data too large or empty".into());
+    }
+    let ext = if data_base64.contains("image/svg") {
+        "svg"
+    } else if data_base64.contains("image/jpeg") || data_base64.contains("image/jpg") {
+        "jpg"
+    } else {
+        "png"
+    };
+    let path = dir.join(format!("{id}.{ext}"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let path_str = path.to_string_lossy().to_string();
+    {
+        let conn = state.db.lock().await;
+        db::set_source_favicon(&conn, id, &path_str)?;
+    }
+    Ok(path_str)
+}
+
+#[tauri::command]
+pub async fn refresh_favicon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<Option<String>, String> {
+    let (url, mut parsed) = {
+        let conn = state.db.lock().await;
+        let s = db::get_source(&conn, id)?;
+        (s.url, None)
+    };
+    let client = state.http.clone();
+    if let Ok(p) = feed::fetch_and_parse(&client, &url).await {
+        parsed = Some(p);
+    }
+    let dir = favicon_dir(&app)?;
+    let icon_url = parsed.as_ref().and_then(|p| p.icon_url.as_deref());
+    let site_url = parsed.as_ref().and_then(|p| p.site_url.as_deref());
+    if let Some(fav) = feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, id).await {
+        let path_str = fav.to_string_lossy().to_string();
+        let conn = state.db.lock().await;
+        db::set_source_favicon(&conn, id, &path_str)?;
+        Ok(Some(path_str))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Fetch all sources, or just the given ids. Emits "fetch-progress" / "fetch-done".
@@ -154,7 +221,9 @@ pub async fn fetch_sources(
                 }
                 drop(conn);
                 if favicon.is_none() {
-                    if let Some(fav) = feed::fetch_favicon(&client, url, &dir, *id).await {
+                    let icon_url = parsed.icon_url.as_deref();
+                    let site_url = parsed.site_url.as_deref();
+                    if let Some(fav) = feed::fetch_favicon(&client, url, icon_url, site_url, &dir, *id).await {
                         let conn = state.db.lock().await;
                         let _ = db::set_source_favicon(&conn, *id, fav.to_string_lossy().as_ref());
                     }

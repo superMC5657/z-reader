@@ -18,6 +18,8 @@ pub struct NewEntry {
 pub struct ParsedFeed {
     pub title: String,
     pub description: Option<String>,
+    pub icon_url: Option<String>,
+    pub site_url: Option<String>,
     pub entries: Vec<NewEntry>,
 }
 
@@ -37,6 +39,10 @@ pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<Pars
 
     let title = feed.title.as_ref().map(|t| t.content.clone()).unwrap_or_default();
     let description = feed.description.as_ref().map(|d| d.content.clone());
+    let icon_url = feed.icon.as_ref().map(|i| i.uri.clone())
+        .or_else(|| feed.logo.as_ref().map(|l| l.uri.clone()));
+    let site_url = feed.links.iter().find(|l| l.rel.as_deref() != Some("self")).map(|l| l.href.clone())
+        .or_else(|| feed.links.first().map(|l| l.href.clone()));
 
     let mut entries = Vec::with_capacity(feed.entries.len());
     for entry in &feed.entries {
@@ -104,7 +110,7 @@ pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<Pars
         });
     }
 
-    Ok(ParsedFeed { title, description, entries })
+    Ok(ParsedFeed { title, description, icon_url, site_url, entries })
 }
 
 /// DB-only stage: insert parsed entries, skipping known guids.
@@ -135,26 +141,63 @@ pub fn store(conn: &rusqlite::Connection, source_id: i64, parsed: &ParsedFeed) -
 pub async fn fetch_favicon(
     client: &reqwest::Client,
     feed_url: &str,
+    icon_url: Option<&str>,
+    site_url: Option<&str>,
     favicon_dir: &std::path::PathBuf,
     source_id: i64,
 ) -> Option<std::path::PathBuf> {
-    let origin = url::Url::parse(feed_url)
-        .ok()?
-        .origin()
-        .ascii_serialization();
-    let candidates = [
-        format!("{origin}/favicon.ico"),
-        format!("{origin}/favicon.png"),
-    ];
-    for candidate in candidates {
-        let resp = client.get(&candidate).send().await.ok()?;
-        if resp.status().is_success() {
-            if let Ok(bytes) = resp.bytes().await {
-                if !bytes.is_empty() && bytes.len() < 2_000_000 {
-                    let ext = if candidate.ends_with(".png") { "png" } else { "ico" };
-                    let path = favicon_dir.join(format!("{source_id}.{ext}"));
-                    if tokio::fs::write(&path, &bytes).await.is_ok() {
-                        return Some(path);
+    let mut candidates = Vec::new();
+
+    // 1. Explicit feed icon URL from RSS/Atom
+    if let Some(u) = icon_url {
+        let u = u.trim();
+        if !u.is_empty() {
+            candidates.push(u.to_string());
+        }
+    }
+
+    // 2. Derive origins and domains
+    let target = site_url.unwrap_or(feed_url);
+    if let Ok(parsed) = url::Url::parse(target) {
+        let origin = parsed.origin().ascii_serialization();
+        let host = parsed.host_str().unwrap_or("").to_string();
+
+        candidates.push(format!("{origin}/favicon.ico"));
+        candidates.push(format!("{origin}/favicon.png"));
+        candidates.push(format!("{origin}/apple-touch-icon.png"));
+        candidates.push(format!("{origin}/apple-touch-icon-precomposed.png"));
+
+        if !host.is_empty() {
+            candidates.push(format!("https://www.google.com/s2/favicons?domain={host}&sz=64"));
+            candidates.push(format!("https://icons.duckduckgo.com/ip2/{host}.ico"));
+        }
+    }
+
+    if let Ok(parsed) = url::Url::parse(feed_url) {
+        let origin = parsed.origin().ascii_serialization();
+        let ico = format!("{origin}/favicon.ico");
+        if !candidates.contains(&ico) {
+            candidates.push(ico);
+        }
+    }
+
+    for candidate in &candidates {
+        let req = client.get(candidate).timeout(std::time::Duration::from_secs(8));
+        if let Ok(resp) = req.send().await {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes().await {
+                    if bytes.len() > 80 && bytes.len() < 2_000_000 {
+                        let ext = if candidate.contains(".png") || candidate.contains("google.com") {
+                            "png"
+                        } else if candidate.contains(".svg") {
+                            "svg"
+                        } else {
+                            "ico"
+                        };
+                        let path = favicon_dir.join(format!("{source_id}.{ext}"));
+                        if tokio::fs::write(&path, &bytes).await.is_ok() {
+                            return Some(path);
+                        }
                     }
                 }
             }

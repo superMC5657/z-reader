@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useDataStore, useUiStore } from '../../stores/data'
 import * as api from '../../lib/tauri'
 import type { Source } from '../../types'
 import Modal from '../ui/Modal.vue'
 import Icon from '../ui/Icon.vue'
+import FeedIcon from '../ui/FeedIcon.vue'
 
 defineEmits<{
   'add-source': []
@@ -47,8 +47,33 @@ const sourcesOf = computed(() => {
   return (gid: number) => map.get(gid) ?? []
 })
 
-function faviconSrc(source: Source): string | null {
-  return source.favicon ? convertFileSrc(source.favicon) : null
+const iconFileInput = ref<HTMLInputElement | null>(null)
+let customIconTargetSourceId: number | null = null
+
+function triggerCustomIconUpload(sourceId: number) {
+  customIconTargetSourceId = sourceId
+  iconFileInput.value?.click()
+}
+
+async function onIconFileSelected(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file || customIconTargetSourceId === null) return
+  const sid = customIconTargetSourceId
+  const reader = new FileReader()
+  reader.onload = async () => {
+    const base64 = reader.result as string
+    if (base64) {
+      await api.setCustomFavicon(sid, base64)
+      await data.loadSources()
+    }
+  }
+  reader.readAsDataURL(file)
+  ;(e.target as HTMLInputElement).value = ''
+}
+
+async function reFetchFavicon(sourceId: number) {
+  await api.refreshFavicon(sourceId)
+  await data.loadSources()
 }
 
 function sourceMenu(e: MouseEvent, s: Source) {
@@ -56,6 +81,8 @@ function sourceMenu(e: MouseEvent, s: Source) {
   ui.openMenu(e.clientX, e.clientY, [
     { label: t('item.markAllRead'), action: () => api.markAllRead('source', s.id).then(() => data.loadSources()) },
     { label: t('group.rename'), action: () => openGroupModal(s.id, s.title) },
+    { label: t('feed.refreshIcon'), action: () => reFetchFavicon(s.id) },
+    { label: t('feed.changeIcon'), action: () => triggerCustomIconUpload(s.id) },
     ...groups.map((g) => ({
       label: `${t('group.moveTo')} · ${g.name}`,
       action: () => api.setSourceGroup(s.id, g.id).then(() => Promise.all([data.loadSources(), data.loadGroups()])),
@@ -200,10 +227,7 @@ async function toggleExpand(gid: number) {
             @click="data.selectScope('source', s.id)"
             @contextmenu.prevent="sourceMenu($event, s)"
           >
-            <img v-if="faviconSrc(s)" class="favicon" :src="faviconSrc(s)!" alt="" />
-            <span v-else class="favicon placeholder">
-              <Icon name="rss" :size="10" color="var(--text-tertiary)" />
-            </span>
+            <FeedIcon :source="s" :size="16" />
             <span class="row-title">{{ s.title }}</span>
             <span v-if="s.unread" class="unread-badge">{{ s.unread }}</span>
           </button>
@@ -221,13 +245,19 @@ async function toggleExpand(gid: number) {
         @click="data.selectScope('source', s.id)"
         @contextmenu.prevent="sourceMenu($event, s)"
       >
-        <img v-if="faviconSrc(s)" class="favicon" :src="faviconSrc(s)!" alt="" />
-        <span v-else class="favicon placeholder">
-          <Icon name="rss" :size="10" color="var(--text-tertiary)" />
-        </span>
+        <FeedIcon :source="s" :size="16" />
         <span class="row-title">{{ s.title }}</span>
         <span v-if="s.unread" class="unread-badge">{{ s.unread }}</span>
       </button>
+
+      <!-- Hidden file input for uploading custom icon -->
+      <input
+        ref="iconFileInput"
+        type="file"
+        accept="image/png,image/jpeg,image/svg+xml,image/x-icon,image/webp,image/gif"
+        style="display: none;"
+        @change="onIconFileSelected"
+      />
 
       <!-- Empty State -->
       <div v-if="!data.sources.length" class="empty-hint">
@@ -502,11 +532,26 @@ async function toggleExpand(gid: number) {
 }
 
 .favicon {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 3.5px;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 4px;
   flex-shrink: 0;
   object-fit: cover;
+}
+
+.favicon.initial-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 750;
+  color: #ffffff;
+  border-radius: 4px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+  user-select: none;
 }
 
 .favicon.placeholder {

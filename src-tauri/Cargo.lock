@@ -5709,6 +5709,7 @@ name = "z-reader"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "base64 0.22.1",
  "chrono",
  "dom_smoothie",
  "feed-rs",
