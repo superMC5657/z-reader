@@ -32,3 +32,6 @@ src-tauri/gen/schemas
 
 # Acceptance screenshots
 .shots/
+
+# Agent run artifacts
+.omo/
