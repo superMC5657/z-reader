@@ -99,6 +99,11 @@ const viewOptions = computed(() => [
   { value: 'compact', label: t('toolbar.views.compact'), icon: 'view-compact' },
 ])
 
+const readerModeOptions = computed(() => [
+  { value: 'split', label: t('settings.app.readerModeSplit'), icon: 'layout-split' },
+  { value: 'focus', label: t('settings.app.readerModeFocus'), icon: 'focus' },
+])
+
 const localeOptions = computed(() =>
   LOCALES.map((l) => ({ value: l.value, label: l.label, icon: 'globe' }))
 )
@@ -241,6 +246,18 @@ function adjustFontSize(delta: number) {
             :model-value="app.s.view"
             :options="viewOptions"
             @update:model-value="app.patch({ view: $event })"
+          />
+        </div>
+
+        <!-- Reader Mode -->
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.app.readerMode') }}</span>
+          </div>
+          <AppleSelect
+            :model-value="app.s.readerMode || 'split'"
+            :options="readerModeOptions"
+            @update:model-value="app.patch({ readerMode: $event })"
           />
         </div>
 
