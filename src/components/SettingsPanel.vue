@@ -76,6 +76,12 @@ function toggleViewConfig(bit: number, val: boolean) {
     app.patch({ viewConfigs: app.s.viewConfigs & ~bit })
   }
 }
+
+function adjustFontSize(delta: number) {
+  const cur = app.s.fontSize || 16
+  const next = Math.min(22, Math.max(12, cur + delta))
+  app.patch({ fontSize: next })
+}
 </script>
 
 <template>
@@ -165,6 +171,14 @@ function toggleViewConfig(bit: number, val: boolean) {
             <span class="label-title">{{ t('settings.app.fontSize') }}</span>
           </div>
           <div class="slider-row">
+            <button
+              class="f-icon-btn stepper-btn"
+              title="A-"
+              :disabled="app.s.fontSize <= 12"
+              @click="adjustFontSize(-1)"
+            >
+              <span class="stepper-label small">A-</span>
+            </button>
             <input
               type="range"
               min="12"
@@ -173,6 +187,14 @@ function toggleViewConfig(bit: number, val: boolean) {
               :value="app.s.fontSize"
               @input="app.patch({ fontSize: Number(($event.target as HTMLInputElement).value) })"
             />
+            <button
+              class="f-icon-btn stepper-btn"
+              title="A+"
+              :disabled="app.s.fontSize >= 22"
+              @click="adjustFontSize(1)"
+            >
+              <span class="stepper-label large">A+</span>
+            </button>
             <span class="value-badge">{{ app.s.fontSize }}px</span>
           </div>
         </div>
@@ -359,7 +381,34 @@ function toggleViewConfig(bit: number, val: boolean) {
 .slider-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.45rem;
+}
+
+.stepper-btn {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 6px;
+  background: var(--bg-track);
+  color: var(--text-secondary);
+}
+
+.stepper-btn:hover:not(:disabled) {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.stepper-label {
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+.stepper-label.small {
+  font-size: 0.7rem;
+}
+
+.stepper-label.large {
+  font-size: 0.82rem;
 }
 
 .value-badge {
