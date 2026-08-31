@@ -87,15 +87,21 @@ onBeforeUnmount(() => {
 .panes {
   display: flex;
   height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 .pane-list {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pane-article {
   flex: 1.15;
+  min-width: 0;
+  overflow: hidden;
   border-left: 0.5px solid var(--border);
 }
 

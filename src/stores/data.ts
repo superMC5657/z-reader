@@ -8,7 +8,7 @@ interface UiState {
   menuVisible: boolean
   x: number
   y: number
-  items: { label: string; danger?: boolean; action: () => void }[]
+  items: { label: string; icon?: string; checked?: boolean; danger?: boolean; action: () => void }[]
 }
 
 export const useUiStore = defineStore('ui', {

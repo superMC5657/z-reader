@@ -63,6 +63,37 @@ function itemContextMenu(e: MouseEvent, item: Item) {
 function clearSearch() {
   data.search_('')
 }
+
+function openViewMenu(e: MouseEvent) {
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  ui.openMenu(rect.right - 180, rect.bottom + 6, [
+    {
+      label: t('toolbar.views.cards'),
+      icon: 'view-cards',
+      checked: activeView.value === 'cards',
+      action: () => app.patch({ view: 'cards' }),
+    },
+    {
+      label: t('toolbar.views.list'),
+      icon: 'view-list',
+      checked: activeView.value === 'list',
+      action: () => app.patch({ view: 'list' }),
+    },
+    {
+      label: t('toolbar.views.magazine'),
+      icon: 'view-magazine',
+      checked: activeView.value === 'magazine',
+      action: () => app.patch({ view: 'magazine' }),
+    },
+    {
+      label: t('toolbar.views.compact'),
+      icon: 'view-compact',
+      checked: activeView.value === 'compact',
+      action: () => app.patch({ view: 'compact' }),
+    },
+  ])
+}
 </script>
 
 <template>
@@ -91,40 +122,52 @@ function clearSearch() {
 
       <div class="spacer" data-tauri-drag-region></div>
 
-      <!-- Apple Spotlight Capsule Search Box -->
-      <div class="search-wrapper">
-        <Icon name="search" :size="13" color="var(--text-tertiary)" class="search-icon" />
-        <input
-          class="search-input"
-          :placeholder="t('toolbar.search')"
-          :value="data.search"
-          @input="data.search_(($event.target as HTMLInputElement).value)"
-        />
-        <button v-if="data.search" class="clear-btn" @click="clearSearch" title="Clear">
-          <Icon name="xmark" :size="14" color="var(--text-tertiary)" />
-        </button>
-      </div>
+      <!-- Right Actions Group -->
+      <div class="toolbar-actions">
+        <!-- Apple Spotlight Capsule Search Box -->
+        <div class="search-wrapper" :class="{ 'has-search': !!data.search }">
+          <Icon name="search" :size="13" color="var(--text-tertiary)" class="search-icon" />
+          <input
+            class="search-input"
+            :placeholder="t('toolbar.search')"
+            :value="data.search"
+            @input="data.search_(($event.target as HTMLInputElement).value)"
+          />
+          <button v-if="data.search" class="clear-btn" @click="clearSearch" title="Clear">
+            <Icon name="xmark" :size="14" color="var(--text-tertiary)" />
+          </button>
+        </div>
 
-      <!-- Mark All Read -->
-      <button
-        class="f-icon-btn toolbar-btn"
-        :title="t('toolbar.markAllRead')"
-        @click="data.markAllReadInScope()"
-      >
-        <Icon name="checkmark-circle" :size="17" />
-      </button>
-
-      <!-- View Switcher Segmented Control -->
-      <div class="segmented view-switch">
+        <!-- Mark All Read -->
         <button
-          v-for="v in views"
-          :key="v"
-          class="seg view-seg"
-          :class="{ active: activeView === v }"
-          :title="t(`toolbar.views.${v}`)"
-          @click="app.patch({ view: v })"
+          class="f-icon-btn toolbar-btn"
+          :title="t('toolbar.markAllRead')"
+          @click="data.markAllReadInScope()"
         >
-          <Icon :name="viewIcons[v]" :size="14" />
+          <Icon name="checkmark-circle" :size="17" />
+        </button>
+
+        <!-- View Switcher: Segmented Control (Wide mode >= 640px) -->
+        <div class="segmented view-switch wide-view-switch">
+          <button
+            v-for="v in views"
+            :key="v"
+            class="seg view-seg"
+            :class="{ active: activeView === v }"
+            :title="t(`toolbar.views.${v}`)"
+            @click="app.patch({ view: v })"
+          >
+            <Icon :name="viewIcons[v]" :size="14" />
+          </button>
+        </div>
+
+        <!-- View Switcher: Single Dropdown Button (Compact mode < 640px) -->
+        <button
+          class="f-icon-btn toolbar-btn compact-view-btn"
+          :title="t(`toolbar.views.${activeView}`)"
+          @click="openViewMenu"
+        >
+          <Icon :name="viewIcons[activeView]" :size="15" />
         </button>
       </div>
     </header>
@@ -164,7 +207,10 @@ function clearSearch() {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   background: var(--bg);
+  container-type: inline-size;
+  container-name: article-list;
 }
 
 .toolbar {
@@ -178,6 +224,9 @@ function clearSearch() {
   border-bottom: 0.5px solid var(--border);
   flex-wrap: nowrap;
   min-height: 52px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
   z-index: 10;
 }
 
@@ -186,6 +235,7 @@ function clearSearch() {
   align-items: center;
   gap: 0.5rem;
   min-width: 0;
+  flex-shrink: 1;
 }
 
 .scope h2 {
@@ -196,6 +246,7 @@ function clearSearch() {
   text-overflow: ellipsis;
   max-width: 14rem;
   letter-spacing: -0.025em;
+  min-width: 0;
 }
 
 .count {
@@ -206,10 +257,24 @@ function clearSearch() {
   padding: 0.1rem 0.5rem;
   border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.filter-seg {
+  flex-shrink: 0;
 }
 
 .spacer {
   flex: 1;
+  min-width: 0.25rem;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 /* Apple Capsule Search */
@@ -217,9 +282,10 @@ function clearSearch() {
   position: relative;
   display: flex;
   align-items: center;
-  width: 13rem;
-  min-width: 5rem;
+  width: 11rem;
+  min-width: 4.5rem;
   flex-shrink: 1;
+  transition: width 0.2s var(--ease);
 }
 
 .search-icon {
@@ -266,6 +332,7 @@ function clearSearch() {
 .toolbar-btn {
   border-radius: 8px;
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .toolbar-btn:hover {
@@ -273,8 +340,100 @@ function clearSearch() {
   background: var(--bg-hover-strong);
 }
 
+.wide-view-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.compact-view-btn {
+  display: none;
+}
+
 .view-seg {
   padding: 0.25rem 0.55rem;
+}
+
+/* Responsive Container Queries for ArticleList */
+@container article-list (max-width: 640px) {
+  .toolbar {
+    padding: 0.55rem 0.85rem;
+    gap: 0.45rem;
+  }
+
+  .wide-view-switch {
+    display: none;
+  }
+
+  .compact-view-btn {
+    display: inline-flex;
+  }
+
+  .search-wrapper {
+    width: 8rem;
+  }
+
+  .scope h2 {
+    max-width: 9rem;
+    font-size: 1.05rem;
+  }
+}
+
+@container article-list (max-width: 480px) {
+  .toolbar {
+    padding: 0.5rem 0.65rem;
+    gap: 0.35rem;
+  }
+
+  .toolbar-actions {
+    gap: 0.25rem;
+  }
+
+  .scope h2 {
+    max-width: 6.5rem;
+    font-size: 0.98rem;
+  }
+
+  .filter-seg .seg {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.78rem;
+  }
+
+  .search-wrapper {
+    width: 2rem;
+  }
+
+  .search-wrapper:focus-within,
+  .search-wrapper.has-search {
+    width: 7.5rem;
+  }
+
+  .search-wrapper:not(:focus-within):not(.has-search) .search-input {
+    cursor: pointer;
+    background: transparent;
+    border-color: transparent;
+    color: transparent;
+    padding-left: 0.65rem;
+  }
+
+  .search-wrapper:not(:focus-within):not(.has-search) .search-input::placeholder {
+    color: transparent;
+  }
+
+  .search-wrapper:not(:focus-within):not(.has-search):hover {
+    background: var(--bg-hover);
+    border-radius: var(--radius-pill);
+  }
+}
+
+@container article-list (max-width: 360px) {
+  .scope h2 {
+    max-width: 4.5rem;
+  }
+
+  .filter-seg .seg {
+    padding: 0.18rem 0.38rem;
+    font-size: 0.74rem;
+  }
 }
 
 .list-body {

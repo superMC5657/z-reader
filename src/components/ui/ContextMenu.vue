@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useUiStore } from '../../stores/data'
+import Icon from './Icon.vue'
 
 const ui = useUiStore()
 
@@ -28,10 +29,12 @@ function onAction(action: () => void) {
           v-for="item in ui.items"
           :key="item.label"
           class="ctx-item"
-          :class="{ danger: item.danger }"
+          :class="{ danger: item.danger, active: item.checked }"
           @click="onAction(item.action)"
         >
+          <Icon v-if="item.icon" :name="item.icon" :size="14" class="ctx-item-icon" />
           <span class="ctx-label">{{ item.label }}</span>
+          <Icon v-if="item.checked" name="checkmark" :size="12" class="ctx-check" />
         </button>
       </div>
     </div>
@@ -61,14 +64,38 @@ function onAction(action: () => void) {
 .ctx-item {
   display: flex;
   align-items: center;
+  gap: 0.55rem;
   width: 100%;
   text-align: left;
-  padding: 0.38rem 0.75rem;
+  padding: 0.38rem 0.65rem;
   border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 450;
   color: var(--text-primary);
   transition: all 0.12s var(--ease);
+}
+
+.ctx-label {
+  flex: 1;
+}
+
+.ctx-item-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.ctx-item:hover .ctx-item-icon {
+  color: #ffffff;
+}
+
+.ctx-check {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.ctx-item:hover .ctx-check {
+  color: #ffffff;
 }
 
 .ctx-item:hover {
