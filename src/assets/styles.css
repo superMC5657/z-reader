@@ -63,6 +63,7 @@
 }
 
 [data-theme='dark'] {
+  color-scheme: dark;
   /* Apple System Colors - Dark Mode */
   --accent: #0a84ff;
   --accent-hover: #3697ff;
@@ -193,6 +194,29 @@ select {
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   padding-right: 2rem;
+  color-scheme: light dark;
+}
+
+[data-theme='dark'] select,
+[data-theme='dark'] input,
+[data-theme='dark'] textarea,
+[data-theme='dark'] option {
+  color-scheme: dark;
+}
+
+[data-theme='dark'] select {
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23A1A1A6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+option {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  padding: 0.35rem 0.6rem;
+}
+
+[data-theme='dark'] option {
+  background-color: #323236;
+  color: #f5f5f7;
 }
 
 input[type='range'] {

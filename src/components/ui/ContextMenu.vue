@@ -5,10 +5,15 @@ import Icon from './Icon.vue'
 
 const ui = useUiStore()
 
-const style = computed(() => ({
-  left: `${Math.min(ui.x, window.innerWidth - 240)}px`,
-  top: `${Math.min(ui.y, window.innerHeight - ui.items.length * 36 - 20)}px`,
-}))
+const style = computed(() => {
+  const menuWidth = 160
+  const maxX = window.innerWidth - menuWidth - 12
+  const maxY = window.innerHeight - ui.items.length * 36 - 24
+  return {
+    left: `${Math.max(12, Math.min(ui.x, maxX))}px`,
+    top: `${Math.max(12, Math.min(ui.y, maxY))}px`,
+  }
+})
 
 function onAction(action: () => void) {
   ui.closeMenu()
@@ -50,7 +55,8 @@ function onAction(action: () => void) {
 
 .ctx-menu {
   position: fixed;
-  min-width: 14rem;
+  min-width: 9.5rem;
+  max-width: min(18rem, 90vw);
   background: var(--bg-card);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
