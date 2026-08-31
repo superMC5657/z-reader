@@ -192,25 +192,36 @@ async function exportOpml() {
 
 <style scoped>
 .settings-tabs {
-  display: flex;
-  gap: 0.3rem;
-  padding: 0 1.25rem;
-  border-bottom: 1px solid var(--border);
+  display: inline-flex;
+  align-self: center;
+  background: var(--bg-track);
+  border-radius: 9px;
+  margin: 0.4rem auto 0.9rem;
+  gap: 1px;
+  padding: 2px;
 }
 
 .stab {
-  padding: 0.45rem 0.9rem;
+  padding: 0.26rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
   color: var(--text-secondary);
-  border-bottom: 2px solid transparent;
+  transition: all 0.15s var(--ease);
 }
 
 .stab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px var(--border);
+  border-radius: 7px;
+}
+
+[data-theme='dark'] .stab.active {
+  background: rgba(110, 110, 115, 0.55);
 }
 
 .tab-body {
-  padding-top: 0.4rem;
+  padding-top: 0.3rem;
   min-height: 16rem;
 }
 
@@ -218,8 +229,8 @@ async function exportOpml() {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0;
+  border-bottom: 0.5px solid var(--border);
 }
 
 .source-info {
@@ -244,7 +255,7 @@ async function exportOpml() {
 
 .data-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.55rem;
 }
 
 .hint {
@@ -259,10 +270,6 @@ async function exportOpml() {
   gap: 0.5rem;
   font-size: 0.9rem;
   color: var(--text-primary);
-  margin-bottom: 0.4rem;
-}
-
-input[type='range'] {
-  padding: 0;
+  margin-bottom: 0.45rem;
 }
 </style>

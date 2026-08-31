@@ -52,34 +52,34 @@ const app = useAppStore()
 .cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 0.8rem;
-  padding: 0.9rem 1rem;
+  gap: 0.85rem;
+  padding: 1rem 1.2rem;
 }
 
 .card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.12s, box-shadow 0.12s;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
   display: flex;
   flex-direction: column;
 }
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: var(--shadow-flyout);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), var(--shadow-card);
 }
 
 .card.selected {
-  outline: 2px solid var(--accent);
+  outline: 2.5px solid var(--accent);
+  outline-offset: -2.5px;
 }
 
 .cover {
   aspect-ratio: 16 / 9;
-  background: var(--bg-hover);
+  background: var(--bg-track);
 }
 
 .cover img {
@@ -90,7 +90,7 @@ const app = useAppStore()
 }
 
 .card-body {
-  padding: 0.7rem 0.85rem;
+  padding: 0.75rem 0.9rem 0.6rem;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -102,7 +102,10 @@ const app = useAppStore()
   align-items: center;
   gap: 0.3rem;
   font-size: 0.72rem;
+  font-weight: 500;
   color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .source-name {
@@ -129,7 +132,7 @@ const app = useAppStore()
 .snippet {
   font-size: 0.8rem;
   color: var(--text-secondary);
-  line-height: 1.45;
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -140,7 +143,7 @@ const app = useAppStore()
   display: flex;
   align-items: center;
   margin-top: auto;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   color: var(--text-tertiary);
 }
 
@@ -150,6 +153,6 @@ const app = useAppStore()
 }
 
 .star.active {
-  color: #f2b705;
+  color: var(--star);
 }
 </style>

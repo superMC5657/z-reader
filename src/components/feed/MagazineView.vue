@@ -48,38 +48,40 @@ const app = useAppStore()
 
 <style scoped>
 .magazine {
-  padding: 0.4rem 1rem;
+  padding: 0.6rem 1.2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .row {
   display: flex;
-  gap: 0.8rem;
+  gap: 0.9rem;
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  padding: 0.7rem 0.9rem;
+  padding: 0.75rem 1rem;
   cursor: pointer;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 
 .row:hover {
-  box-shadow: var(--shadow-flyout);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1), var(--shadow-card);
 }
 
 .row.selected {
-  outline: 2px solid var(--accent);
+  outline: 2.5px solid var(--accent);
+  outline-offset: -2.5px;
 }
 
 .thumb {
   width: 9.5rem;
   aspect-ratio: 16 / 10;
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
-  background: var(--bg-hover);
+  background: var(--bg-track);
 }
 
 .thumb img {
@@ -99,7 +101,10 @@ const app = useAppStore()
   align-items: center;
   gap: 0.3rem;
   font-size: 0.72rem;
+  font-weight: 500;
   color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .source {
@@ -113,7 +118,7 @@ const app = useAppStore()
 .title {
   font-size: 1rem;
   font-weight: 600;
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -122,6 +127,7 @@ const app = useAppStore()
 .snippet {
   font-size: 0.8rem;
   color: var(--text-secondary);
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -131,9 +137,9 @@ const app = useAppStore()
 .foot {
   display: flex;
   align-items: center;
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   color: var(--text-tertiary);
-  margin-top: 0.3rem;
+  margin-top: 0.35rem;
 }
 
 .star {
@@ -142,6 +148,6 @@ const app = useAppStore()
 }
 
 .star.active {
-  color: #f2b705;
+  color: var(--star);
 }
 </style>

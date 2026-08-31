@@ -36,17 +36,18 @@ const app = useAppStore()
 
 <style scoped>
 .compact {
-  padding: 0.2rem 1rem;
+  padding: 0.3rem 1.2rem;
 }
 
 .row {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.32rem 0.5rem;
-  border-radius: 4px;
+  padding: 0.34rem 0.6rem;
+  border-radius: 7px;
   cursor: pointer;
   font-size: 0.82rem;
+  transition: background 0.15s var(--ease);
 }
 
 .row:hover {
@@ -54,7 +55,15 @@ const app = useAppStore()
 }
 
 .row.selected {
-  background: var(--bg-active);
+  background: var(--accent);
+}
+
+.row.selected .title,
+.row.selected .snippet,
+.row.selected .source,
+.row.selected .time,
+.row.selected .sep {
+  color: #fff;
 }
 
 .title {
@@ -91,8 +100,10 @@ const app = useAppStore()
   color: var(--text-tertiary);
   font-size: 0.72rem;
   flex-shrink: 0;
-  width: 2.6rem;
+  width: 3.6rem;
   text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .star {
@@ -101,6 +112,6 @@ const app = useAppStore()
 }
 
 .star.active {
-  color: #f2b705;
+  color: var(--star);
 }
 </style>

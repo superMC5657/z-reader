@@ -47,27 +47,35 @@ function onAction(action: () => void) {
 
 .ctx-menu {
   position: fixed;
-  min-width: 12rem;
+  min-width: 13rem;
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  backdrop-filter: blur(28px) saturate(1.6);
   border-radius: 8px;
-  box-shadow: var(--shadow-flyout);
-  padding: 0.25rem;
+  box-shadow: var(--shadow-pop), 0 0 0 0.5px var(--border);
+  padding: 0.3rem;
 }
 
 .ctx-item {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 0.4rem 0.7rem;
-  border-radius: 4px;
+  padding: 0.32rem 0.75rem;
+  border-radius: 5px;
+  font-size: 0.88rem;
+  transition: background 0.1s var(--ease);
 }
 
 .ctx-item:hover {
-  background: var(--bg-hover);
+  background: var(--accent);
+  color: #fff;
 }
 
 .ctx-item.danger {
   color: var(--danger);
+}
+
+.ctx-item.danger:hover {
+  background: var(--danger);
+  color: #fff;
 }
 </style>

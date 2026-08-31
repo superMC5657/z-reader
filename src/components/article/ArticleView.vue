@@ -3,28 +3,45 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore } from '../../stores/data'
+import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
 import { formatFullTime } from '../../lib/time'
 
 const { t } = useI18n()
 const data = useDataStore()
+const app = useAppStore()
 const fetchingFull = ref(false)
 const extractError = ref('')
 
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
 
+// Match the reader iframe's palette to the app theme (the iframe can't inherit CSS vars).
+const isDark = computed(() => {
+  const theme = app.s.theme
+  return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+})
+
 const docHtml = computed(() => {
   if (!item.value?.content) return ''
+  const fg = isDark.value ? '#f5f5f7' : '#1d1d1f'
+  const muted = isDark.value ? '#a1a1a6' : '#6e6e73'
+  const border = isDark.value ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'
+  const chip = isDark.value ? 'rgba(120,120,128,0.32)' : 'rgba(120,120,128,0.14)'
   return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
-    body { font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', system-ui, sans-serif;
-           color: var(--text-primary); line-height: 1.75; padding: 0 1.5rem 2rem; max-width: 46rem; margin: 0 auto; }
-    img, video { max-width: 100%; height: auto; border-radius: 4px; }
-    pre { overflow-x: auto; background: rgba(127,127,127,0.12); padding: 0.8rem; border-radius: 6px; }
-    code { font-family: Consolas, 'JetBrains Mono', monospace; }
-    blockquote { border-left: 3px solid var(--accent); margin: 0.6rem 0; padding: 0.1rem 1rem; color: var(--text-secondary); }
-    a { color: var(--accent); }
-    table { border-collapse: collapse; } td, th { border: 1px solid var(--border); padding: 0.3rem 0.6rem; }
+    body { font-family: 'Inter Variable', -apple-system, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', system-ui, sans-serif;
+           letter-spacing: -0.01em; color: ${fg}; line-height: 1.8; padding: 0 1.5rem 2.5rem;
+           max-width: 40rem; margin: 0 auto; font-size: 1rem; }
+    h1, h2, h3 { letter-spacing: -0.02em; line-height: 1.3; margin: 1.6em 0 0.5em; }
+    img, video { max-width: 100%; height: auto; border-radius: 10px; margin: 0.5rem 0; }
+    pre { overflow-x: auto; background: ${chip}; padding: 0.9rem 1.1rem; border-radius: 10px; font-size: 0.85rem; line-height: 1.6; }
+    code { font-family: 'SF Mono', Consolas, 'JetBrains Mono', monospace; }
+    p > code, li > code { background: ${chip}; padding: 0.1em 0.35em; border-radius: 5px; font-size: 0.85em; }
+    blockquote { border-left: 3px solid #0a84ff; margin: 0.8rem 0; padding: 0.1rem 1.1rem; color: ${muted}; }
+    a { color: #0a84ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid ${border}; padding: 0.35rem 0.7rem; }
+    hr { border: none; border-top: 0.5px solid ${border}; margin: 1.6rem 0; }
   </style></head><body>${item.value.content}</body></html>`
 })
 
@@ -139,8 +156,9 @@ function onIframeLoad(e: Event) {
 }
 
 .head {
-  padding: 0.9rem 1.5rem 0.6rem;
-  border-bottom: 1px solid var(--border);
+  padding: 1rem 1.6rem 0.8rem;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--bg-card);
 }
 
 .head-top {
@@ -151,17 +169,20 @@ function onIframeLoad(e: Event) {
 }
 
 .head-meta {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 0.35rem;
   min-width: 0;
   overflow: hidden;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .source {
   color: var(--accent);
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -171,19 +192,21 @@ function onIframeLoad(e: Event) {
 
 .actions {
   display: flex;
-  gap: 0.15rem;
+  gap: 0.1rem;
   flex-shrink: 0;
 }
 
 .actions .active {
-  color: #f2b705;
+  color: var(--star);
 }
 
 .title {
-  font-size: 1.35rem;
-  font-weight: 700;
-  line-height: 1.4;
-  margin-top: 0.5rem;
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  margin-top: 0.55rem;
+  max-width: 40rem;
 }
 
 .content {
@@ -209,19 +232,8 @@ function onIframeLoad(e: Event) {
 }
 
 .error {
-  padding: 0.5rem 1.5rem;
+  padding: 0.5rem 1.6rem;
   font-size: 0.8rem;
   color: var(--danger);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spin {
-  display: inline-block;
-  animation: spin 1s linear infinite;
 }
 </style>

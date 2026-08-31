@@ -123,27 +123,28 @@ function itemContextMenu(e: MouseEvent, item: Item) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: var(--bg);
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.55rem 1rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1.1rem;
+  border-bottom: 0.5px solid var(--border);
   flex-wrap: nowrap;
 }
 
 .scope {
   display: flex;
   align-items: baseline;
-  gap: 0.45rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 
 .scope h2 {
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-size: 1.15rem;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -151,28 +152,10 @@ function itemContextMenu(e: MouseEvent, item: Item) {
 }
 
 .count {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 500;
   color: var(--text-secondary);
-}
-
-.segmented {
-  display: inline-flex;
-  background: var(--bg-active);
-  border-radius: 5px;
-  padding: 2px;
-}
-
-.seg {
-  padding: 0.2rem 0.65rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-}
-
-.seg.active {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-card);
+  font-variant-numeric: tabular-nums;
 }
 
 .spacer {
@@ -180,9 +163,17 @@ function itemContextMenu(e: MouseEvent, item: Item) {
 }
 
 .search {
-  width: 11rem;
+  width: 11.5rem;
+  min-width: 3.5rem;
+  flex-shrink: 1;
   font-size: 0.82rem;
-  border-radius: 5px;
+  border-radius: var(--radius-capsule);
+  background: var(--bg-track);
+  padding: 0.28rem 0.85rem;
+}
+
+.search::placeholder {
+  color: var(--text-tertiary);
 }
 
 .list-body {
@@ -198,6 +189,7 @@ function itemContextMenu(e: MouseEvent, item: Item) {
   height: 100%;
   color: var(--text-tertiary);
   gap: 0.3rem;
+  font-size: 0.95rem;
 }
 
 .state .sub {

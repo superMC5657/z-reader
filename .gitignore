@@ -29,3 +29,6 @@ src-tauri/gen/schemas
 
 # ZCode session files
 .zcode/
+
+# Acceptance screenshots
+.shots/

@@ -189,9 +189,9 @@ async function toggleExpand(gid: number) {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bg-nav);
-  backdrop-filter: blur(24px);
-  border-right: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  backdrop-filter: blur(28px) saturate(1.6);
+  border-right: 0.5px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -199,26 +199,30 @@ async function toggleExpand(gid: number) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  font-weight: 600;
+  padding: 1rem 1.1rem 0.7rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
 }
 
 .logo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 6px;
-  background: var(--accent);
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #3ea1ff, var(--accent));
   color: #fff;
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 0.85rem;
+  box-shadow: 0 1px 2px rgba(0, 122, 255, 0.35);
 }
 
 .nav-body {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0.4rem 0.4rem;
+  padding: 0 0.5rem 0.4rem;
 }
 
 .nav-row {
@@ -226,18 +230,32 @@ async function toggleExpand(gid: number) {
   align-items: center;
   gap: 0.45rem;
   width: 100%;
-  padding: 0.38rem 0.6rem;
-  border-radius: 4px;
+  padding: 0.32rem 0.6rem;
+  border-radius: 7px;
   text-align: left;
   color: var(--text-primary);
+  transition: background 0.15s var(--ease);
 }
 
 .nav-row:hover {
   background: var(--bg-hover);
 }
 
-.nav-row.active {
-  background: var(--bg-active);
+.nav-row.all.active,
+.nav-row.group.active .row-main {
+  background: var(--accent);
+  color: #fff;
+}
+
+.nav-row.all.active .row-icon,
+.nav-row.group.active .row-main .row-icon {
+  color: #fff;
+}
+
+.nav-row.all.active .unread-badge,
+.nav-row.group.active .row-main .unread-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
 }
 
 .nav-row.group {
@@ -246,23 +264,38 @@ async function toggleExpand(gid: number) {
 
 .nav-row.source {
   padding-left: 1.7rem;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   color: var(--text-secondary);
 }
 
 .nav-row.source.active {
-  color: var(--text-primary);
+  background: var(--accent);
+  color: #fff;
+}
+
+.nav-row.source.active .row-title {
+  color: #fff;
+}
+
+.nav-row.source.active .unread-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
 }
 
 .nav-row.error .row-title {
   color: var(--danger);
 }
 
+.nav-row.error.active .row-title {
+  color: #ffd6d3;
+}
+
 .chevron {
-  width: 1.3rem;
+  width: 1.2rem;
   height: 1.6rem;
   color: var(--text-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.62rem;
+  transition: transform 0.15s var(--ease);
 }
 
 .row-main {
@@ -271,13 +304,18 @@ async function toggleExpand(gid: number) {
   gap: 0.45rem;
   flex: 1;
   min-width: 0;
+  padding: 0.32rem 0.6rem;
+  border-radius: 7px;
+  margin: 0 -0.15rem;
   text-align: left;
 }
 
 .row-icon {
-  width: 1.1rem;
+  width: 1.15rem;
   text-align: center;
   flex-shrink: 0;
+  color: var(--accent);
+  font-size: 0.85rem;
 }
 
 .row-title {
@@ -291,62 +329,47 @@ async function toggleExpand(gid: number) {
 .favicon {
   width: 1rem;
   height: 1rem;
-  border-radius: 3px;
+  border-radius: 3.5px;
   flex-shrink: 0;
 }
 
 .favicon.placeholder {
   background: var(--text-tertiary);
-  opacity: 0.4;
-}
-
-.unread-badge {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  background: var(--bg-active);
-  border-radius: 8px;
-  padding: 0.05rem 0.45rem;
-  flex-shrink: 0;
+  opacity: 0.35;
 }
 
 .divider {
-  height: 1px;
+  height: 0.5px;
   background: var(--border);
   margin: 0.45rem 0.6rem;
 }
 
 .empty-hint {
-  padding: 1.2rem;
+  padding: 1.4rem 1rem;
   color: var(--text-tertiary);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   text-align: center;
 }
 
 .empty-hint .sub {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   margin-top: 0.3rem;
 }
 
 .nav-footer {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.5rem 0.6rem;
-  border-top: 1px solid var(--border);
+  gap: 0.1rem;
+  padding: 0.45rem 0.7rem calc(0.5rem);
+  border-top: 0.5px solid var(--border);
+}
+
+.nav-footer .f-icon-btn {
+  color: var(--accent);
+  font-size: 0.95rem;
 }
 
 .spacer {
   flex: 1;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spin {
-  display: inline-block;
-  animation: spin 1s linear infinite;
 }
 </style>

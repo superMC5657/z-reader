@@ -36,16 +36,17 @@ const data = useDataStore()
 
 <style scoped>
 .list {
-  padding: 0.4rem 1rem;
+  padding: 0.5rem 1.2rem;
 }
 
 .row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s var(--ease);
 }
 
 .row:hover {
@@ -53,7 +54,14 @@ const data = useDataStore()
 }
 
 .row.selected {
-  background: var(--bg-active);
+  background: var(--accent);
+}
+
+.row.selected .title,
+.row.selected .meta,
+.row.selected .source,
+.row.selected .time {
+  color: #fff;
 }
 
 .row .unread-dot {
@@ -79,7 +87,7 @@ const data = useDataStore()
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 0.15rem;
+  margin-top: 0.18rem;
 }
 
 .meta {
@@ -90,6 +98,7 @@ const data = useDataStore()
   font-size: 0.72rem;
   color: var(--text-tertiary);
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .source {
@@ -106,6 +115,10 @@ const data = useDataStore()
 }
 
 .star.active {
-  color: #f2b705;
+  color: var(--star);
+}
+
+.row.selected .star.active {
+  color: #fff;
 }
 </style>

@@ -95,7 +95,7 @@ onBeforeUnmount(() => {
 
 .pane-article {
   flex: 1.15;
-  border-left: 1px solid var(--border);
+  border-left: 0.5px solid var(--border);
 }
 
 @media (max-width: 980px) {
