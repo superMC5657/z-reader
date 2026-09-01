@@ -6,10 +6,10 @@
 
 - 订阅 RSS / Atom / JSON Feed(feed-rs 解析,自动去重、favicon 抓取)
 - 分组管理、右键菜单、未读计数
-- 四种文章视图:卡片 / 列表 / 杂志 / 紧凑
+- 三种文章视图:卡片 / 杂志 / 列表
 - 已读 / 未读 / 收藏筛选,后台定时刷新
 - 内置阅读视图(sandboxed iframe 渲染,ammonia 消毒)+ Readability 全文抓取(dom_smoothie)
-- 正则规则之外的原版核心交互:j / k 导航、m 标记已读、s 收藏、r 刷新
+- 正则规则之外的原版核心交互:← / → 导航、m 标记已读、s 收藏、r 刷新
 - OPML 导入导出
 - Fluent Design 风格 UI,深色模式(跟随系统 / 手动),中英双语
 - SQLite 本地存储(rusqlite,WAL),设置存 JSON

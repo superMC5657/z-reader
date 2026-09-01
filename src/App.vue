@@ -52,23 +52,63 @@ function matchesKey(e: KeyboardEvent, shortcutKey?: string): boolean {
   return e.key.toLowerCase() === shortcutKey.toLowerCase()
 }
 
+function scrollArticleContent(delta: number) {
+  const iframe = document.querySelector<HTMLIFrameElement>('iframe.reader-frame')
+  if (!iframe) return
+  if (iframe.contentWindow) {
+    iframe.contentWindow.scrollBy({ top: delta, behavior: 'auto' })
+  } else if (iframe.contentDocument?.documentElement) {
+    iframe.contentDocument.documentElement.scrollTop += delta
+  }
+}
+
+function scrollArticleList(delta: number) {
+  const listBody = document.querySelector<HTMLElement>('.list-body')
+  if (listBody) {
+    listBody.scrollBy({ top: delta, behavior: 'auto' })
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
 
+  if (showSettings.value || showAdd.value) {
+    if (e.key === 'Escape') {
+      showSettings.value = false
+      showAdd.value = false
+    }
+    return
+  }
+
   const sc = app.shortcuts
   const items = data.items
   const idx = items.findIndex((i) => i.id === data.selectedId)
 
-  if (matchesKey(e, sc.nextArticle) || e.key === 'ArrowDown') {
+  if (matchesKey(e, sc.nextArticle)) {
     e.preventDefault()
     const next = Math.min(idx + 1, items.length - 1)
     if (items[next]) data.selectItem(items[next].id)
-  } else if (matchesKey(e, sc.prevArticle) || e.key === 'ArrowUp') {
+  } else if (matchesKey(e, sc.prevArticle)) {
     e.preventDefault()
     const next = Math.max(idx - 1, 0)
     if (items[next]) data.selectItem(items[next].id)
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'PageDown' || e.key === 'PageUp') {
+    e.preventDefault()
+    const delta =
+      e.key === 'ArrowDown'
+        ? 70
+        : e.key === 'ArrowUp'
+          ? -70
+          : e.key === 'PageDown'
+            ? window.innerHeight * 0.75
+            : -window.innerHeight * 0.75
+    if (data.selectedItem) {
+      scrollArticleContent(delta)
+    } else {
+      scrollArticleList(delta)
+    }
   } else if (matchesKey(e, sc.toggleRead)) {
     const cur = data.selectedItem
     if (cur) data.setItemRead(cur, !cur.hasBeenRead)

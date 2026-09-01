@@ -100,9 +100,8 @@ const themeOptions = computed(() => [
 
 const viewOptions = computed(() => [
   { value: 'cards', label: t('toolbar.views.cards'), icon: 'view-cards' },
-  { value: 'list', label: t('toolbar.views.list'), icon: 'view-list' },
   { value: 'magazine', label: t('toolbar.views.magazine'), icon: 'view-magazine' },
-  { value: 'compact', label: t('toolbar.views.compact'), icon: 'view-compact' },
+  { value: 'list', label: t('toolbar.views.list'), icon: 'view-list' },
 ])
 
 const readerModeOptions = computed(() => [

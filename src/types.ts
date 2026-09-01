@@ -36,7 +36,7 @@ export interface Item {
 export interface Settings {
   version: string
   theme: 'system' | 'light' | 'dark'
-  view: 'cards' | 'list' | 'magazine' | 'compact'
+  view: 'cards' | 'magazine' | 'list'
   locale: string
   fontSize: number
   fetchInterval: number

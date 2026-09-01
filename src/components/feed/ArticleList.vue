@@ -9,7 +9,6 @@ import Icon from '../ui/Icon.vue'
 import CardsView from './CardsView.vue'
 import ListView from './ListView.vue'
 import MagazineView from './MagazineView.vue'
-import CompactView from './CompactView.vue'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -29,12 +28,11 @@ const filterTabs = computed(() => [
   { value: 2, label: t('filter.starred') },
 ])
 
-const views = ['cards', 'list', 'magazine', 'compact'] as const
+const views = ['cards', 'magazine', 'list'] as const
 const viewIcons: Record<string, string> = {
   cards: 'view-cards',
-  list: 'view-list',
   magazine: 'view-magazine',
-  compact: 'view-compact',
+  list: 'view-list',
 }
 
 const activeView = computed(() => app.s.view)
@@ -75,22 +73,16 @@ function openViewMenu(e: MouseEvent) {
       action: () => app.patch({ view: 'cards' }),
     },
     {
-      label: t('toolbar.views.list'),
-      icon: 'view-list',
-      checked: activeView.value === 'list',
-      action: () => app.patch({ view: 'list' }),
-    },
-    {
       label: t('toolbar.views.magazine'),
       icon: 'view-magazine',
       checked: activeView.value === 'magazine',
       action: () => app.patch({ view: 'magazine' }),
     },
     {
-      label: t('toolbar.views.compact'),
-      icon: 'view-compact',
-      checked: activeView.value === 'compact',
-      action: () => app.patch({ view: 'compact' }),
+      label: t('toolbar.views.list'),
+      icon: 'view-list',
+      checked: activeView.value === 'list',
+      action: () => app.patch({ view: 'list' }),
     },
   ])
 }
@@ -191,7 +183,7 @@ function openViewMenu(e: MouseEvent) {
 
       <!-- Feed Views -->
       <component
-        :is="{ cards: CardsView, list: ListView, magazine: MagazineView, compact: CompactView }[activeView]"
+        :is="{ cards: CardsView, magazine: MagazineView, list: ListView }[activeView]"
         v-else
         :items="data.items"
         @select="(item: Item) => data.selectItem(item.id)"

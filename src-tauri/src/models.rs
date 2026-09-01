@@ -60,7 +60,7 @@ pub struct Settings {
     pub version: String,
     /// "system" | "light" | "dark"
     pub theme: String,
-    /// "cards" | "list" | "magazine" | "compact"
+    /// "cards" | "magazine" | "list"
     pub view: String,
     pub locale: String,
     pub font_size: f64,
@@ -78,8 +78,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let mut shortcuts = std::collections::HashMap::new();
-        shortcuts.insert("nextArticle".into(), "j".into());
-        shortcuts.insert("prevArticle".into(), "k".into());
+        shortcuts.insert("nextArticle".into(), "ArrowRight".into());
+        shortcuts.insert("prevArticle".into(), "ArrowLeft".into());
         shortcuts.insert("toggleRead".into(), "m".into());
         shortcuts.insert("toggleStar".into(), "s".into());
         shortcuts.insert("fetchFull".into(), "f".into());

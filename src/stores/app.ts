@@ -4,8 +4,8 @@ import type { Settings } from '../types'
 import { i18n } from '../i18n'
 
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
-  nextArticle: 'j',
-  prevArticle: 'k',
+  nextArticle: 'ArrowRight',
+  prevArticle: 'ArrowLeft',
   toggleRead: 'm',
   toggleStar: 's',
   fetchFull: 'f',
@@ -85,9 +85,25 @@ export const useAppStore = defineStore('app', {
       }
       if (!this.s.shortcuts || Object.keys(this.s.shortcuts).length === 0) {
         this.settings.shortcuts = { ...DEFAULT_SHORTCUTS }
+      } else {
+        let changed = false
+        if (this.settings.shortcuts.nextArticle === 'j') {
+          this.settings.shortcuts.nextArticle = 'ArrowRight'
+          changed = true
+        }
+        if (this.settings.shortcuts.prevArticle === 'k') {
+          this.settings.shortcuts.prevArticle = 'ArrowLeft'
+          changed = true
+        }
+        if (changed) {
+          await saveSettings(this.settings).catch(() => {})
+        }
       }
       if (!this.s.readerMode) {
         this.settings.readerMode = 'split'
+      }
+      if ((this.s.view as string) === 'compact') {
+        this.settings.view = 'cards'
       }
       apply(this.s)
       const mql = window.matchMedia('(prefers-color-scheme: dark)')

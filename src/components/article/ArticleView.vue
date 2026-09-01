@@ -181,14 +181,33 @@ async function onFetchFull() {
 }
 
 function onIframeLoad(e: Event) {
-  const doc = (e.target as HTMLIFrameElement).contentDocument
+  const iframe = e.target as HTMLIFrameElement
+  const doc = iframe.contentDocument
   if (!doc) return
+  iframe.contentWindow?.scrollTo(0, 0)
   doc.addEventListener('click', (ev) => {
     const anchor = (ev.target as HTMLElement).closest('a')
     if (anchor?.href) {
       ev.preventDefault()
       openUrl(anchor.href)
     }
+  })
+  doc.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(ev.key)) {
+      return
+    }
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: ev.key,
+        code: ev.code,
+        ctrlKey: ev.ctrlKey,
+        metaKey: ev.metaKey,
+        altKey: ev.altKey,
+        shiftKey: ev.shiftKey,
+        bubbles: true,
+        cancelable: true,
+      })
+    )
   })
 }
 </script>
