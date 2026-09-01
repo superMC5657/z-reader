@@ -70,7 +70,7 @@ pub fn run() {
 /// Background loop: refresh all sources every `fetchInterval` minutes.
 async fn background_refresh(app: tauri::AppHandle) {
     use tauri::{Emitter, Manager};
-    let mut last_fetch: Option<std::time::Instant> = None;
+    let mut last_fetch = std::time::Instant::now();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         let interval = {
@@ -78,14 +78,10 @@ async fn background_refresh(app: tauri::AppHandle) {
             let s = settings::load(&path);
             s.fetch_interval.max(1)
         };
-        let due = match last_fetch {
-            None => false, // let the user trigger the first refresh themselves
-            Some(t) => t.elapsed().as_secs() >= interval * 60,
-        };
-        if !due {
+        if last_fetch.elapsed().as_secs() < interval * 60 {
             continue;
         }
-        last_fetch = Some(std::time::Instant::now());
+        last_fetch = std::time::Instant::now();
         let state = app.state::<AppState>();
         let targets = {
             let conn = state.db.lock().await;

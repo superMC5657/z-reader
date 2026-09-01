@@ -360,19 +360,24 @@ pub fn mark_all_read(
     scope: Option<&str>,
     scope_id: Option<i64>,
 ) -> Result<usize, String> {
-    let (sql, arg): (&str, Box<dyn rusqlite::types::ToSql>) = match scope {
-        Some("source") => (
-            "UPDATE items SET has_been_read=1 WHERE source_id=?1",
-            Box::new(scope_id.unwrap_or(-1)),
-        ),
-        Some("group") => (
-            "UPDATE items SET has_been_read=1 WHERE source_id IN (SELECT id FROM sources WHERE group_id=?1)",
-            Box::new(scope_id.unwrap_or(-1)),
-        ),
-        _ => ("UPDATE items SET has_been_read=1", Box::new(0)),
-    };
-    conn.execute(sql, params![arg.as_ref()])
-        .map_err(|e| e.to_string())
+    match scope {
+        Some("source") => {
+            let id = scope_id.unwrap_or(-1);
+            conn.execute(
+                "UPDATE items SET has_been_read=1 WHERE source_id=?1",
+                params![id],
+            )
+        }
+        Some("group") => {
+            let id = scope_id.unwrap_or(-1);
+            conn.execute(
+                "UPDATE items SET has_been_read=1 WHERE source_id IN (SELECT id FROM sources WHERE group_id=?1)",
+                params![id],
+            )
+        }
+        _ => conn.execute("UPDATE items SET has_been_read=1", []),
+    }
+    .map_err(|e| e.to_string())
 }
 
 pub fn set_item_starred(conn: &Connection, id: i64, starred: bool) -> Result<(), String> {
@@ -391,4 +396,41 @@ pub fn set_item_content(conn: &Connection, id: i64, content: &str, snippet: &str
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mark_all_read() {
+        let conn = Connection::open_in_memory().expect("init in-memory db");
+        migrate(&conn).expect("migrate");
+
+        let group = create_group(&conn, "Test Group").expect("create group");
+        let source1 = insert_source(&conn, "https://example.com/1", "Source 1", None, Some(group.id)).expect("insert source 1");
+        let source2 = insert_source(&conn, "https://example.com/2", "Source 2", None, None).expect("insert source 2");
+
+        // Insert unread items
+        conn.execute(
+            "INSERT INTO items (source_id, guid, title, published_at, content, snippet, has_been_read, starred, created_at) VALUES (?1, 'g1', 'Title 1', 100, 'Content', 'Snippet', 0, 0, 100)",
+            params![source1.id],
+        ).expect("insert item 1");
+        conn.execute(
+            "INSERT INTO items (source_id, guid, title, published_at, content, snippet, has_been_read, starred, created_at) VALUES (?1, 'g2', 'Title 2', 200, 'Content', 'Snippet', 0, 0, 200)",
+            params![source2.id],
+        ).expect("insert item 2");
+
+        // Mark by source
+        let count = mark_all_read(&conn, Some("source"), Some(source1.id)).expect("mark by source");
+        assert_eq!(count, 1);
+
+        // Mark by group
+        let count = mark_all_read(&conn, Some("group"), Some(group.id)).expect("mark by group");
+        assert_eq!(count, 1);
+
+        // Mark all (global) - this was the broken branch
+        let count = mark_all_read(&conn, None, None).expect("mark all read");
+        assert_eq!(count, 2);
+    }
 }

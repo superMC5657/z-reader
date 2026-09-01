@@ -34,8 +34,17 @@ pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<Pars
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
+    let final_url = resp.url().as_str().to_string();
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let feed = parser::parse(&bytes[..]).map_err(|e| format!("parse failed: {e}"))?;
+    parse_feed_data(&bytes[..], Some(&final_url), url)
+}
+
+pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str) -> Result<ParsedFeed, String> {
+    let mut builder = parser::Builder::new();
+    if let Some(base) = base_url {
+        builder = builder.base_uri(Some(base));
+    }
+    let feed = builder.build().parse(bytes).map_err(|e| format!("parse failed: {e}"))?;
 
     let title = feed.title.as_ref().map(|t| t.content.clone()).unwrap_or_default();
     let description = feed.description.as_ref().map(|d| d.content.clone());
@@ -47,7 +56,7 @@ pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<Pars
     let mut entries = Vec::with_capacity(feed.entries.len());
     for entry in &feed.entries {
         let guid = if entry.id.is_empty() {
-            format!("{}#{}", url, entry.title.as_ref().map(|t| t.content.as_str()).unwrap_or(""))
+            format!("{}#{}", original_url, entry.title.as_ref().map(|t| t.content.as_str()).unwrap_or(""))
         } else {
             entry.id.clone()
         };
@@ -204,4 +213,32 @@ pub async fn fetch_favicon(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feed_parse_with_base_uri() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <title>Test Feed</title>
+            <link href="/feed.xml" rel="self" />
+            <link href="/index.html" />
+            <icon>/favicon.ico</icon>
+            <entry>
+                <id>entry-1</id>
+                <title>Post 1</title>
+                <link href="/posts/1.html" />
+                <summary>Short summary</summary>
+            </entry>
+        </feed>"#;
+
+        let parsed = parse_feed_data(xml.as_bytes(), Some("https://example.com/blog/feed.xml"), "https://example.com/blog/feed.xml").expect("parse atom");
+        assert_eq!(parsed.site_url.as_deref(), Some("https://example.com/index.html"));
+        assert_eq!(parsed.icon_url.as_deref(), Some("https://example.com/favicon.ico"));
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].url.as_deref(), Some("https://example.com/posts/1.html"));
+    }
 }

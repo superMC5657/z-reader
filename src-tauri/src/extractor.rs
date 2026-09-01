@@ -11,10 +11,10 @@ pub async fn extract_from_url(client: &reqwest::Client, link: &str) -> Result<St
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
+    let final_url = resp.url().to_string();
     let html = resp.text().await.map_err(|e| e.to_string())?;
 
-    let base_url = url::Url::parse(link).map_err(|e| e.to_string())?.to_string();
-    let mut readability = dom_smoothie::Readability::new(html.as_str(), Some(&base_url), None)
+    let mut readability = dom_smoothie::Readability::new(html.as_str(), Some(&final_url), None)
         .map_err(|e| format!("extract failed: {e}"))?;
     let article = readability
         .parse()
