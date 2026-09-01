@@ -41,8 +41,8 @@ jobs:
       - name: Check tag format
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          if [[ "$TAG" != v* ]]; then
-            echo "::error::发布 tag 必须是 v* 格式(当前: $TAG)。请打 vX.Y.Z 格式的 tag 或手动发布时填写 Release tag 输入"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::发布 tag 必须符合 SemVer 格式 (如 v0.1.0 或 v1.0.0-rc.1, 当前: $TAG)。请打 vX.Y.Z 格式的 tag 或手动发布时填写 Release tag 输入"
             exit 1
           fi
           echo "tag 检查通过: $TAG"
