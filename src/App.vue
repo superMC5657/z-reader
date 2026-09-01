@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from './stores/app'
 import { useDataStore, useUiStore } from './stores/data'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import SideNav from './components/nav/SideNav.vue'
 import ArticleList from './components/feed/ArticleList.vue'
 import ArticleView from './components/article/ArticleView.vue'
@@ -121,9 +122,7 @@ function onKeydown(e: KeyboardEvent) {
   } else if (matchesKey(e, sc.openInBrowser)) {
     const cur = data.selectedItem
     if (cur?.url) {
-      import('@tauri-apps/plugin-opener')
-        .then(({ openUrl }) => openUrl(cur.url!))
-        .catch(() => window.open(cur.url!, '_blank'))
+      openUrl(cur.url).catch(() => window.open(cur.url!, '_blank'))
     }
   } else if (matchesKey(e, sc.refresh)) {
     data.fetchAll()
