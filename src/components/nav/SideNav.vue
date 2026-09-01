@@ -36,6 +36,7 @@ const showGroupModal = ref(false)
 const groupModalTitle = ref('')
 const groupModalName = ref('')
 let groupModalTarget: number | null = null // null = create new
+let modalMode: 'createGroup' | 'renameGroup' | 'renameSource' = 'createGroup'
 
 const ungroupedSources = computed(() => data.sources.filter((s) => s.groupId === null))
 const sourcesOf = computed(() => {
@@ -79,8 +80,8 @@ async function reFetchFavicon(sourceId: number) {
 function sourceMenu(e: MouseEvent, s: Source) {
   const groups = data.groups
   ui.openMenu(e.clientX, e.clientY, [
-    { label: t('item.markAllRead'), action: () => api.markAllRead('source', s.id).then(() => data.loadSources()) },
-    { label: t('group.rename'), action: () => openGroupModal(s.id, s.title) },
+    { label: t('item.markAllRead'), action: () => api.markAllRead('source', s.id).then(() => Promise.all([data.loadSources(), data.loadItems()])) },
+    { label: t('feed.rename'), action: () => openRenameSourceModal(s.id, s.title) },
     { label: t('feed.refreshIcon'), action: () => reFetchFavicon(s.id) },
     { label: t('feed.changeIcon'), action: () => triggerCustomIconUpload(s.id) },
     ...groups.map((g) => ({
@@ -109,27 +110,52 @@ function groupMenu(e: MouseEvent, gid: number) {
   ui.openMenu(e.clientX, e.clientY, [
     { label: t('item.markAllRead'), action: () => api.markAllRead('group', gid).then(() => Promise.all([data.loadSources(), data.loadItems()])) },
     { label: t('group.rename'), action: () => openGroupModal(gid, data.groups.find((g) => g.id === gid)?.name ?? '') },
-    { label: t('group.delete'), danger: true, action: () => { if (confirm(t('group.confirmDelete'))) api.deleteGroup(gid).then(() => Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])) } },
+    {
+      label: t('group.delete'),
+      danger: true,
+      action: async () => {
+        if (confirm(t('group.confirmDelete'))) {
+          if (data.scope.type === 'group' && data.scope.id === gid) {
+            await data.selectScope('all')
+          }
+          await api.deleteGroup(gid)
+          await Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])
+        }
+      },
+    },
   ])
 }
 
 function openGroupModal(targetId: number | null, initialName: string) {
+  modalMode = targetId === null ? 'createGroup' : 'renameGroup'
   groupModalTarget = targetId
   groupModalName.value = initialName
   groupModalTitle.value = targetId === null ? t('group.new') : t('group.rename')
   showGroupModal.value = true
 }
 
+function openRenameSourceModal(sourceId: number, initialTitle: string) {
+  modalMode = 'renameSource'
+  groupModalTarget = sourceId
+  groupModalName.value = initialTitle
+  groupModalTitle.value = t('feed.rename')
+  showGroupModal.value = true
+}
+
 async function submitGroupModal() {
   const name = groupModalName.value.trim()
   if (!name) return
-  if (groupModalTarget === null) {
+  if (modalMode === 'createGroup') {
     await api.createGroup(name)
-  } else {
+    await Promise.all([data.loadGroups(), data.loadSources()])
+  } else if (modalMode === 'renameGroup' && groupModalTarget !== null) {
     await api.renameGroup(groupModalTarget, name)
+    await Promise.all([data.loadGroups(), data.loadSources()])
+  } else if (modalMode === 'renameSource' && groupModalTarget !== null) {
+    await api.renameSource(groupModalTarget, name)
+    await data.loadSources()
   }
   showGroupModal.value = false
-  await Promise.all([data.loadGroups(), data.loadSources()])
 }
 
 async function toggleExpand(gid: number) {

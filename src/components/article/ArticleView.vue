@@ -24,6 +24,15 @@ const source = computed(() => (item.value ? data.sourceById(item.value.sourceId)
 // Match the reader iframe's palette to the app theme
 const isDark = computed(() => app.isDark)
 
+function escapeHtmlAttr(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 const docHtml = computed(() => {
   if (!item.value?.content) return ''
   const fg = isDark.value ? '#f5f5f7' : '#1d1d1f'
@@ -34,7 +43,11 @@ const docHtml = computed(() => {
   const codeBg = isDark.value ? '#1e1e20' : '#f2f2f7'
   const accent = isDark.value ? '#0a84ff' : '#007aff'
 
-  return `<!doctype html><html data-theme="${isDark.value ? 'dark' : 'light'}"><head><meta charset="utf-8"><meta name="color-scheme" content="${isDark.value ? 'dark' : 'light'}"><base target="_blank"><style>
+  const baseTag = item.value?.url
+    ? `<base href="${escapeHtmlAttr(item.value.url)}" target="_blank">`
+    : '<base target="_blank">'
+
+  return `<!doctype html><html data-theme="${isDark.value ? 'dark' : 'light'}"><head><meta charset="utf-8"><meta name="color-scheme" content="${isDark.value ? 'dark' : 'light'}">${baseTag}<style>
     :root {
       color-scheme: ${isDark.value ? 'dark' : 'light'};
     }

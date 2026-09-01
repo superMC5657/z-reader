@@ -19,6 +19,7 @@
     "views": { "cards": "Cards", "list": "List", "magazine": "Magazine", "compact": "Compact" }
   },
   "item": {
+    "markAllRead": "Mark all as read",
     "markRead": "Mark as read",
     "markUnread": "Mark as unread",
     "star": "Star",
@@ -89,7 +90,9 @@
     },
     "data": {
       "importOpml": "Import OPML",
+      "importOpmlDesc": "Restore feeds and groups from an OPML file",
       "exportOpml": "Export OPML",
+      "exportOpmlDesc": "Export all feeds to a standard OPML file",
       "imported": "Imported: {sources} sources, {groups} groups, {existing} already existed",
       "exported": "Exported"
     },
@@ -118,6 +121,7 @@
     "moveTo": "Move to group"
   },
   "feed": {
+    "rename": "Rename",
     "refreshIcon": "Refresh Icon",
     "changeIcon": "Change Custom Icon",
     "iconUpdated": "Icon updated"

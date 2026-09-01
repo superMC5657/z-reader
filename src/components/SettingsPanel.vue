@@ -400,7 +400,7 @@ function adjustFontSize(delta: number) {
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.data.importOpml') }}</span>
-            <span class="label-desc">从 OPML 文件恢复订阅与分组</span>
+            <span class="label-desc">{{ t('settings.data.importOpmlDesc') }}</span>
           </div>
           <button class="f-btn" @click="opmlInput?.click()">
             <Icon name="import" :size="14" />
@@ -412,7 +412,7 @@ function adjustFontSize(delta: number) {
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.data.exportOpml') }}</span>
-            <span class="label-desc">将全部订阅源导出为标准 OPML 文件</span>
+            <span class="label-desc">{{ t('settings.data.exportOpmlDesc') }}</span>
           </div>
           <button class="f-btn" @click="exportOpml">
             <Icon name="export" :size="14" />

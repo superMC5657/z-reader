@@ -161,6 +161,10 @@ export const useDataStore = defineStore('data', {
       if (this.scope.type === 'source' && this.scope.id === id) {
         await this.selectScope('all')
       }
+      if (this.selectedItem?.sourceId === id) {
+        this.selectedItem = null
+        this.selectedId = null
+      }
       await Promise.all([this.loadSources(), this.loadItems()])
     },
     async fetchFullContent(id: number) {

@@ -19,6 +19,7 @@
     "views": { "cards": "卡片", "list": "列表", "magazine": "杂志", "compact": "紧凑" }
   },
   "item": {
+    "markAllRead": "全部标为已读",
     "markRead": "标为已读",
     "markUnread": "标为未读",
     "star": "收藏",
@@ -89,7 +90,9 @@
     },
     "data": {
       "importOpml": "导入 OPML",
+      "importOpmlDesc": "从 OPML 文件恢复订阅与分组",
       "exportOpml": "导出 OPML",
+      "exportOpmlDesc": "将全部订阅源导出为标准 OPML 文件",
       "imported": "导入完成:新增 {sources} 个订阅源,{groups} 个分组,{existing} 个已存在",
       "exported": "已导出"
     },
@@ -118,6 +121,7 @@
     "moveTo": "移动到分组"
   },
   "feed": {
+    "rename": "重命名",
     "refreshIcon": "重新获取图标",
     "changeIcon": "更换自定义图标",
     "iconUpdated": "图标已更新"
