@@ -17,9 +17,9 @@
 ## 开发
 
 ```bash
-npm install
-npm run tauri dev     # 开发模式
-cargo tauri build     # 出包 (src-tauri/target/release/bundle)
+pnpm install
+pnpm tauri dev     # 开发模式
+pnpm tauri build   # 出包 (src-tauri/target/release/bundle)
 ```
 
 ## 架构

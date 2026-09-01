@@ -35,3 +35,4 @@ src-tauri/gen/schemas
 
 # Agent run artifacts
 .omo/
+.reasonix/
