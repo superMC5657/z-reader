@@ -37,6 +37,4 @@ src-tauri/
 
 ## Roadmap
 
-- [第二期] 同步服务:Google Reader API、Fever(兼容 FreshRSS / Tiny Tiny RSS 等)
-- 正则规则(自动已读 / 收藏 / 隐藏)
-- 通知、备份恢复、PAC 代理
+第二期规划(云端同步、正则规则引擎、通知/托盘、备份恢复、FTS5 搜索等)详见 [docs/PHASE_2_ROADMAP.md](docs/PHASE_2_ROADMAP.md)。
