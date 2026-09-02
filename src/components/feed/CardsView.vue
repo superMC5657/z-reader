@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { formatTime } from '../../lib/time'
+import { highlightText } from '../../lib/highlight'
 import type { Item } from '../../types'
 import Icon from '../ui/Icon.vue'
 
@@ -47,9 +48,9 @@ const app = useAppStore()
           ></span>
         </div>
 
-        <h3 class="title">{{ item.title }}</h3>
+        <h3 class="title" v-html="highlightText(item.title, data.search)"></h3>
 
-        <p v-if="app.showSnippet && item.snippet" class="snippet">{{ item.snippet }}</p>
+        <p v-if="app.showSnippet && item.snippet" class="snippet" v-html="highlightText(item.snippet, data.search)"></p>
 
         <div class="card-footer">
           <span class="author">{{ item.author || '' }}</span>

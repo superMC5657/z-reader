@@ -2,6 +2,20 @@ use crate::db;
 use crate::models::html_to_text;
 use feed_rs::parser;
 
+/// Minimal source identity needed for rule evaluation and storage.
+pub struct SourceCtx {
+    pub id: i64,
+    pub group_id: Option<i64>,
+    pub url: String,
+}
+
+/// Result of storing a parsed feed.
+pub struct StoreOutcome {
+    pub inserted: usize,
+    /// Titles of new articles matched by a "notify" rule.
+    pub notified: Vec<String>,
+}
+
 /// A feed entry converted to plain DB-ready values.
 pub struct NewEntry {
     pub guid: String,
@@ -122,13 +136,42 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
     Ok(ParsedFeed { title, description, icon_url, site_url, entries })
 }
 
-/// DB-only stage: insert parsed entries, skipping known guids.
-pub fn store(conn: &rusqlite::Connection, source_id: i64, parsed: &ParsedFeed) -> Result<usize, String> {
-    let mut inserted = 0usize;
+/// DB-only stage: insert parsed entries, skipping known guids. Applies the
+/// rule engine to new entries before insertion (mark read / star / hide /
+/// notify). Existing rows are never touched.
+pub fn store(
+    conn: &rusqlite::Connection,
+    source: &SourceCtx,
+    parsed: &ParsedFeed,
+    engine: Option<&crate::rules::RuleEngine>,
+) -> Result<StoreOutcome, String> {
+    let mut out = StoreOutcome { inserted: 0, notified: Vec::new() };
     for e in &parsed.entries {
+        let mut has_been_read = false;
+        let mut starred = false;
+        let mut hidden = false;
+        if let Some(engine) = engine.filter(|eng| !eng.is_empty()) {
+            let content_text = html_to_text(&e.content);
+            let summary_text = e.summary.as_deref().map(html_to_text).unwrap_or_default();
+            let outcome = engine.evaluate(
+                source.id,
+                source.group_id,
+                &source.url,
+                &e.title,
+                &format!("{content_text} {summary_text}"),
+                e.author.as_deref(),
+                e.url.as_deref(),
+            );
+            has_been_read = outcome.mark_read || outcome.hide;
+            starred = outcome.star;
+            hidden = outcome.hide;
+            if outcome.notify {
+                out.notified.push(e.title.clone());
+            }
+        }
         if db::insert_item(
             conn,
-            source_id,
+            source.id,
             &db::UpsertEntry {
                 guid: &e.guid,
                 title: &e.title,
@@ -139,12 +182,15 @@ pub fn store(conn: &rusqlite::Connection, source_id: i64, parsed: &ParsedFeed) -
                 summary: e.summary.as_deref(),
                 snippet: Some(&e.snippet),
                 image: e.image.as_deref(),
+                has_been_read,
+                starred,
+                hidden,
             },
         )? {
-            inserted += 1;
+            out.inserted += 1;
         }
     }
-    Ok(inserted)
+    Ok(out)
 }
 
 pub async fn fetch_favicon(

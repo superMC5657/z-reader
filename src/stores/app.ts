@@ -28,6 +28,14 @@ const DEFAULTS: Settings = {
   menuOn: true,
   readerMode: 'split',
   shortcuts: DEFAULT_SHORTCUTS,
+  proxyMode: 'system',
+  proxyUrl: '',
+  proxyUsername: '',
+  proxyPassword: '',
+  notifyOnNew: true,
+  closeToTray: true,
+  retentionDays: 0,
+  maxItemsPerSource: 0,
 }
 
 function resolveTheme(theme: Settings['theme']): 'light' | 'dark' {

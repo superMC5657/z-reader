@@ -39,6 +39,8 @@ pub struct Item {
     pub image: Option<String>,
     pub has_been_read: bool,
     pub starred: bool,
+    /// Set by the rule engine's "hide" action; excluded from normal lists.
+    pub hidden: bool,
 }
 
 /// Item query scope: everything, one source, or one group.
@@ -47,11 +49,42 @@ pub struct Item {
 pub struct GetItemsParams {
     pub scope: Option<String>, // "all" | "source" | "group"
     pub scope_id: Option<i64>,
-    /// 0 = all, 1 = unread, 2 = starred
+    /// 0 = all, 1 = unread, 2 = starred, 3 = hidden (rules review)
     pub filter: Option<u8>,
     pub search: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+/// A user-defined regex automation rule.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    pub id: i64,
+    pub name: String,
+    pub pattern: String,
+    /// "title" | "content" | "author" | "source_url" | "any"
+    pub target_field: String,
+    /// "mark_read" | "star" | "hide" | "notify"
+    pub action_type: String,
+    pub is_case_sensitive: bool,
+    pub is_enabled: bool,
+    /// "all" | "source:{id}" | "group:{id}"
+    pub source_scope: String,
+    pub created_at: i64,
+}
+
+/// Editable subset of a rule sent from the frontend on create/update.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleInput {
+    pub name: String,
+    pub pattern: String,
+    pub target_field: String,
+    pub action_type: String,
+    pub is_case_sensitive: bool,
+    pub is_enabled: bool,
+    pub source_scope: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -73,6 +106,19 @@ pub struct Settings {
     pub menu_on: bool,
     pub reader_mode: String,
     pub shortcuts: std::collections::HashMap<String, String>,
+    /// "system" (env vars + OS proxy) | "none" (direct) | "manual"
+    pub proxy_mode: String,
+    pub proxy_url: String,
+    pub proxy_username: String,
+    pub proxy_password: String,
+    /// Show an aggregated desktop notification after background refresh finds new articles.
+    pub notify_on_new: bool,
+    /// Closing the main window hides it to the tray instead of quitting.
+    pub close_to_tray: bool,
+    /// Auto-delete unstarred read articles older than N days; 0 = never.
+    pub retention_days: u32,
+    /// Cap unstarred articles kept per source; 0 = unlimited.
+    pub max_items_per_source: u32,
 }
 
 impl Default for Settings {
@@ -102,6 +148,14 @@ impl Default for Settings {
             menu_on: true,
             reader_mode: "split".into(),
             shortcuts,
+            proxy_mode: "system".into(),
+            proxy_url: String::new(),
+            proxy_username: String::new(),
+            proxy_password: String::new(),
+            notify_on_new: true,
+            close_to_tray: true,
+            retention_days: 0,
+            max_items_per_source: 0,
         }
     }
 }

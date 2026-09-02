@@ -77,6 +77,17 @@ export const useDataStore = defineStore('data', {
         this.loadSources()
         this.loadItems()
       })
+      // Tray "mark all as read" and similar Rust-side mutations.
+      await listen<unknown>('unread-changed', () => {
+        this.loadSources().catch(() => {})
+        this.loadItems().catch(() => {})
+      })
+      // A backup restore swapped the database underneath us.
+      await listen<unknown>('data-restored', () => {
+        this.loadSources().catch(() => {})
+        this.loadGroups().catch(() => {})
+        this.loadItems().catch(() => {})
+      })
     },
     async loadSources() {
       this.sources = await api.getSources()

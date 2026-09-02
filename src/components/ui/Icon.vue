@@ -659,6 +659,57 @@ const pixelSize = computed(() => {
       />
     </template>
 
+    <!-- Funnel / Rules / Filter -->
+    <template v-else-if="name === 'funnel' || name === 'rules'">
+      <path
+        d="M3 5C3 4.44772 3.44772 4 4 4H20C20.5523 4 21 4.44772 21 5V6.58579C21 6.851 20.8946 7.10536 20.7071 7.29289L14.5 13.5V19C14.5 19.3746 14.2907 19.7181 13.9576 19.8847L10.9576 21.3847C10.2929 21.717 9.5 21.2342 9.5 20.5V13.5L3.29289 7.29289C3.10536 7.10536 3 6.851 3 6.58579V5Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
+    <!-- Bell / Notification -->
+    <template v-else-if="name === 'bell'">
+      <path
+        d="M6 8C6 4.68629 8.68629 2 12 2C15.3137 2 18 4.68629 18 8V11.5L19.4472 14.8944C19.7672 15.6442 19.2159 16.483 18.3986 16.483H5.60142C4.78411 16.483 4.23275 15.6442 4.55279 14.8944L6 11.5V8Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M9.5 19.5C10.152 20.375 11.0103 21 12 21C12.9897 21 13.848 20.375 14.5 19.5"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+      />
+    </template>
+
+    <!-- Archive box / Backup -->
+    <template v-else-if="name === 'archivebox'">
+      <path
+        d="M4 8.5C3.72386 8.5 3.5 8.27614 3.5 8V5C3.5 4.17157 4.17157 3.5 5 3.5H19C19.8284 3.5 20.5 4.17157 20.5 5V8C20.5 8.27614 20.2761 8.5 20 8.5H4Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M4.5 8.5V19C4.5 19.8284 5.17157 20.5 6 20.5H18C18.8284 20.5 19.5 19.8284 19.5 19V8.5M4.5 8.5H19.5"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M10 12.5H14"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+      />
+    </template>
+
     <!-- Fallback / Default -->
     <template v-else>
       <circle cx="12" cy="12" r="8" :stroke="props.color" :stroke-width="props.strokeWidth" />

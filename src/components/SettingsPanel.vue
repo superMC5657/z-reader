@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
 import { useAppStore } from '../stores/app'
 import * as api from '../lib/tauri'
+import type { Item, Rule, RuleBackfillResult } from '../types'
 import Modal from './ui/Modal.vue'
 import Icon from './ui/Icon.vue'
 import FeedIcon from './ui/FeedIcon.vue'
 import AppleSelect from './ui/AppleSelect.vue'
 import Switch from './ui/Switch.vue'
+import RuleEditDialog from './RuleEditDialog.vue'
 import { LOCALES } from '../i18n'
 import {
   updateState,
@@ -23,14 +25,180 @@ const app = useAppStore()
 
 const emit = defineEmits<{ close: [] }>()
 
-const tab = ref<'sources' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
+const tab = ref<'sources' | 'general' | 'rules' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
 const tabs = computed(() => [
   { value: 'sources', label: t('settings.tabs.sources'), icon: 'sources' },
+  { value: 'general', label: t('settings.tabs.general'), icon: 'gear' },
+  { value: 'rules', label: t('settings.tabs.rules'), icon: 'funnel' },
   { value: 'app', label: t('settings.tabs.app'), icon: 'app' },
   { value: 'shortcuts', label: t('settings.tabs.shortcuts'), icon: 'keyboard' },
   { value: 'data', label: t('settings.tabs.data'), icon: 'data' },
   { value: 'about', label: t('settings.tabs.about'), icon: 'info' },
 ])
+
+// ---------- General tab: proxy / notification / tray / storage ----------
+
+const proxyModeOptions = computed(() => [
+  { value: 'system', label: t('settings.general.proxySystem'), icon: 'display' },
+  { value: 'none', label: t('settings.general.proxyNone'), icon: 'close' },
+  { value: 'manual', label: t('settings.general.proxyManual'), icon: 'globe' },
+])
+
+const retentionOptions = computed(() => [
+  { value: 0, label: t('settings.general.retentionNever'), icon: 'data' },
+  { value: 7, label: t('settings.general.retentionDays', { n: 7 }), icon: 'data' },
+  { value: 30, label: t('settings.general.retentionDays', { n: 30 }), icon: 'data' },
+  { value: 90, label: t('settings.general.retentionDays', { n: 90 }), icon: 'data' },
+  { value: 180, label: t('settings.general.retentionDays', { n: 180 }), icon: 'data' },
+])
+
+const maxPerSourceOptions = computed(() => [
+  { value: 0, label: t('settings.general.maxUnlimited'), icon: 'data' },
+  { value: 100, label: t('settings.general.maxCount', { n: 100 }), icon: 'data' },
+  { value: 200, label: t('settings.general.maxCount', { n: 200 }), icon: 'data' },
+  { value: 500, label: t('settings.general.maxCount', { n: 500 }), icon: 'data' },
+  { value: 1000, label: t('settings.general.maxCount', { n: 1000 }), icon: 'data' },
+])
+
+const proxyTesting = ref(false)
+const proxyResult = ref<string>('')
+
+async function testProxy() {
+  proxyTesting.value = true
+  proxyResult.value = ''
+  try {
+    const ms = await api.testProxy(app.s)
+    proxyResult.value = t('settings.general.proxyOk', { ms })
+  } catch (err) {
+    proxyResult.value = t('settings.general.proxyFail', { err: String(err) })
+  } finally {
+    proxyTesting.value = false
+  }
+}
+
+const stats = ref<{ articles: number; unread: number; dbSize: number } | null>(null)
+const cleaningUp = ref(false)
+const cleanupMsg = ref('')
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${n} B`
+}
+
+async function loadStats() {
+  try {
+    stats.value = await api.getStats()
+  } catch {
+    stats.value = null
+  }
+}
+
+async function cleanupNow() {
+  cleaningUp.value = true
+  cleanupMsg.value = ''
+  try {
+    const deleted = await api.cleanupNow()
+    cleanupMsg.value = t('settings.general.cleanupDone', { n: deleted })
+    await loadStats()
+    await data.loadSources()
+  } catch (err) {
+    cleanupMsg.value = String(err)
+  } finally {
+    cleaningUp.value = false
+  }
+}
+
+watch(tab, (v) => {
+  if (v === 'general') loadStats()
+  if (v === 'rules') loadRulesTab()
+})
+
+// ---------- Rules tab ----------
+
+const rules = ref<Rule[]>([])
+const rulesLoading = ref(false)
+const showRuleEditor = ref(false)
+const editingRule = ref<Rule | null>(null)
+const backfillMsg = ref('')
+const hiddenItems = ref<Item[]>([])
+
+async function loadRulesTab() {
+  rulesLoading.value = true
+  try {
+    const [rs, hidden] = await Promise.all([
+      api.getRules(),
+      api.getItems({ filter: 3, limit: 100 }),
+    ])
+    rules.value = rs
+    hiddenItems.value = hidden
+  } finally {
+    rulesLoading.value = false
+  }
+}
+
+function openRuleEditor(rule: Rule | null) {
+  editingRule.value = rule
+  showRuleEditor.value = true
+}
+
+function onRuleSaved() {
+  showRuleEditor.value = false
+  loadRulesTab()
+}
+
+async function toggleRule(rule: Rule, enabled: boolean) {
+  await api.updateRule(rule.id, {
+    name: rule.name,
+    pattern: rule.pattern,
+    targetField: rule.targetField,
+    actionType: rule.actionType,
+    isCaseSensitive: rule.isCaseSensitive,
+    isEnabled: enabled,
+    sourceScope: rule.sourceScope,
+  })
+  rule.isEnabled = enabled
+}
+
+async function removeRule(id: number) {
+  if (confirm(t('settings.rules.confirmDelete'))) {
+    await api.deleteRule(id)
+    await loadRulesTab()
+  }
+}
+
+async function unhideItem(id: number) {
+  await api.setItemHidden(id, false)
+  hiddenItems.value = hiddenItems.value.filter((i) => i.id !== id)
+}
+
+async function applyBackfill() {
+  backfillMsg.value = ''
+  try {
+    const r: RuleBackfillResult = await api.applyRulesBackfill()
+    backfillMsg.value = t('settings.rules.backfillDone', {
+      read: r.markedRead,
+      starred: r.starred,
+      hidden: r.hidden,
+    })
+    await loadRulesTab()
+  } catch (err) {
+    backfillMsg.value = String(err)
+  }
+}
+
+function scopeLabel(scope: string): string {
+  if (scope === 'all') return t('settings.rules.scopeAll')
+  const [, idStr] = scope.split(':')
+  const id = Number(idStr)
+  if (scope.startsWith('source:')) {
+    return `${t('settings.rules.scopeSourcePrefix')}${data.sourceById(id)?.title ?? id}`
+  }
+  const group = data.groups.find((g) => g.id === id)
+  return `${t('settings.rules.scopeGroupPrefix')}${group?.name ?? id}`
+}
+
+// ---------- End Phase 2 sections ----------
 
 const recordingAction = ref<string | null>(null)
 
@@ -164,6 +332,43 @@ async function exportOpml() {
   dataMsg.value = t('settings.data.exported')
 }
 
+// ---------- Full backup & restore ----------
+
+const backingUp = ref(false)
+const restoreConfirmVisible = ref(false)
+
+async function doExportBackup() {
+  backingUp.value = true
+  dataMsg.value = ''
+  try {
+    const path = await api.exportBackup()
+    dataMsg.value = path
+      ? t('settings.data.backupDone', { path })
+      : t('settings.data.backupCancelled')
+  } catch (err) {
+    dataMsg.value = String(err)
+  } finally {
+    backingUp.value = false
+  }
+}
+
+async function doImportBackup() {
+  restoreConfirmVisible.value = false
+  backingUp.value = true
+  dataMsg.value = ''
+  try {
+    const path = await api.importBackup()
+    if (path) {
+      // A successful restore swaps the database; relaunch for a clean reload.
+      await restartApp()
+    }
+  } catch (err) {
+    dataMsg.value = String(err)
+  } finally {
+    backingUp.value = false
+  }
+}
+
 function toggleViewConfig(bit: number, val: boolean) {
   if (val) {
     app.patch({ viewConfigs: app.s.viewConfigs | bit })
@@ -225,6 +430,215 @@ function adjustFontSize(delta: number) {
         <Icon name="rss" :size="32" color="var(--text-quaternary)" />
         <p>{{ t('nav.noSources') }}</p>
       </div>
+    </div>
+
+    <!-- Tab: General (network / notification / tray / storage) -->
+    <div v-else-if="tab === 'general'" class="tab-body">
+      <div class="grouped-inset-box">
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.proxyMode') }}</span>
+            <span class="label-desc">{{ t('settings.general.proxyModeDesc') }}</span>
+          </div>
+          <AppleSelect
+            :model-value="app.s.proxyMode"
+            :options="proxyModeOptions"
+            @update:model-value="app.patch({ proxyMode: $event })"
+          />
+        </div>
+
+        <template v-if="app.s.proxyMode === 'manual'">
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.general.proxyUrl') }}</span>
+              <span class="label-desc">http://127.0.0.1:7890 · socks5://127.0.0.1:1080</span>
+            </div>
+            <input
+              class="apple-text-input"
+              style="width: 13rem"
+              placeholder="http://127.0.0.1:7890"
+              :value="app.s.proxyUrl"
+              @change="app.patch({ proxyUrl: ($event.target as HTMLInputElement).value.trim() })"
+            />
+          </div>
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.general.proxyAuth') }}</span>
+            </div>
+            <div class="auth-inputs">
+              <input
+                class="apple-text-input"
+                style="width: 6.5rem"
+                :placeholder="t('settings.general.proxyUser')"
+                :value="app.s.proxyUsername"
+                @change="app.patch({ proxyUsername: ($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="apple-text-input"
+                style="width: 6.5rem"
+                type="password"
+                :placeholder="t('settings.general.proxyPassword')"
+                :value="app.s.proxyPassword"
+                @change="app.patch({ proxyPassword: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+          </div>
+        </template>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.testProxy') }}</span>
+            <span v-if="proxyResult" class="label-desc">{{ proxyResult }}</span>
+          </div>
+          <button class="f-btn" :disabled="proxyTesting" @click="testProxy">
+            <Icon name="globe" :size="14" />
+            {{ proxyTesting ? t('settings.general.testing') : t('settings.general.testProxy') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="grouped-inset-box">
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.notifyOnNew') }}</span>
+            <span class="label-desc">{{ t('settings.general.notifyOnNewDesc') }}</span>
+          </div>
+          <Switch
+            :model-value="app.s.notifyOnNew"
+            @update:model-value="app.patch({ notifyOnNew: $event })"
+          />
+        </div>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.closeToTray') }}</span>
+            <span class="label-desc">{{ t('settings.general.closeToTrayDesc') }}</span>
+          </div>
+          <Switch
+            :model-value="app.s.closeToTray"
+            @update:model-value="app.patch({ closeToTray: $event })"
+          />
+        </div>
+      </div>
+
+      <div class="grouped-inset-box">
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.retentionLabel') }}</span>
+            <span class="label-desc">{{ t('settings.general.retentionDesc') }}</span>
+          </div>
+          <AppleSelect
+            :model-value="app.s.retentionDays"
+            :options="retentionOptions"
+            @update:model-value="app.patch({ retentionDays: $event })"
+          />
+        </div>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.maxPerSource') }}</span>
+            <span class="label-desc">{{ t('settings.general.maxDesc') }}</span>
+          </div>
+          <AppleSelect
+            :model-value="app.s.maxItemsPerSource"
+            :options="maxPerSourceOptions"
+            @update:model-value="app.patch({ maxItemsPerSource: $event })"
+          />
+        </div>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.cleanupNow') }}</span>
+            <span v-if="stats" class="label-desc">
+              {{ t('settings.general.statsLine', {
+                articles: stats.articles,
+                unread: stats.unread,
+                size: formatBytes(stats.dbSize),
+              }) }}
+            </span>
+          </div>
+          <button class="f-btn" :disabled="cleaningUp" @click="cleanupNow">
+            <Icon name="refresh" :size="14" />
+            {{ cleaningUp ? t('common.loading') : t('settings.general.cleanupNow') }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="cleanupMsg" class="info-banner">
+        <Icon name="checkmark" :size="14" color="var(--success)" />
+        <span>{{ cleanupMsg }}</span>
+      </div>
+    </div>
+
+    <!-- Tab: Regex Rules -->
+    <div v-else-if="tab === 'rules'" class="tab-body">
+      <div class="rules-toolbar">
+        <p class="rules-hint">{{ t('settings.rules.hint') }}</p>
+        <div class="rules-toolbar-actions">
+          <button class="f-btn compact-btn" @click="applyBackfill">
+            <Icon name="sparkles" :size="13" />
+            {{ t('settings.rules.applyBackfill') }}
+          </button>
+          <button class="f-btn primary compact-btn" @click="openRuleEditor(null)">
+            <Icon name="plus" :size="13" />
+            {{ t('settings.rules.new') }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="rules.length" class="grouped-inset-box">
+        <div v-for="r in rules" :key="r.id" class="grouped-inset-row">
+          <div class="rule-info">
+            <div class="rule-name-row">
+              <span class="rule-name">{{ r.name }}</span>
+              <span class="rule-badge action">{{ t(`settings.rules.action_${r.actionType}`) }}</span>
+              <span class="rule-badge scope">{{ scopeLabel(r.sourceScope) }}</span>
+            </div>
+            <code class="rule-pattern">{{ r.pattern }}</code>
+          </div>
+          <div class="source-actions">
+            <Switch :model-value="r.isEnabled" @update:model-value="toggleRule(r, $event)" />
+            <button class="f-icon-btn" :title="t('feed.rename')" @click="openRuleEditor(r)">
+              <Icon name="pencil" :size="14" />
+            </button>
+            <button class="f-icon-btn remove-btn" :title="t('settings.rules.delete')" @click="removeRule(r.id)">
+              <Icon name="trash" :size="15" color="var(--danger)" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-sources">
+        <Icon name="funnel" :size="32" color="var(--text-quaternary)" />
+        <p>{{ t('settings.rules.empty') }}</p>
+      </div>
+
+      <div v-if="backfillMsg" class="info-banner">
+        <Icon name="checkmark" :size="14" color="var(--success)" />
+        <span>{{ backfillMsg }}</span>
+      </div>
+
+      <div v-if="hiddenItems.length" class="hidden-section">
+        <div class="shortcut-group-title">{{ t('settings.rules.hiddenSection', { n: hiddenItems.length }) }}</div>
+        <div class="grouped-inset-box">
+          <div v-for="h in hiddenItems" :key="h.id" class="grouped-inset-row">
+            <div class="rule-info">
+              <span class="rule-name">{{ h.title }}</span>
+            </div>
+            <button class="f-btn compact-btn" @click="unhideItem(h.id)">
+              {{ t('settings.rules.unhide') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <RuleEditDialog
+        v-if="showRuleEditor"
+        :rule="editingRule"
+        :sources="data.sources"
+        :groups="data.groups"
+        @close="showRuleEditor = false"
+        @saved="onRuleSaved"
+      />
     </div>
 
     <!-- Tab: App Settings (macOS Inset Grouped) -->
@@ -420,13 +834,47 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
 
+      <!-- Full backup & restore -->
+      <div class="grouped-inset-box">
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.data.backup') }}</span>
+            <span class="label-desc">{{ t('settings.data.backupDesc') }}</span>
+          </div>
+          <button class="f-btn" :disabled="backingUp" @click="doExportBackup">
+            <Icon name="archivebox" :size="14" />
+            {{ t('settings.data.backup') }}
+          </button>
+        </div>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.data.restore') }}</span>
+            <span class="label-desc">{{ t('settings.data.restoreDesc') }}</span>
+          </div>
+          <button class="f-btn" :disabled="backingUp" @click="restoreConfirmVisible = true">
+            <Icon name="import" :size="14" />
+            {{ t('settings.data.restore') }}
+          </button>
+        </div>
+      </div>
+
       <div v-if="dataMsg" class="info-banner">
         <Icon name="checkmark" :size="14" color="var(--success)" />
         <span>{{ dataMsg }}</span>
       </div>
-    </div>
 
-    <!-- Tab: About -->
+      <!-- Restore confirmation -->
+      <Modal v-if="restoreConfirmVisible" :title="t('settings.data.restore')" @close="restoreConfirmVisible = false">
+        <p class="restore-confirm-text">{{ t('settings.data.confirmRestore') }}</p>
+        <template #footer>
+          <button class="f-btn" @click="restoreConfirmVisible = false">{{ t('common.cancel') }}</button>
+          <button class="f-btn danger" :disabled="backingUp" @click="doImportBackup">
+            {{ t('settings.data.restore') }}
+          </button>
+        </template>
+      </Modal>
+    </div>
     <div v-else class="tab-body">
       <div class="about-card">
         <div class="about-logo">
@@ -943,5 +1391,92 @@ function adjustFontSize(delta: number) {
   font-size: 0.78rem;
   text-align: center;
   word-break: break-word;
+}
+
+/* General & Rules Tab Styles */
+.auth-inputs {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.rules-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0 0.2rem;
+}
+
+.rules-hint {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+.rules-toolbar-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.rule-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.rule-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.rule-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.08rem 0.42rem;
+  border-radius: var(--radius-pill);
+  background: var(--bg-track);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rule-badge.action {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.rule-pattern {
+  font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hidden-section {
+  margin-top: 1rem;
+}
+
+.restore-confirm-text {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0;
 }
 </style>

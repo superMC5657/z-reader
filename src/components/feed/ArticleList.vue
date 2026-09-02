@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore, useUiStore } from '../../stores/data'
@@ -59,8 +59,18 @@ function itemContextMenu(e: MouseEvent, item: Item) {
 }
 
 function clearSearch() {
+  window.clearTimeout(searchTimer)
+  searchInput.value = ''
   data.search_('')
 }
+
+// Debounced search: the backend query runs 250ms after typing settles.
+const searchInput = ref(data.search)
+let searchTimer: number | undefined
+watch(searchInput, (q) => {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => data.search_(q), 250)
+})
 
 function openViewMenu(e: MouseEvent) {
   const target = e.currentTarget as HTMLElement
@@ -122,8 +132,8 @@ function openViewMenu(e: MouseEvent) {
           <input
             class="search-input"
             :placeholder="t('toolbar.search')"
-            :value="data.search"
-            @input="data.search_(($event.target as HTMLInputElement).value)"
+            :value="searchInput"
+            @input="searchInput = ($event.target as HTMLInputElement).value"
           />
           <button v-if="data.search" class="clear-btn" @click="clearSearch" title="Clear">
             <Icon name="xmark" :size="14" color="var(--text-tertiary)" />

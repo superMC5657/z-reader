@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useDataStore } from '../../stores/data'
 import { formatTime } from '../../lib/time'
+import { highlightText } from '../../lib/highlight'
 import type { Item } from '../../types'
 import Icon from '../ui/Icon.vue'
 
@@ -29,8 +30,8 @@ const data = useDataStore()
 
       <!-- Main Content -->
       <div class="row-main">
-        <h3 class="title">{{ item.title }}</h3>
-        <p v-if="item.snippet" class="snippet">{{ item.snippet }}</p>
+        <h3 class="title" v-html="highlightText(item.title, data.search)"></h3>
+        <p v-if="item.snippet" class="snippet" v-html="highlightText(item.snippet, data.search)"></p>
       </div>
 
       <!-- Metadata & Channel -->

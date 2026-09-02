@@ -547,3 +547,11 @@ input[type='range']:focus {
   display: inline-block;
   animation: spin 0.85s linear infinite;
 }
+
+/* Search result highlight (used via v-html in list views) */
+mark {
+  background: var(--accent-tint);
+  color: var(--accent);
+  padding: 0 1px;
+  border-radius: 2px;
+}

@@ -1,5 +1,15 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { GetItemsParams, Group, Item, Settings, Source } from '../types'
+import type {
+  AppStats,
+  GetItemsParams,
+  Group,
+  Item,
+  Rule,
+  RuleBackfillResult,
+  RuleInput,
+  Settings,
+  Source,
+} from '../types'
 
 export const getSources = () => invoke<Source[]>('get_sources')
 export const getGroups = () => invoke<Group[]>('get_groups')
@@ -23,6 +33,7 @@ export const markRead = (ids: number[], read: boolean) => invoke<void>('mark_rea
 export const markAllRead = (scope?: string, scopeId?: number | null) =>
   invoke<void>('mark_all_read', { scope: scope ?? null, scopeId: scopeId ?? null })
 export const star = (id: number, starred: boolean) => invoke<void>('star', { id, starred })
+export const setItemHidden = (id: number, hidden: boolean) => invoke<void>('set_item_hidden', { id, hidden })
 export const fetchFullContent = (id: number) => invoke<void>('fetch_full_content', { id })
 
 export const getSettings = () => invoke<Settings>('get_settings')
@@ -37,3 +48,22 @@ export const importOpml = (text: string) => invoke<OpmlImportResult>('import_opm
 export const exportOpml = () => invoke<string>('export_opml')
 export const refreshFavicon = (id: number) => invoke<string | null>('refresh_favicon', { id })
 export const setCustomFavicon = (id: number, dataBase64: string) => invoke<string>('set_custom_favicon', { id, dataBase64 })
+
+// ---------- Phase 2: proxy ----------
+export const testProxy = (settings: Settings) => invoke<number>('test_proxy', { settings })
+
+// ---------- Phase 2: regex rules ----------
+export const getRules = () => invoke<Rule[]>('get_rules')
+export const createRule = (input: RuleInput) => invoke<Rule>('create_rule', { input })
+export const updateRule = (id: number, input: RuleInput) => invoke<void>('update_rule', { id, input })
+export const deleteRule = (id: number) => invoke<void>('delete_rule', { id })
+export const applyRulesBackfill = () => invoke<RuleBackfillResult>('apply_rules_backfill')
+
+// ---------- Phase 2: backup & restore ----------
+export const exportBackup = () => invoke<string | null>('export_backup')
+export const importBackup = () => invoke<string | null>('import_backup')
+
+// ---------- Phase 2: stats & storage ----------
+export const getStats = () => invoke<AppStats>('get_stats')
+export const vacuumNow = () => invoke<void>('vacuum_now')
+export const cleanupNow = () => invoke<number>('cleanup_now')
