@@ -4,7 +4,7 @@
   "version": "0.1.2",
   "type": "module",
   "scripts": {
-    "bump:version": "node scripts/bump-version.mjs",
+    "bump:version": "node scripts/bump-version.mjs --name z-reader",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
