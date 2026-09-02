@@ -1,6 +1,6 @@
 [package]
 name = "z-reader"
-version = "0.2.0"
+version = "0.3.0"
 description = "Modern desktop RSS reader (Fluent Reader rebuild in Tauri 2)"
 authors = ["z-reader"]
 edition = "2021"

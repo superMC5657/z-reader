@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../stores/data'
 import { useAppStore } from '../stores/app'
 import * as api from '../lib/tauri'
-import type { Item, Rule, RuleBackfillResult } from '../types'
+import type { Item, Rule, RuleBackfillResult, SyncStatus } from '../types'
+import { formatFullTime } from '../lib/time'
 import Modal from './ui/Modal.vue'
 import Icon from './ui/Icon.vue'
 import FeedIcon from './ui/FeedIcon.vue'
@@ -25,11 +26,12 @@ const app = useAppStore()
 
 const emit = defineEmits<{ close: [] }>()
 
-const tab = ref<'sources' | 'general' | 'rules' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
+const tab = ref<'sources' | 'general' | 'rules' | 'sync' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
 const tabs = computed(() => [
   { value: 'sources', label: t('settings.tabs.sources'), icon: 'sources' },
   { value: 'general', label: t('settings.tabs.general'), icon: 'gear' },
   { value: 'rules', label: t('settings.tabs.rules'), icon: 'funnel' },
+  { value: 'sync', label: t('settings.tabs.sync'), icon: 'cloud' },
   { value: 'app', label: t('settings.tabs.app'), icon: 'app' },
   { value: 'shortcuts', label: t('settings.tabs.shortcuts'), icon: 'keyboard' },
   { value: 'data', label: t('settings.tabs.data'), icon: 'data' },
@@ -112,7 +114,80 @@ async function cleanupNow() {
 watch(tab, (v) => {
   if (v === 'general') loadStats()
   if (v === 'rules') loadRulesTab()
+  if (v === 'sync') loadSyncStatus()
 })
+
+// ---------- Sync tab ----------
+
+const syncServerUrl = ref('')
+const syncUsername = ref('')
+const syncPassword = ref('')
+const syncConnecting = ref(false)
+const syncErrorMsg = ref('')
+const syncStatusInfo = ref<SyncStatus | null>(null)
+const syncingNow = ref(false)
+const syncResultMsg = ref('')
+const syncDisconnectVisible = ref(false)
+
+async function loadSyncStatus() {
+  if (!app.s.syncAccount) return
+  try {
+    syncStatusInfo.value = await api.syncStatus()
+  } catch {
+    syncStatusInfo.value = null
+  }
+}
+
+async function doSyncLogin() {
+  syncErrorMsg.value = ''
+  if (!syncServerUrl.value.trim() || !syncUsername.value.trim() || !syncPassword.value) {
+    syncErrorMsg.value = t('settings.sync.errorRequired')
+    return
+  }
+  syncConnecting.value = true
+  try {
+    const count = await api.syncLogin(syncServerUrl.value, syncUsername.value, syncPassword.value)
+    await app.refresh()
+    await Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])
+    syncResultMsg.value = t('settings.sync.connected', { n: count })
+    await loadSyncStatus()
+  } catch (err) {
+    syncErrorMsg.value = String(err)
+  } finally {
+    syncConnecting.value = false
+  }
+}
+
+async function doSyncNow() {
+  syncingNow.value = true
+  syncResultMsg.value = ''
+  try {
+    const r = await api.syncNow()
+    syncResultMsg.value = t('settings.sync.syncDone', {
+      pull: r.newItems,
+      push: r.pushed,
+      fail: r.failures,
+    })
+    await Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])
+    await loadSyncStatus()
+  } catch (err) {
+    syncResultMsg.value = String(err)
+  } finally {
+    syncingNow.value = false
+  }
+}
+
+async function doSyncLogout() {
+  syncDisconnectVisible.value = false
+  try {
+    await api.syncLogout()
+    await app.refresh()
+    syncStatusInfo.value = null
+    syncResultMsg.value = ''
+  } catch (err) {
+    syncResultMsg.value = String(err)
+  }
+}
 
 // ---------- Rules tab ----------
 
@@ -639,6 +714,104 @@ function adjustFontSize(delta: number) {
         @close="showRuleEditor = false"
         @saved="onRuleSaved"
       />
+    </div>
+
+    <!-- Tab: Cloud Sync -->
+    <div v-else-if="tab === 'sync'" class="tab-body">
+      <template v-if="!app.s.syncAccount">
+        <div class="sync-form">
+          <label class="form-label">{{ t('settings.sync.serverUrl') }}</label>
+          <input
+            v-model="syncServerUrl"
+            class="apple-text-input"
+            placeholder="https://example.com/api/greader.php"
+            spellcheck="false"
+          />
+          <p class="sync-hint">{{ t('settings.sync.serverHint') }}</p>
+
+          <div class="form-grid">
+            <div>
+              <label class="form-label">{{ t('settings.sync.username') }}</label>
+              <input v-model="syncUsername" class="apple-text-input" autocomplete="off" spellcheck="false" />
+            </div>
+            <div>
+              <label class="form-label">{{ t('settings.sync.password') }}</label>
+              <input v-model="syncPassword" class="apple-text-input" type="password" autocomplete="off" />
+            </div>
+          </div>
+
+          <div v-if="syncErrorMsg" class="rule-error">{{ syncErrorMsg }}</div>
+
+          <button class="f-btn primary sync-connect-btn" :disabled="syncConnecting" @click="doSyncLogin">
+            <Icon name="cloud" :size="14" />
+            {{ syncConnecting ? t('settings.sync.connecting') : t('settings.sync.connect') }}
+          </button>
+          <p class="sync-hint">{{ t('settings.sync.modeHint') }}</p>
+          <p class="sync-hint warning">{{ t('settings.sync.plaintextWarning') }}</p>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="grouped-inset-box">
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.sync.account') }}</span>
+              <span class="label-desc">{{ app.s.syncAccount.serverUrl }}</span>
+            </div>
+            <span class="sync-provider-badge">Google Reader API</span>
+          </div>
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.sync.lastSync') }}</span>
+            </div>
+            <span class="sync-time">
+              {{ syncStatusInfo?.lastSync ? formatFullTime(syncStatusInfo.lastSync) : t('settings.sync.never') }}
+            </span>
+          </div>
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.sync.pendingQueue') }}</span>
+              <span class="label-desc">{{ t('settings.sync.pendingQueueDesc') }}</span>
+            </div>
+            <span class="value-badge">{{ syncStatusInfo?.queueLen ?? 0 }}</span>
+          </div>
+        </div>
+
+        <div class="grouped-inset-box">
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.sync.syncNow') }}</span>
+              <span class="label-desc">{{ t('settings.sync.syncNowDesc') }}</span>
+            </div>
+            <button class="f-btn" :disabled="syncingNow" @click="doSyncNow">
+              <Icon name="refresh" :size="14" />
+              {{ syncingNow ? t('common.loading') : t('settings.sync.syncNow') }}
+            </button>
+          </div>
+          <div class="grouped-inset-row">
+            <div class="label-box">
+              <span class="label-title">{{ t('settings.sync.disconnect') }}</span>
+              <span class="label-desc">{{ t('settings.sync.disconnectDesc') }}</span>
+            </div>
+            <button class="f-btn" @click="syncDisconnectVisible = true">
+              {{ t('settings.sync.disconnect') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="syncResultMsg" class="info-banner">
+          <Icon name="checkmark" :size="14" color="var(--success)" />
+          <span>{{ syncResultMsg }}</span>
+        </div>
+
+        <Modal v-if="syncDisconnectVisible" :title="t('settings.sync.disconnect')" @close="syncDisconnectVisible = false">
+          <p class="restore-confirm-text">{{ t('settings.sync.confirmDisconnect') }}</p>
+          <template #footer>
+            <button class="f-btn" @click="syncDisconnectVisible = false">{{ t('common.cancel') }}</button>
+            <button class="f-btn danger" @click="doSyncLogout">{{ t('settings.sync.disconnect') }}</button>
+          </template>
+        </Modal>
+      </template>
     </div>
 
     <!-- Tab: App Settings (macOS Inset Grouped) -->
@@ -1478,5 +1651,51 @@ function adjustFontSize(delta: number) {
   color: var(--text-secondary);
   line-height: 1.55;
   margin: 0;
+}
+
+/* Sync Tab Styles */
+.sync-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0 0.2rem;
+}
+
+.sync-hint {
+  font-size: 0.74rem;
+  color: var(--text-tertiary);
+  margin: 0.15rem 0 0.3rem;
+  line-height: 1.45;
+}
+
+.sync-hint.warning {
+  color: var(--text-tertiary);
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.5rem;
+}
+
+.sync-connect-btn {
+  align-self: flex-start;
+  margin-top: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sync-provider-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-tint);
+  padding: 0.14rem 0.55rem;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sync-time {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 </style>

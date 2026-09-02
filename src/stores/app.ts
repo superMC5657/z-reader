@@ -36,6 +36,7 @@ const DEFAULTS: Settings = {
   closeToTray: true,
   retentionDays: 0,
   maxItemsPerSource: 0,
+  syncAccount: null,
 }
 
 function resolveTheme(theme: Settings['theme']): 'light' | 'dark' {
@@ -135,6 +136,11 @@ export const useAppStore = defineStore('app', {
       this.settings = { ...this.s, ...p }
       apply(this.s)
       await saveSettings(this.settings)
+    },
+    /** Re-read settings.json after backend-side changes (sync login/logout). */
+    async refresh() {
+      this.settings = await getSettings().catch(() => this.settings)
+      if (this.settings) apply(this.s)
     },
   },
 })

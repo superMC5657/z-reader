@@ -9,6 +9,7 @@ import type {
   RuleInput,
   Settings,
   Source,
+  SyncStatus,
 } from '../types'
 
 export const getSources = () => invoke<Source[]>('get_sources')
@@ -67,3 +68,10 @@ export const importBackup = () => invoke<string | null>('import_backup')
 export const getStats = () => invoke<AppStats>('get_stats')
 export const vacuumNow = () => invoke<void>('vacuum_now')
 export const cleanupNow = () => invoke<number>('cleanup_now')
+
+// ---------- Phase 2.3: cloud sync (Google Reader API) ----------
+export const syncLogin = (serverUrl: string, username: string, password: string) =>
+  invoke<number>('sync_login', { serverUrl, username, password })
+export const syncLogout = () => invoke<void>('sync_logout')
+export const syncStatus = () => invoke<SyncStatus>('sync_status')
+export const syncNow = () => invoke<{ newItems: number; pushed: number; failures: number; subscriptions: number }>('sync_now')

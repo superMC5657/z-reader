@@ -710,6 +710,24 @@ const pixelSize = computed(() => {
       />
     </template>
 
+    <!-- Cloud / Sync -->
+    <template v-else-if="name === 'cloud' || name === 'sync'">
+      <path
+        d="M7 18.5C4.51472 18.5 2.5 16.4853 2.5 14C2.5 11.6915 4.24528 9.78924 6.47736 9.53373C6.99233 6.89229 9.26744 4.9 12 4.9C14.7326 4.9 17.0077 6.89229 17.5226 9.53373C19.7547 9.78924 21.5 11.6915 21.5 14C21.5 16.4853 19.4853 18.5 17 18.5H7Z"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M9.5 13.5L12 11L14.5 13.5M12 11.5V16.5"
+        :stroke="props.color"
+        :stroke-width="props.strokeWidth"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </template>
+
     <!-- Fallback / Default -->
     <template v-else>
       <circle cx="12" cy="12" r="8" :stroke="props.color" :stroke-width="props.strokeWidth" />

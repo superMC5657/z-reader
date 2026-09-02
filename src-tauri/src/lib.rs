@@ -3,11 +3,13 @@ mod commands;
 mod db;
 mod extractor;
 mod feed;
+mod greader;
 mod models;
 mod net;
 mod opml_io;
 mod rules;
 mod settings;
+mod sync;
 mod tray;
 
 use std::sync::RwLock;
@@ -18,6 +20,8 @@ pub struct AppState {
     pub db_path: std::path::PathBuf,
     /// Swappable HTTP client: rebuilt when proxy settings change.
     pub http: RwLock<reqwest::Client>,
+    /// In-memory cloud-sync login session (never persisted).
+    pub sync_token: RwLock<Option<sync::Session>>,
 }
 
 impl AppState {
@@ -52,6 +56,7 @@ pub fn run() {
                 db: Mutex::new(conn),
                 db_path,
                 http: RwLock::new(http),
+                sync_token: RwLock::new(None),
             });
 
             if let Err(e) = tray::create_tray(app.handle()) {
@@ -103,6 +108,10 @@ pub fn run() {
             commands::set_custom_favicon,
             commands::refresh_favicon,
             commands::test_proxy,
+            commands::sync_login,
+            commands::sync_logout,
+            commands::sync_status,
+            commands::sync_now,
             commands::get_rules,
             commands::create_rule,
             commands::update_rule,
@@ -148,6 +157,13 @@ pub async fn refresh_all_sources(
     use tauri::{Emitter, Manager};
     let state = app.state::<AppState>();
     let settings = settings::load(&settings::settings_path(&app)?);
+
+    // Cloud sync mode: subscriptions live on the server, so refresh = sync.
+    if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+        let report = sync::run(&app, background).await?;
+        return Ok(report.new_items);
+    }
+
     let client = state.http_client();
     let engine = {
         let conn = state.db.lock().await;

@@ -102,11 +102,32 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         conn.pragma_update(None, "user_version", 2).ok();
     }
+    if version < 3 {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE sources ADD COLUMN remote_id TEXT;
+            ALTER TABLE items ADD COLUMN remote_id TEXT;
+            CREATE INDEX idx_items_remote ON items(remote_id) WHERE remote_id IS NOT NULL;
+            CREATE TABLE IF NOT EXISTS sync_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                target TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sync_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 3).ok();
+    }
     Ok(())
 }
 
 /// Current schema version; bump when adding a migration block above.
-pub const CURRENT_VERSION: i64 = 2;
+pub const CURRENT_VERSION: i64 = 3;
 
 /// Test helper so other modules' tests can build a fully-migrated in-memory DB.
 #[cfg(test)]
@@ -172,11 +193,12 @@ fn row_to_source(row: &Row) -> rusqlite::Result<Source> {
         last_fetched: row.get(6)?,
         error_count: row.get(7)?,
         unread: row.get(8)?,
+        remote_id: row.get(9)?,
     })
 }
 
 const SOURCE_SELECT: &str = "SELECT s.id, s.url, s.title, s.description, s.favicon, s.group_id, s.last_fetched, s.error_count,
-    (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.has_been_read = 0) AS unread
+    (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.has_been_read = 0) AS unread, s.remote_id
     FROM sources s";
 
 pub fn get_sources(conn: &Connection) -> Result<Vec<Source>, String> {
@@ -273,7 +295,7 @@ pub fn mark_source_fetched(conn: &Connection, source_id: i64, ok: bool) -> Resul
     Ok(())
 }
 
-const ITEM_COLUMNS: &str = "id, source_id, guid, title, url, author, published_at, content, summary, snippet, image, has_been_read, starred, hidden";
+const ITEM_COLUMNS: &str = "id, source_id, guid, title, url, author, published_at, content, summary, snippet, image, has_been_read, starred, hidden, remote_id";
 
 fn row_to_item(row: &Row) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -291,6 +313,7 @@ fn row_to_item(row: &Row) -> rusqlite::Result<Item> {
         has_been_read: row.get::<_, i64>(11)? != 0,
         starred: row.get::<_, i64>(12)? != 0,
         hidden: row.get::<_, i64>(13)? != 0,
+        remote_id: row.get(14)?,
     })
 }
 
@@ -647,6 +670,214 @@ pub fn vacuum(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// ---------- Cloud sync ----------
+
+pub fn get_group(conn: &Connection, id: i64) -> Result<Option<Group>, String> {
+    conn.query_row(
+        "SELECT id, name, expanded, sort FROM groups WHERE id = ?1",
+        params![id],
+        row_to_group,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn find_or_create_group(conn: &Connection, name: &str) -> Result<Group, String> {
+    conn.query_row(
+        "SELECT id, name, expanded, sort FROM groups WHERE name = ?1",
+        params![name],
+        row_to_group,
+    )
+    .optional()
+    .map_err(|e| e.to_string())?
+    .map(Ok)
+    .unwrap_or_else(|| create_group(conn, name))
+}
+
+pub fn get_source_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Option<Source>, String> {
+    conn.query_row(
+        &format!("{SOURCE_SELECT} WHERE s.remote_id = ?1"),
+        params![remote_id],
+        row_to_source,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_source_remote(conn: &Connection, source_id: i64, remote_id: Option<&str>) -> Result<(), String> {
+    conn.execute(
+        "UPDATE sources SET remote_id=?1 WHERE id=?2",
+        params![remote_id, source_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Insert or reconcile one remote article. Matching order: by remote id, then
+/// by (source, url) for rows that were fetched locally before linking. On
+/// match the remote read/starred state overwrites local (server wins / LWW);
+/// otherwise a new row is inserted. Returns true when a new row was created.
+pub struct RemoteItemUpsert<'a> {
+    pub remote_id: &'a str,
+    pub source_id: i64,
+    pub title: &'a str,
+    pub url: Option<&'a str>,
+    pub author: Option<&'a str>,
+    pub published_at: i64,
+    pub content: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub snippet: Option<&'a str>,
+    pub has_been_read: bool,
+    pub starred: bool,
+}
+
+pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<bool, String> {
+    let mut existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM items WHERE remote_id = ?1",
+            params![r.remote_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if existing.is_none() {
+        if let Some(url) = r.url.filter(|u| !u.is_empty()) {
+            existing = conn
+                .query_row(
+                    "SELECT id FROM items WHERE source_id = ?1 AND url = ?2 AND remote_id IS NULL",
+                    params![r.source_id, url],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    match existing {
+        Some(id) => {
+            conn.execute(
+                "UPDATE items SET has_been_read=?1, starred=?2, remote_id=?3 WHERE id=?4",
+                params![r.has_been_read as i64, r.starred as i64, r.remote_id, id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(false)
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO items (source_id, guid, title, url, author, published_at, content, summary, snippet, remote_id, has_been_read, starred, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    r.source_id,
+                    r.remote_id, // guid: stable per source
+                    r.title,
+                    r.url,
+                    r.author,
+                    r.published_at,
+                    r.content,
+                    r.summary,
+                    r.snippet,
+                    r.remote_id,
+                    r.has_been_read as i64,
+                    r.starred as i64,
+                    crate::models::now_ts()
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct QueueEntry {
+    pub id: i64,
+    pub action: String,
+    pub target: String,
+}
+
+/// Queue one action per item, skipping items without a remote id.
+pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: &str) -> Result<usize, String> {
+    let mut n = 0usize;
+    for id in item_ids {
+        let remote: Option<String> = conn
+            .query_row("SELECT remote_id FROM items WHERE id=?1", params![id], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if let Some(target) = remote.filter(|t| !t.is_empty()) {
+            conn.execute(
+                "INSERT INTO sync_queue (action, target, created_at) VALUES (?1, ?2, ?3)",
+                params![action, target, crate::models::now_ts()],
+            )
+            .map_err(|e| e.to_string())?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Queue a stream-level action (e.g. mark-all-read for feed/label/reading-list).
+pub fn enqueue_stream_action(conn: &Connection, action: &str, target: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO sync_queue (action, target, created_at) VALUES (?1, ?2, ?3)",
+        params![action, target, crate::models::now_ts()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn queue_fetch(conn: &Connection, limit: i64) -> Result<Vec<QueueEntry>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, action, target FROM sync_queue ORDER BY id LIMIT ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(QueueEntry {
+                id: row.get(0)?,
+                action: row.get(1)?,
+                target: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+pub fn queue_delete(conn: &Connection, ids: &[i64]) -> Result<(), String> {
+    for id in ids {
+        conn.execute("DELETE FROM sync_queue WHERE id=?1", params![id])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn queue_len(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT COUNT(*) FROM sync_queue", [], |row| row.get(0))
+        .map_err(|e| e.to_string())
+}
+
+pub fn queue_clear(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM sync_queue", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn get_state(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM sync_state WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_state(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO sync_state (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,5 +1007,127 @@ mod tests {
         assert_eq!(remaining.len(), 4);
         assert!(!remaining.iter().any(|i| i.guid == "c"));
         assert!(remaining.iter().any(|i| i.guid == "b"));
+    }
+
+    #[test]
+    fn test_sync_upsert_queue_and_state() {
+        let conn = Connection::open_in_memory().expect("init db");
+        migrate(&conn).expect("migrate");
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(v, CURRENT_VERSION);
+
+        let s = insert_source(&conn, "https://e.example", "E", None, None).unwrap();
+        set_source_remote(&conn, s.id, Some("feed/2")).unwrap();
+        let found = get_source_by_remote_id(&conn, "feed/2").unwrap().unwrap();
+        assert_eq!(found.id, s.id);
+
+        // first upsert inserts a row carrying the remote read state
+        let inserted = upsert_remote_item(
+            &conn,
+            &RemoteItemUpsert {
+                remote_id: "abc",
+                source_id: s.id,
+                title: "t1",
+                url: Some("https://e.example/a"),
+                author: None,
+                published_at: 100,
+                content: Some("<p>c</p>"),
+                summary: None,
+                snippet: Some("c"),
+                has_been_read: true,
+                starred: false,
+            },
+        )
+        .unwrap();
+        assert!(inserted);
+
+        // second pull with changed server state: LWW overwrite, no new row
+        let again = upsert_remote_item(
+            &conn,
+            &RemoteItemUpsert {
+                remote_id: "abc",
+                source_id: s.id,
+                title: "t1",
+                url: Some("https://e.example/a"),
+                author: None,
+                published_at: 100,
+                content: Some("<p>c</p>"),
+                summary: None,
+                snippet: Some("c"),
+                has_been_read: false,
+                starred: true,
+            },
+        )
+        .unwrap();
+        assert!(!again);
+        let items = get_items(&conn, &GetItemsParams::default()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(!items[0].has_been_read);
+        assert!(items[0].starred);
+
+        // a pre-existing local row (no remote id) is matched by (source, url)
+        insert_item(&conn, s.id, &item("local", "local row", "x", 50, false, false, false)).unwrap();
+        conn.execute(
+            "UPDATE items SET url='https://e.example/b' WHERE guid='local'",
+            [],
+        )
+        .unwrap();
+        let matched = upsert_remote_item(
+            &conn,
+            &RemoteItemUpsert {
+                remote_id: "def",
+                source_id: s.id,
+                title: "local row",
+                url: Some("https://e.example/b"),
+                author: None,
+                published_at: 50,
+                content: Some("x"),
+                summary: None,
+                snippet: Some("x"),
+                has_been_read: true,
+                starred: false,
+            },
+        )
+        .unwrap();
+        assert!(!matched);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+        let rid: Option<String> = conn
+            .query_row("SELECT remote_id FROM items WHERE guid='local'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rid.as_deref(), Some("def"));
+
+        // queue: actions for items without a remote id are skipped
+        let with_remote = items[0].id; // matched by remote id "abc"
+        insert_item(&conn, s.id, &item("plain", "never synced", "x", 40, false, false, false)).unwrap();
+        let no_remote: i64 = conn
+            .query_row("SELECT id FROM items WHERE guid='plain'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(enqueue_item_actions(&conn, &[with_remote], "mark_unread").unwrap(), 1);
+        assert_eq!(enqueue_item_actions(&conn, &[no_remote], "mark_read").unwrap(), 0);
+        enqueue_stream_action(&conn, "mark_all_read", "user/-/state/com.google/reading-list").unwrap();
+        let queue = queue_fetch(&conn, 100).unwrap();
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].action, "mark_unread");
+        assert_eq!(queue[1].action, "mark_all_read");
+        queue_delete(&conn, &[queue[0].id]).unwrap();
+        assert_eq!(queue_len(&conn).unwrap(), 1);
+        queue_clear(&conn).unwrap();
+        assert_eq!(queue_len(&conn).unwrap(), 0);
+
+        // sync_state cursor roundtrip
+        assert_eq!(get_state(&conn, "greader.last_sync").unwrap(), None);
+        set_state(&conn, "greader.last_sync", "123").unwrap();
+        set_state(&conn, "greader.last_sync", "456").unwrap();
+        assert_eq!(get_state(&conn, "greader.last_sync").unwrap().as_deref(), Some("456"));
+
+        // find_or_create_group is idempotent by name
+        let g1 = find_or_create_group(&conn, "Tech").unwrap();
+        let g2 = find_or_create_group(&conn, "Tech").unwrap();
+        assert_eq!(g1.id, g2.id);
     }
 }

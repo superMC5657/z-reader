@@ -1,7 +1,7 @@
 {
   "name": "z-reader",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "bump:version": "node scripts/bump-version.mjs --name z-reader",

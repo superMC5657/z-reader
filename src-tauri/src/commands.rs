@@ -216,8 +216,13 @@ pub async fn mark_read(
     ids: Vec<i64>,
     read: bool,
 ) -> Result<(), String> {
+    let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_items_read(&conn, &ids, read)?;
+    if acct.is_some() {
+        let action = if read { "mark_read" } else { "mark_unread" };
+        db::enqueue_item_actions(&conn, &ids, action)?;
+    }
     drop(conn);
     crate::tray::update_tray(&app).await;
     Ok(())
@@ -230,17 +235,41 @@ pub async fn mark_all_read(
     scope: Option<String>,
     scope_id: Option<i64>,
 ) -> Result<(), String> {
+    let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::mark_all_read(&conn, scope.as_deref(), scope_id)?;
+    if acct.as_ref().is_some_and(|a| a.provider == "greader") {
+        // Map the scope to a remote stream and queue the server-side mark-all.
+        let stream = match scope.as_deref() {
+            Some("source") => db::get_source(&conn, scope_id.unwrap_or(-1))?.remote_id,
+            Some("group") => db::get_group(&conn, scope_id.unwrap_or(-1))?
+                .map(|g| format!("user/-/label/{}", g.name)),
+            _ => Some(crate::greader::STREAM_READING_LIST.to_string()),
+        };
+        if let Some(target) = stream.filter(|t| !t.is_empty()) {
+            db::enqueue_stream_action(&conn, "mark_all_read", &target)?;
+        }
+    }
     drop(conn);
     crate::tray::update_tray(&app).await;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn star(state: State<'_, AppState>, id: i64, starred: bool) -> Result<(), String> {
+pub async fn star(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    starred: bool,
+) -> Result<(), String> {
+    let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
-    db::set_item_starred(&conn, id, starred)
+    db::set_item_starred(&conn, id, starred)?;
+    if acct.is_some() {
+        let action = if starred { "star" } else { "unstar" };
+        db::enqueue_item_actions(&conn, &[id], action)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -321,6 +350,86 @@ pub async fn test_proxy(settings: Settings) -> Result<u64, String> {
         .error_for_status()
         .map_err(|e| e.to_string())?;
     Ok(start.elapsed().as_millis() as u64)
+}
+
+// ---------- Phase 2.3: cloud sync (Google Reader API) ----------
+
+/// Validate credentials against the server and store the account on success.
+/// Returns the number of subscriptions on the server.
+#[tauri::command]
+pub async fn sync_login(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server_url: String,
+    username: String,
+    password: String,
+) -> Result<usize, String> {
+    let acct = crate::models::SyncAccount {
+        provider: "greader".into(),
+        server_url: server_url.trim().trim_end_matches('/').to_string(),
+        username: username.trim().to_string(),
+        password,
+    };
+    if acct.server_url.is_empty() || acct.username.is_empty() || acct.password.is_empty() {
+        return Err("server URL, username and password are required".into());
+    }
+    let http = state.http_client();
+    let auth = crate::sync::ensure_session(&state, &http, &acct)
+        .await
+        .map_err(|e| e.to_string())?;
+    let subs = crate::greader::subscriptions(&http, &acct.server_url, &auth)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let path = settings_io::settings_path(&app)?;
+    let mut s = settings_io::load(&path);
+    s.sync_account = Some(acct);
+    settings_io::save(&path, &s)?;
+    Ok(subs.len())
+}
+
+/// Disconnect the account. Local data is kept; queued (unpushed) actions are
+/// dropped because their target server is gone.
+#[tauri::command]
+pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let path = settings_io::settings_path(&app)?;
+    let mut s = settings_io::load(&path);
+    s.sync_account = None;
+    settings_io::save(&path, &s)?;
+    crate::sync::clear_session(&state);
+    {
+        let conn = state.db.lock().await;
+        db::queue_clear(&conn)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let last_sync = {
+        let conn = state.db.lock().await;
+        db::get_state(&conn, "greader.last_sync")?
+    };
+    let queue_len = {
+        let conn = state.db.lock().await;
+        db::queue_len(&conn)?
+    };
+    Ok(serde_json::json!({
+        "lastSync": last_sync.and_then(|v| v.parse::<i64>().ok()),
+        "queueLen": queue_len,
+    }))
+}
+
+/// Run one manual sync cycle.
+#[tauri::command]
+pub async fn sync_now(app: AppHandle) -> Result<serde_json::Value, String> {
+    let r = crate::sync::run(&app, false).await?;
+    Ok(serde_json::json!({
+        "newItems": r.new_items,
+        "pushed": r.pushed,
+        "failures": r.failures,
+        "subscriptions": r.subscription_count,
+    }))
 }
 
 // ---------- Phase 2: regex rules ----------

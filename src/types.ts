@@ -8,6 +8,8 @@ export interface Source {
   lastFetched: number | null
   errorCount: number
   unread: number
+  /** remote stream id when synced from a cloud service */
+  remoteId: string | null
 }
 
 export interface Group {
@@ -32,6 +34,8 @@ export interface Item {
   hasBeenRead: boolean
   starred: boolean
   hidden: boolean
+  /** remote item id (hex) when the article came from a sync server */
+  remoteId: string | null
 }
 
 export interface Settings {
@@ -59,6 +63,22 @@ export interface Settings {
   retentionDays: number
   /** cap unstarred articles kept per source; 0 = unlimited */
   maxItemsPerSource: number
+  /** cloud sync account; null = pure local mode */
+  syncAccount: SyncAccount | null
+}
+
+export interface SyncAccount {
+  /** "greader" (Google Reader compatible API) */
+  provider: 'greader'
+  /** API base URL, e.g. "https://host/api/greader.php" for FreshRSS */
+  serverUrl: string
+  username: string
+  password: string
+}
+
+export interface SyncStatus {
+  lastSync: number | null
+  queueLen: number
 }
 
 export interface GetItemsParams {

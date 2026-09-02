@@ -12,6 +12,8 @@ pub struct Source {
     pub last_fetched: Option<i64>,
     pub error_count: i64,
     pub unread: i64,
+    /// Remote stream id when the source is synced (e.g. "feed/…"), None for local-only.
+    pub remote_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -41,6 +43,8 @@ pub struct Item {
     pub starred: bool,
     /// Set by the rule engine's "hide" action; excluded from normal lists.
     pub hidden: bool,
+    /// Remote item id (normalized hex form) when the article came from a sync server.
+    pub remote_id: Option<String>,
 }
 
 /// Item query scope: everything, one source, or one group.
@@ -72,6 +76,18 @@ pub struct Rule {
     /// "all" | "source:{id}" | "group:{id}"
     pub source_scope: String,
     pub created_at: i64,
+}
+
+/// Cloud sync account credentials. Only "greader" is supported for now.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncAccount {
+    /// "greader" (Google Reader compatible API)
+    pub provider: String,
+    /// API base URL, e.g. "https://host/api/greader.php" for FreshRSS
+    pub server_url: String,
+    pub username: String,
+    pub password: String,
 }
 
 /// Editable subset of a rule sent from the frontend on create/update.
@@ -119,6 +135,8 @@ pub struct Settings {
     pub retention_days: u32,
     /// Cap unstarred articles kept per source; 0 = unlimited.
     pub max_items_per_source: u32,
+    /// Cloud sync account; None = pure local mode.
+    pub sync_account: Option<SyncAccount>,
 }
 
 impl Default for Settings {
@@ -156,6 +174,7 @@ impl Default for Settings {
             close_to_tray: true,
             retention_days: 0,
             max_items_per_source: 0,
+            sync_account: None,
         }
     }
 }
