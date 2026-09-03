@@ -1,8 +1,8 @@
 # ZReader 第二期（Phase 2）路线图与技术设计方案
 
-> **文档版本**：v1.2.0  
+> **文档版本**：v1.3.0  
 > **创建日期**：2026-09-02  
-> **状态**：Phase 2 全部实施完毕——2.1 + 2.2（v0.2.0）、2.3 GReader 云同步（v0.3.0，2026-09-03）；Fever API 与 2.3 的真机联调待后续  
+> **状态**：Phase 2 全部实施完毕——2.1 + 2.2（v0.2.0）、2.3 GReader 云同步（v0.3.0，2026-09-03）；2.3 的真机联调待后续  
 > **基线版本**：ZReader v0.1.2（第一期 MVP 稳定版）
 
 ---
@@ -12,7 +12,7 @@
 ZReader 第一期完成了基于 **Rust + Tauri 2 + Vue 3** 的现代化桌面 RSS 阅读器核心架构（本地 SQLite 存储、Feed 抓取与解析、Ammonia/Readability 阅读视图、Fluent UI 与多视图模式）。
 
 **第二期（Phase 2）的核心目标**：
-1. **打破信息孤岛**：打通与主流第三方云端 RSS 服务的双向同步（Google Reader API、Fever）；
+1. **打破信息孤岛**：打通与主流第三方云端 RSS 服务的双向同步（Google Reader API）；
 2. **构建智能过滤**：复刻并增强原版 Fluent Reader 广受好评的“正则自动化规则引擎”；
 3. **完善桌面原生体验**：补齐系统代理配置、原生桌面通知、系统托盘常驻、完整数据备份与 SQLite FTS5 本地全文搜索。
 
@@ -21,7 +21,7 @@ graph TB
     subgraph Core["ZReader Core (Rust + Tauri 2)"]
         DB[(SQLite / WAL + FTS5)]
         ReqwestClient[Reqwest Client w/ Proxy]
-        SyncEngine[Sync Engine (GReader/Fever)]
+        SyncEngine[Sync Engine (GReader)]
         RuleEngine[Regex Rule Engine]
         NotifyService[Notification & Tray Service]
     end
@@ -58,7 +58,6 @@ graph TB
 
 #### 1.1 协议支持范围
 * **Google Reader API (GReader API)**：支持 FreshRSS、Miniflux、Inoreader、Feedbin、Bazqux 等（通过标准 `/accounts/ClientLogin`、`/reader/api/0/...` 协议）。
-* **Fever API**：支持 Tiny Tiny RSS（Fever 插件）、FreshRSS（Fever 模拟）。
 
 #### 1.2 技术设计要点
 * **同步策略**：
@@ -70,7 +69,6 @@ graph TB
   pub enum SyncProviderType {
       Local,
       GoogleReader,
-      Fever,
   }
 
   pub struct SyncAccount {
@@ -211,7 +209,6 @@ gantt
 
     section Phase 2.3 云同步生态
     Google Reader API 对接与同步引擎 :p3_1, 2026-10-15, 12d
-    Fever API 兼容与联调            :p3_2, after p3_1, 8d
 ```
 
 ### 阶段建议：
@@ -223,7 +220,7 @@ gantt
    * 攻坚 **正则自动化规则引擎** 与 **完整数据备份恢复**。
    * 补齐 Fluent Reader 最具特色的自动化能力。
 3. **Phase 2.3（生态互通）**：
-   * 落地 **Google Reader API 与 Fever 同步引擎**。
+   * 落地 **Google Reader API 同步引擎**。
    * 解决多端（手机端与电脑端）阅读进度同步问题。
 
 ---
