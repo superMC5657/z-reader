@@ -142,6 +142,87 @@ async fn background_refresh(app: tauri::AppHandle) {
     }
 }
 
+/// Max simultaneous feed fetches during a refresh cycle.
+const REFRESH_CONCURRENCY: usize = 6;
+
+/// Per-source result of one refresh task.
+struct SourceRefreshOutcome {
+    inserted: usize,
+    notified: Vec<String>,
+    failed: bool,
+}
+
+/// Everything one refresh task needs; owned so tasks are `'static`.
+struct RefreshTask {
+    app: tauri::AppHandle,
+    client: reqwest::Client,
+    engine: std::sync::Arc<rules::RuleEngine>,
+    favicon_dir: std::path::PathBuf,
+    background: bool,
+    id: i64,
+    group_id: Option<i64>,
+    url: String,
+    favicon: Option<String>,
+}
+
+/// Refresh a single source: fetch + parse (network), store + marks (short DB
+/// critical sections), lazy favicon fill. Never propagates errors; records
+/// them on the source row and reports them via the outcome.
+async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
+    use tauri::{Emitter, Manager};
+    let RefreshTask { app, client, engine, favicon_dir, background, id, group_id, url, favicon } = task;
+    if !background {
+        let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
+    }
+    let state = app.state::<AppState>();
+    let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false };
+    let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
+    match feed::fetch_and_parse(&client, &url).await {
+        Ok(parsed) => {
+            let stored = {
+                let conn = state.db.lock().await;
+                feed::store(&conn, &ctx, &parsed, Some(&engine))
+            };
+            match stored {
+                Ok(stored) => {
+                    out.inserted = stored.inserted;
+                    out.notified = stored.notified;
+                }
+                Err(e) => {
+                    out.failed = true;
+                    log::warn!("store source {id} failed: {e}");
+                    let conn = state.db.lock().await;
+                    let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
+                }
+            }
+            if favicon.is_none() {
+                let icon_url = parsed.icon_url.as_deref();
+                let site_url = parsed.site_url.as_deref();
+                if let Some(fav) =
+                    feed::fetch_favicon(&client, &url, icon_url, site_url, &favicon_dir, id).await
+                {
+                    let conn = state.db.lock().await;
+                    let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
+                }
+            }
+            if !out.failed {
+                let conn = state.db.lock().await;
+                let _ = db::mark_source_fetched(&conn, id, true, None);
+            }
+        }
+        Err(e) => {
+            out.failed = true;
+            log::warn!("refresh source {id} failed: {e}");
+            let conn = state.db.lock().await;
+            let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
+        }
+    }
+    if !background {
+        let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
+    }
+    out
+}
+
 /// Fetch all (or selected) sources, run new entries through the rule engine,
 /// store them, refresh missing favicons, apply the retention policy and sync
 /// the tray badge. Emits fetch-progress / fetch-done for the frontend.
@@ -166,10 +247,10 @@ pub async fn refresh_all_sources(
         (report.new_items, report.failures, report.notified)
     } else {
         let client = state.http_client();
-        let engine = {
+        let engine = std::sync::Arc::new({
             let conn = state.db.lock().await;
             rules::RuleEngine::load(&conn)?
-        };
+        });
         let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
             let conn = state.db.lock().await;
             match ids {
@@ -186,54 +267,50 @@ pub async fn refresh_all_sources(
         };
         let dir = commands::favicon_dir(&app)?;
 
+        // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
+        // Each task owns its network I/O and takes the DB lock only for short
+        // store/mark critical sections.
+        let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
+        let mut set = tokio::task::JoinSet::new();
+        for (id, group_id, url, favicon) in targets {
+            let permit = sem
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|e| e.to_string())?;
+            let task = RefreshTask {
+                app: app.clone(),
+                client: client.clone(),
+                engine: engine.clone(),
+                favicon_dir: dir.clone(),
+                background,
+                id,
+                group_id,
+                url,
+                favicon,
+            };
+            set.spawn(async move {
+                let _permit = permit;
+                refresh_one_source(task).await
+            });
+        }
+
         let mut total_new = 0usize;
         let mut failures = 0usize;
         let mut notified: Vec<String> = Vec::new();
-        for (id, group_id, url, favicon) in &targets {
-            if !background {
-                let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
-            }
-            let ctx = feed::SourceCtx { id: *id, group_id: *group_id, url: url.clone() };
-            match feed::fetch_and_parse(&client, url).await {
-                Ok(parsed) => {
-                    let outcome = {
-                        let conn = state.db.lock().await;
-                        feed::store(&conn, &ctx, &parsed, Some(&engine))
-                    };
-                    match outcome {
-                        Ok(out) => {
-                            total_new += out.inserted;
-                            notified.extend(out.notified);
-                        }
-                        Err(e) => {
-                            failures += 1;
-                            log::warn!("store source {id} failed: {e}");
-                            let conn = state.db.lock().await;
-                            let _ = db::mark_source_fetched(&conn, *id, false);
-                        }
+        while let Some(res) = set.join_next().await {
+            match res {
+                Ok(out) => {
+                    total_new += out.inserted;
+                    if out.failed {
+                        failures += 1;
                     }
-                    if favicon.is_none() {
-                        let icon_url = parsed.icon_url.as_deref();
-                        let site_url = parsed.site_url.as_deref();
-                        if let Some(fav) =
-                            feed::fetch_favicon(&client, url, icon_url, site_url, &dir, *id).await
-                        {
-                            let conn = state.db.lock().await;
-                            let _ = db::set_source_favicon(&conn, *id, fav.to_string_lossy().as_ref());
-                        }
-                    }
-                    let conn = state.db.lock().await;
-                    let _ = db::mark_source_fetched(&conn, *id, true);
+                    notified.extend(out.notified);
                 }
                 Err(e) => {
                     failures += 1;
-                    log::warn!("refresh source {id} failed: {e}");
-                    let conn = state.db.lock().await;
-                    let _ = db::mark_source_fetched(&conn, *id, false);
+                    log::warn!("refresh task failed: {e}");
                 }
-            }
-            if !background {
-                let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
             }
         }
         (total_new, failures, notified)

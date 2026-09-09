@@ -133,11 +133,16 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         conn.pragma_update(None, "user_version", 4).ok();
     }
+    if version < 5 {
+        conn.execute_batch("ALTER TABLE sources ADD COLUMN last_error TEXT;")
+            .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 5).ok();
+    }
     Ok(())
 }
 
 /// Current schema version; bump when adding a migration block above.
-pub const CURRENT_VERSION: i64 = 4;
+pub const CURRENT_VERSION: i64 = 5;
 
 /// Test helper so other modules' tests can build a fully-migrated in-memory DB.
 #[cfg(test)]
@@ -277,11 +282,12 @@ fn row_to_source(row: &Row) -> rusqlite::Result<Source> {
         error_count: row.get(7)?,
         unread: row.get(8)?,
         remote_id: row.get(9)?,
+        last_error: row.get(10)?,
     })
 }
 
 const SOURCE_SELECT: &str = "SELECT s.id, s.url, s.title, s.description, s.favicon, s.group_id, s.last_fetched, s.error_count,
-    (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.has_been_read = 0) AS unread, s.remote_id
+    (SELECT COUNT(*) FROM items i WHERE i.source_id = s.id AND i.has_been_read = 0) AS unread, s.remote_id, s.last_error
     FROM sources s";
 
 pub fn get_sources(conn: &Connection) -> Result<Vec<Source>, String> {
@@ -361,17 +367,23 @@ pub fn set_source_favicon(conn: &Connection, source_id: i64, path: &str) -> Resu
     Ok(())
 }
 
-pub fn mark_source_fetched(conn: &Connection, source_id: i64, ok: bool) -> Result<(), String> {
+pub fn mark_source_fetched(
+    conn: &Connection,
+    source_id: i64,
+    ok: bool,
+    err: Option<&str>,
+) -> Result<(), String> {
     if ok {
         conn.execute(
-            "UPDATE sources SET last_fetched=?1, error_count=0 WHERE id=?2",
+            "UPDATE sources SET last_fetched=?1, error_count=0, last_error=NULL WHERE id=?2",
             params![crate::models::now_ts(), source_id],
         )
         .map_err(|e| e.to_string())?;
     } else {
+        let msg: String = err.unwrap_or("fetch failed").chars().take(500).collect();
         conn.execute(
-            "UPDATE sources SET error_count = error_count + 1 WHERE id=?1",
-            params![source_id],
+            "UPDATE sources SET error_count = error_count + 1, last_error=?1 WHERE id=?2",
+            params![msg, source_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1038,6 +1050,28 @@ pub fn set_state(conn: &Connection, key: &str, value: &str) -> Result<(), String
 mod tests {
     use super::*;
     use crate::models::{GetItemsParams, SyncAction};
+
+    #[test]
+    fn test_mark_source_fetched_records_error() {
+        let conn = Connection::open_in_memory().expect("init in-memory db");
+        migrate(&conn).expect("migrate");
+
+        let s = insert_source(&conn, "https://example.com/1", "Source 1", None, None).expect("insert");
+
+        // Given: a failed fetch with a reason
+        mark_source_fetched(&conn, s.id, false, Some("HTTP 503")).expect("mark failed");
+        // Then: error count bumps and the reason is persisted
+        let fetched = get_source(&conn, s.id).expect("get source");
+        assert_eq!(fetched.error_count, 1);
+        assert_eq!(fetched.last_error.as_deref(), Some("HTTP 503"));
+
+        // Given: a later success
+        mark_source_fetched(&conn, s.id, true, None).expect("mark ok");
+        // Then: counters clear and the stale reason is gone
+        let fetched = get_source(&conn, s.id).expect("get source");
+        assert_eq!(fetched.error_count, 0);
+        assert_eq!(fetched.last_error, None);
+    }
 
     #[test]
     fn test_mark_all_read() {

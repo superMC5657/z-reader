@@ -195,7 +195,7 @@
       "backup": "Full Backup",
       "backupDesc": "Pack the database, settings and icons into a .zreader.bak file",
       "restore": "Restore Backup",
-      "restoreDesc": "Restore all data from a backup file; the app restarts afterwards",
+      "restoreDesc": "Restore all data from a backup file; sync/proxy passwords are never backed up and must be re-entered",
       "confirmRestore": "Restoring will overwrite ALL current data (articles, subscriptions, settings) and restart the app. Continue?",
       "backupDone": "Backup saved: {path}",
       "backupCancelled": "Backup cancelled"
@@ -234,6 +234,8 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "loading": "Loading…",
+    "loadMore": "Load more",
+    "noMore": "No more articles",
     "empty": "No articles",
     "emptyHint": "Try another filter or come back later",
     "error": "Something went wrong"

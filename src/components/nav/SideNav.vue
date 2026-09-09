@@ -250,6 +250,7 @@ async function toggleExpand(gid: number) {
             :key="s.id"
             class="nav-row source"
             :class="{ active: data.scope.type === 'source' && data.scope.id === s.id, error: s.errorCount > 0 }"
+            :title="s.lastError ?? undefined"
             @click="data.selectScope('source', s.id)"
             @contextmenu.prevent="sourceMenu($event, s)"
           >
@@ -266,9 +267,10 @@ async function toggleExpand(gid: number) {
       <button
         v-for="s in ungroupedSources"
         :key="s.id"
-        class="nav-row source ungrouped"
-        :class="{ active: data.scope.type === 'source' && data.scope.id === s.id, error: s.errorCount > 0 }"
-        @click="data.selectScope('source', s.id)"
+          class="nav-row source ungrouped"
+          :class="{ active: data.scope.type === 'source' && data.scope.id === s.id, error: s.errorCount > 0 }"
+          :title="s.lastError ?? undefined"
+          @click="data.selectScope('source', s.id)"
         @contextmenu.prevent="sourceMenu($event, s)"
       >
         <FeedIcon :source="s" :size="16" />

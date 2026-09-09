@@ -30,9 +30,11 @@ pub fn write_archive(
     let mut zw = zip::ZipWriter::new(file);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    let db_bytes = std::fs::read(db_file).map_err(|e| e.to_string())?;
+    // Stream the DB straight into the archive: never hold the whole file in
+    // memory, so hundred-megabyte libraries still export on small machines.
+    let mut db_file = std::fs::File::open(db_file).map_err(|e| e.to_string())?;
     zw.start_file(DB_ENTRY, opts).map_err(|e| e.to_string())?;
-    zw.write_all(&db_bytes).map_err(|e| e.to_string())?;
+    std::io::copy(&mut db_file, &mut zw).map_err(|e| e.to_string())?;
 
     if let Some(sp) = settings_file {
         if let Ok(text) = std::fs::read_to_string(sp) {

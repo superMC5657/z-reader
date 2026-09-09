@@ -10,6 +10,8 @@ export interface Source {
   unread: number
   /** remote stream id when synced from a cloud service */
   remoteId: string | null
+  /** last fetch/store failure message; null when healthy */
+  lastError: string | null
 }
 
 export interface Group {

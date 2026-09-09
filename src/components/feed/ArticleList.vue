@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore, useUiStore } from '../../stores/data'
@@ -71,6 +71,26 @@ watch(searchInput, (q) => {
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => data.search_(q), 250)
 })
+
+// Infinite scroll: when the sentinel enters the list viewport, append the
+// next page. The button remains as a fallback if the observer never fires.
+const listBody = ref<HTMLElement | null>(null)
+const moreSentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+watch([listBody, moreSentinel], ([body, sentinel]) => {
+  observer?.disconnect()
+  observer = null
+  if (body instanceof HTMLElement && sentinel instanceof HTMLElement) {
+    observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) data.loadMore().catch(() => {})
+      },
+      { root: body, rootMargin: '200px' },
+    )
+    observer.observe(sentinel)
+  }
+})
+onBeforeUnmount(() => observer?.disconnect())
 
 function openViewMenu(e: MouseEvent) {
   const target = e.currentTarget as HTMLElement
@@ -175,7 +195,7 @@ function openViewMenu(e: MouseEvent) {
     </header>
 
     <!-- Main List Body -->
-    <div class="list-body">
+    <div ref="listBody" class="list-body">
       <!-- Loading State -->
       <div v-if="data.loading && !data.items.length" class="state">
         <Icon name="arrow-clockwise" :size="28" color="var(--accent)" class="spin" />
@@ -199,6 +219,15 @@ function openViewMenu(e: MouseEvent) {
         @select="(item: Item) => data.selectItem(item.id)"
         @context="onContext"
       />
+
+      <!-- Pagination sentinel: infinite scroll with a clickable fallback -->
+      <div v-if="data.items.length" ref="moreSentinel" class="more-sentinel">
+        <button v-if="data.hasMore && !data.loadingMore" class="more-btn" @click="data.loadMore()">
+          {{ t('common.loadMore') }}
+        </button>
+        <span v-else-if="data.loadingMore" class="more-hint">{{ t('common.loading') }}</span>
+        <span v-else-if="!data.hasMore" class="more-hint end">{{ t('common.noMore') }}</span>
+      </div>
     </div>
   </section>
 </template>
@@ -438,6 +467,36 @@ function openViewMenu(e: MouseEvent) {
   flex: 1;
   overflow-y: auto;
   position: relative;
+}
+
+.more-sentinel {
+  display: flex;
+  justify-content: center;
+  padding: 0.9rem 0 1.4rem;
+}
+
+.more-btn {
+  border: 0.5px solid var(--border);
+  background: var(--bg-toolbar);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.35rem 1.1rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.more-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.more-hint {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+.more-hint.end {
+  opacity: 0.7;
 }
 
 .state {

@@ -14,6 +14,8 @@ pub struct Source {
     pub unread: i64,
     /// Remote stream id when the source is synced (e.g. "feed/…"), None for local-only.
     pub remote_id: Option<String>,
+    /// Last fetch/store failure message; cleared on the next success.
+    pub last_error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

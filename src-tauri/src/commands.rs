@@ -83,7 +83,7 @@ pub async fn add_source(
         let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id)?;
         let ctx = feed::SourceCtx { id: s.id, group_id: s.group_id, url: url.clone() };
         feed::store(&conn, &ctx, &parsed, None)?;
-        db::mark_source_fetched(&conn, s.id, true)?;
+        db::mark_source_fetched(&conn, s.id, true, None)?;
         db::get_source(&conn, s.id)?
     };
     if source.favicon.is_none() {

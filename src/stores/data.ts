@@ -31,6 +31,19 @@ interface Scope {
   id: number | null
 }
 
+const PAGE_SIZE = 300
+
+function listParams(scope: Scope, filter: number, search: string, offset: number) {
+  return {
+    scope: scope.type,
+    scopeId: scope.id,
+    filter,
+    search: search || undefined,
+    limit: PAGE_SIZE,
+    offset,
+  }
+}
+
 export const useDataStore = defineStore('data', {
   state: () => ({
     sources: [] as Source[],
@@ -42,6 +55,8 @@ export const useDataStore = defineStore('data', {
     itemLoading: false,
     loading: false,
     fetching: false,
+    loadingMore: false,
+    hasMore: true,
     search: '',
   }),
   getters: {
@@ -98,15 +113,25 @@ export const useDataStore = defineStore('data', {
     async loadItems() {
       this.loading = true
       try {
-        this.items = await api.getItems({
-          scope: this.scope.type,
-          scopeId: this.scope.id,
-          filter: useAppStore().s.filterType,
-          search: this.search || undefined,
-          limit: 300,
-        })
+        this.items = await api.getItems(
+          listParams(this.scope, useAppStore().s.filterType, this.search, 0),
+        )
+        this.hasMore = this.items.length >= PAGE_SIZE
       } finally {
         this.loading = false
+      }
+    },
+    async loadMore() {
+      if (this.loading || this.loadingMore || !this.hasMore) return
+      this.loadingMore = true
+      try {
+        const page = await api.getItems(
+          listParams(this.scope, useAppStore().s.filterType, this.search, this.items.length),
+        )
+        this.items.push(...page)
+        this.hasMore = page.length >= PAGE_SIZE
+      } finally {
+        this.loadingMore = false
       }
     },
     async selectScope(type: Scope['type'], id: number | null = null) {
@@ -128,6 +153,8 @@ export const useDataStore = defineStore('data', {
       this.itemLoading = true
       try {
         const item = await api.getItem(id)
+        // Drop stale responses when the user navigated away mid-flight.
+        if (this.selectedId !== id) return
         this.selectedItem = item
         if (!item.hasBeenRead) await this.setItemRead(item, true)
       } finally {
@@ -135,20 +162,36 @@ export const useDataStore = defineStore('data', {
       }
     },
     async setItemRead(item: Item, read: boolean) {
-      await api.markRead([item.id], read)
+      const prev = item.hasBeenRead
       item.hasBeenRead = read
       if (this.selectedItem?.id === item.id) this.selectedItem.hasBeenRead = read
       const idx = this.items.findIndex((i) => i.id === item.id)
       if (idx >= 0) this.items[idx].hasBeenRead = read
+      try {
+        await api.markRead([item.id], read)
+      } catch (e) {
+        item.hasBeenRead = prev
+        if (this.selectedItem?.id === item.id) this.selectedItem.hasBeenRead = prev
+        if (idx >= 0) this.items[idx].hasBeenRead = prev
+        throw e
+      }
       await this.loadSources()
     },
     async toggleStar(item: Item) {
       const starred = !item.starred
-      await api.star(item.id, starred)
       item.starred = starred
       if (this.selectedItem?.id === item.id) this.selectedItem.starred = starred
       const idx = this.items.findIndex((i) => i.id === item.id)
       if (idx >= 0) this.items[idx].starred = starred
+      try {
+        await api.star(item.id, starred)
+      } catch (e) {
+        const prev = !starred
+        item.starred = prev
+        if (this.selectedItem?.id === item.id) this.selectedItem.starred = prev
+        if (idx >= 0) this.items[idx].starred = prev
+        throw e
+      }
     },
     async markAllReadInScope() {
       await api.markAllRead(this.scope.type, this.scope.id)

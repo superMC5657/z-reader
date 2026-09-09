@@ -195,7 +195,7 @@
       "backup": "完整备份",
       "backupDesc": "打包数据库、设置与图标的 .zreader.bak 文件",
       "restore": "恢复备份",
-      "restoreDesc": "从备份文件还原全部数据，完成后应用将重启",
+      "restoreDesc": "从备份文件还原全部数据；同步/代理密码不在备份中，恢复后需重新填写",
       "confirmRestore": "恢复将覆盖当前全部数据（文章、订阅、设置），完成后应用将重启。确定继续？",
       "backupDone": "备份完成：{path}",
       "backupCancelled": "已取消备份"
@@ -234,6 +234,8 @@
     "cancel": "取消",
     "confirm": "确定",
     "loading": "加载中…",
+    "loadMore": "加载更多",
+    "noMore": "没有更多文章了",
     "empty": "没有文章",
     "emptyHint": "换个筛选条件或稍后再试",
     "error": "出错了"

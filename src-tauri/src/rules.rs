@@ -213,6 +213,9 @@ impl RuleEngine {
 }
 
 /// Apply all rules to existing articles in a single pass.
+/// Rows stream through in id pages (bounded memory on large archives) while
+/// only id lists accumulate; flag writes go out as batched IN-statements in
+/// one transaction instead of one UPDATE per row.
 pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats, String> {
     struct Row {
         id: i64,
@@ -225,86 +228,110 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
         author: Option<String>,
         url: Option<String>,
     }
-    let rows: Vec<Row> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT i.id, i.source_id, s.group_id, s.url, i.title, i.content, i.summary, i.author, i.url
-                 FROM items i JOIN sources s ON s.id = i.source_id",
-            )
-            .map_err(|e| e.to_string())?;
-        let mapped = stmt
-            .query_map([], |row| {
-                Ok(Row {
-                    id: row.get(0)?,
-                    source_id: row.get(1)?,
-                    group_id: row.get(2)?,
-                    source_url: row.get(3)?,
-                    title: row.get(4)?,
-                    content: row.get(5)?,
-                    summary: row.get(6)?,
-                    author: row.get(7)?,
-                    url: row.get(8)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
-    };
+    const PAGE: i64 = 1000;
 
     let mut stats = BackfillStats::default();
     let mut to_read: Vec<i64> = Vec::new();
     let mut to_star: Vec<i64> = Vec::new();
     let mut to_hide: Vec<i64> = Vec::new();
-    for r in &rows {
-        let content_text = html_to_text(r.content.as_deref().unwrap_or(""));
-        let summary_text = html_to_text(r.summary.as_deref().unwrap_or(""));
-        let full_text = format!("{content_text} {summary_text}");
-        let ctx = ArticleEvalContext {
-            source_id: r.source_id,
-            group_id: r.group_id,
-            source_url: &r.source_url,
-            title: &r.title,
-            content_text: &full_text,
-            author: r.author.as_deref(),
-            url: r.url.as_deref(),
+
+    let mut last_id = 0i64;
+    loop {
+        let rows: Vec<Row> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT i.id, i.source_id, s.group_id, s.url, i.title, i.content, i.summary, i.author, i.url
+                     FROM items i JOIN sources s ON s.id = i.source_id
+                     WHERE i.id > ?1 ORDER BY i.id LIMIT ?2",
+                )
+                .map_err(|e| e.to_string())?;
+            let mapped = stmt
+                .query_map(params![last_id, PAGE], |row| {
+                    Ok(Row {
+                        id: row.get(0)?,
+                        source_id: row.get(1)?,
+                        group_id: row.get(2)?,
+                        source_url: row.get(3)?,
+                        title: row.get(4)?,
+                        content: row.get(5)?,
+                        summary: row.get(6)?,
+                        author: row.get(7)?,
+                        url: row.get(8)?,
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+            mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
         };
-        let out = engine.evaluate(&ctx);
-        if out.mark_read {
-            to_read.push(r.id);
+        if rows.is_empty() {
+            break;
         }
-        if out.star {
-            to_star.push(r.id);
-        }
-        if out.hide {
-            to_hide.push(r.id);
-            // Hidden articles leave the reading flow entirely.
-            if !to_read.contains(&r.id) {
+        last_id = rows.last().map(|r| r.id).unwrap_or(last_id);
+
+        for r in &rows {
+            let content_text = html_to_text(r.content.as_deref().unwrap_or(""));
+            let summary_text = html_to_text(r.summary.as_deref().unwrap_or(""));
+            let full_text = format!("{content_text} {summary_text}");
+            let ctx = ArticleEvalContext {
+                source_id: r.source_id,
+                group_id: r.group_id,
+                source_url: &r.source_url,
+                title: &r.title,
+                content_text: &full_text,
+                author: r.author.as_deref(),
+                url: r.url.as_deref(),
+            };
+            let out = engine.evaluate(&ctx);
+            if out.mark_read {
                 to_read.push(r.id);
             }
-        }
-        if out.notify {
-            stats.notified += 1;
+            if out.star {
+                to_star.push(r.id);
+            }
+            if out.hide {
+                to_hide.push(r.id);
+                // Hidden articles leave the reading flow entirely.
+                if !out.mark_read {
+                    to_read.push(r.id);
+                }
+            }
+            if out.notify {
+                stats.notified += 1;
+            }
         }
     }
 
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    for id in &to_read {
-        tx.execute("UPDATE items SET has_been_read=1 WHERE id=?1", params![id])
-            .map_err(|e| e.to_string())?;
-    }
-    for id in &to_star {
-        tx.execute("UPDATE items SET starred=1 WHERE id=?1", params![id])
-            .map_err(|e| e.to_string())?;
-    }
-    for id in &to_hide {
-        tx.execute("UPDATE items SET hidden=1 WHERE id=?1", params![id])
-            .map_err(|e| e.to_string())?;
-    }
+    batch_set_flag(&tx, "has_been_read", &to_read)?;
+    batch_set_flag(&tx, "starred", &to_star)?;
+    batch_set_flag(&tx, "hidden", &to_hide)?;
     tx.commit().map_err(|e| e.to_string())?;
 
     stats.marked_read = to_read.len();
     stats.starred = to_star.len();
     stats.hidden = to_hide.len();
     Ok(stats)
+}
+
+/// Set one flag column for many rows with chunked `WHERE id IN` statements.
+/// `column` is always an internal constant, never user input.
+fn batch_set_flag(
+    tx: &rusqlite::Transaction,
+    column: &str,
+    ids: &[i64],
+) -> Result<(), String> {
+    const CHUNK: usize = 500;
+    for chunk in ids.chunks(CHUNK) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let placeholders: Vec<String> =
+            (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!("UPDATE items SET {column}=1 WHERE id IN ({})", placeholders.join(","));
+        let mut stmt = tx.prepare(&sql).map_err(|e| e.to_string())?;
+        stmt.execute(rusqlite::params_from_iter(chunk.iter()))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
