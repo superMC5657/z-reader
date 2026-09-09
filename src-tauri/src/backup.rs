@@ -37,7 +37,8 @@ pub fn write_archive(
     if let Some(sp) = settings_file {
         if let Ok(text) = std::fs::read_to_string(sp) {
             zw.start_file(SETTINGS_ENTRY, opts).map_err(|e| e.to_string())?;
-            zw.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            zw.write_all(scrub_settings_json(&text).as_bytes())
+                .map_err(|e| e.to_string())?;
         }
     }
 
@@ -65,6 +66,33 @@ pub fn write_archive(
 
     zw.finish().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Strip secrets from settings.json before it enters a backup archive.
+///
+/// `syncAccount.password` and `proxyPassword` are redacted; everything else
+/// (server URL, username, host) is kept so restore still reconnects and the
+/// user only re-enters secrets. Parse failures fall back to the original text
+/// to preserve restore compatibility.
+pub fn scrub_settings_json(text: &str) -> String {
+    let mut v: serde_json::Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(_) => return text.to_string(),
+    };
+    if let Some(obj) = v.as_object_mut() {
+        if let Some(acct) = obj.get_mut("syncAccount").and_then(|a| a.as_object_mut()) {
+            if acct.contains_key("password") {
+                acct.insert("password".into(), serde_json::Value::String(String::new()));
+            }
+        }
+        // camelCase (serde) + snake_case (hand-written files) both redacted.
+        for key in ["proxyPassword", "proxy_password"] {
+            if obj.contains_key(key) {
+                obj.insert(key.into(), serde_json::Value::String(String::new()));
+            }
+        }
+    }
+    serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())
 }
 
 /// Extract an archive into a destination directory (path-traversal safe).
@@ -185,10 +213,11 @@ mod tests {
         extract_archive(&archive, &restored_dir).unwrap();
         let restored_db = restored_dir.join(DB_ENTRY);
         assert!(restored_db.exists());
-        assert_eq!(
-            std::fs::read_to_string(restored_dir.join(SETTINGS_ENTRY)).unwrap(),
-            "{\"theme\":\"dark\"}"
-        );
+        // Settings survive the scrub roundtrip as equivalent JSON (pretty-printed).
+        let restored_settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(restored_dir.join(SETTINGS_ENTRY)).unwrap())
+                .unwrap();
+        assert_eq!(restored_settings.get("theme").and_then(|v| v.as_str()), Some("dark"));
         validate_db(&restored_db).unwrap();
 
         let conn = crate::db::open(&restored_db).unwrap();
@@ -205,8 +234,28 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_rejects_garbage() {
-        let dir = temp_dir("bad");
+    fn test_scrub_removes_passwords() {
+        // Given: settings carrying sync + proxy secrets
+        let raw = r#"{"theme":"dark","proxyPassword":"s3cret","syncAccount":{"provider":"greader","serverUrl":"https://x","username":"u","password":"hunter2"}}"#;
+        // When: scrubbed for archival
+        let out = scrub_settings_json(raw);
+        // Then: secrets are gone, everything else survives as valid JSON
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v.get("theme").and_then(|v| v.as_str()), Some("dark"));
+        assert_eq!(v.get("proxyPassword").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(
+            v.get("syncAccount").and_then(|a| a.get("password")).and_then(|p| p.as_str()),
+            Some("")
+        );
+        assert_eq!(
+            v.get("syncAccount").and_then(|a| a.get("username")).and_then(|u| u.as_str()),
+            Some("u")
+        );
+        assert!(!out.contains("s3cret") && !out.contains("hunter2"));
+    }
+
+    #[test]
+    fn test_validate_rejects_garbage() {        let dir = temp_dir("bad");
         let bad = dir.join("bad.db");
         std::fs::write(&bad, b"not a database at all").unwrap();
         assert!(validate_db(&bad).is_err());

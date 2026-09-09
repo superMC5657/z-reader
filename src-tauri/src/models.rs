@@ -23,6 +23,7 @@ pub struct Group {
     pub name: String,
     pub expanded: bool,
     pub sort: i64,
+    pub remote_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -60,6 +61,180 @@ pub struct GetItemsParams {
     pub offset: Option<u32>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleTargetField {
+    Title,
+    Content,
+    Author,
+    SourceUrl,
+    Any,
+}
+
+impl RuleTargetField {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuleTargetField::Title => "title",
+            RuleTargetField::Content => "content",
+            RuleTargetField::Author => "author",
+            RuleTargetField::SourceUrl => "source_url",
+            RuleTargetField::Any => "any",
+        }
+    }
+}
+
+impl std::fmt::Display for RuleTargetField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for RuleTargetField {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "title" => Ok(RuleTargetField::Title),
+            "content" => Ok(RuleTargetField::Content),
+            "author" => Ok(RuleTargetField::Author),
+            "source_url" => Ok(RuleTargetField::SourceUrl),
+            "any" => Ok(RuleTargetField::Any),
+            _ => Err(format!("unknown target_field: {s}")),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleActionType {
+    MarkRead,
+    Star,
+    Hide,
+    Notify,
+}
+
+impl RuleActionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuleActionType::MarkRead => "mark_read",
+            RuleActionType::Star => "star",
+            RuleActionType::Hide => "hide",
+            RuleActionType::Notify => "notify",
+        }
+    }
+}
+
+impl std::fmt::Display for RuleActionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for RuleActionType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mark_read" => Ok(RuleActionType::MarkRead),
+            "star" => Ok(RuleActionType::Star),
+            "hide" => Ok(RuleActionType::Hide),
+            "notify" => Ok(RuleActionType::Notify),
+            _ => Err(format!("unknown action_type: {s}")),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum RuleSourceScope {
+    All,
+    Source(i64),
+    Group(i64),
+}
+
+impl std::fmt::Display for RuleSourceScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuleSourceScope::All => write!(f, "all"),
+            RuleSourceScope::Source(id) => write!(f, "source:{id}"),
+            RuleSourceScope::Group(id) => write!(f, "group:{id}"),
+        }
+    }
+}
+
+impl std::str::FromStr for RuleSourceScope {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "all" {
+            Ok(RuleSourceScope::All)
+        } else if let Some(id) = s.strip_prefix("source:") {
+            id.parse::<i64>().map(RuleSourceScope::Source).map_err(|e| e.to_string())
+        } else if let Some(id) = s.strip_prefix("group:") {
+            id.parse::<i64>().map(RuleSourceScope::Group).map_err(|e| e.to_string())
+        } else {
+            Err(format!("invalid source_scope: {s}"))
+        }
+    }
+}
+
+impl Serialize for RuleSourceScope {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for RuleSourceScope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncAction {
+    MarkRead,
+    MarkUnread,
+    Star,
+    Unstar,
+    MarkAllRead,
+}
+
+impl SyncAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncAction::MarkRead => "mark_read",
+            SyncAction::MarkUnread => "mark_unread",
+            SyncAction::Star => "star",
+            SyncAction::Unstar => "unstar",
+            SyncAction::MarkAllRead => "mark_all_read",
+        }
+    }
+}
+
+impl std::fmt::Display for SyncAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for SyncAction {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mark_read" => Ok(SyncAction::MarkRead),
+            "mark_unread" => Ok(SyncAction::MarkUnread),
+            "star" => Ok(SyncAction::Star),
+            "unstar" => Ok(SyncAction::Unstar),
+            "mark_all_read" => Ok(SyncAction::MarkAllRead),
+            _ => Err(format!("unknown sync action: {s}")),
+        }
+    }
+}
+
 /// A user-defined regex automation rule.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -67,14 +242,11 @@ pub struct Rule {
     pub id: i64,
     pub name: String,
     pub pattern: String,
-    /// "title" | "content" | "author" | "source_url" | "any"
-    pub target_field: String,
-    /// "mark_read" | "star" | "hide" | "notify"
-    pub action_type: String,
+    pub target_field: RuleTargetField,
+    pub action_type: RuleActionType,
     pub is_case_sensitive: bool,
     pub is_enabled: bool,
-    /// "all" | "source:{id}" | "group:{id}"
-    pub source_scope: String,
+    pub source_scope: RuleSourceScope,
     pub created_at: i64,
 }
 
@@ -96,11 +268,11 @@ pub struct SyncAccount {
 pub struct RuleInput {
     pub name: String,
     pub pattern: String,
-    pub target_field: String,
-    pub action_type: String,
+    pub target_field: RuleTargetField,
+    pub action_type: RuleActionType,
     pub is_case_sensitive: bool,
     pub is_enabled: bool,
-    pub source_scope: String,
+    pub source_scope: RuleSourceScope,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -31,6 +31,8 @@ pub struct GSubscription {
     pub title: String,
     /// Feed URL as reported by the server.
     pub url: Option<String>,
+    /// Category stream id (e.g. "user/-/label/Tech").
+    pub category_id: Option<String>,
     /// Category label (maps to a local group).
     pub category: Option<String>,
 }
@@ -58,20 +60,25 @@ pub fn normalize_item_id(raw: &str) -> Option<String> {
         if hex.len() == 16 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some(hex);
         }
-        return None;
     }
-    if !raw.is_empty() && raw.chars().all(|c| c.is_ascii_digit()) {
-        let n: i64 = raw.parse().ok()?;
-        return Some(format!("{n:016x}"));
+    // Also accept 16-char hex directly.
+    let hex = raw.trim().to_ascii_lowercase();
+    if hex.len() == 16 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(hex);
+    }
+    // Try decimal int64 -> hex format.
+    if let Ok(val) = raw.trim().parse::<u64>() {
+        return Some(format!("{val:016x}"));
     }
     None
 }
 
-pub fn long_form_id(hex: &str) -> String {
-    format!("{ITEM_ID_PREFIX}{hex}")
+/// Convert canonical hex remote id back to GReader long-form id for edit-tag.
+pub fn long_form_id(hex_id: &str) -> String {
+    format!("{ITEM_ID_PREFIX}{hex_id}")
 }
 
-// ---------- parsing (pure) ----------
+// ---------- parser helpers ----------
 
 pub fn parse_login(body: &str) -> Option<String> {
     body.lines()
@@ -97,17 +104,22 @@ pub fn parse_subscriptions(body: &str) -> Result<Vec<GSubscription>, String> {
                 .unwrap_or("")
                 .to_string();
             let url = s.get("url").and_then(|u| u.as_str()).map(String::from);
-            let category = s
+            let (category_id, category) = s
                 .get("categories")
                 .and_then(|c| c.as_array())
                 .and_then(|arr| {
                     arr.iter().find_map(|c| {
-                        c.get("label")
-                            .and_then(|l| l.as_str())
-                            .map(String::from)
+                        let id = c.get("id").and_then(|i| i.as_str()).map(String::from);
+                        let label = c.get("label").and_then(|l| l.as_str()).map(String::from);
+                        if id.is_some() || label.is_some() {
+                            Some((id, label))
+                        } else {
+                            None
+                        }
                     })
-                });
-            Some(GSubscription { stream_id, title, url, category })
+                })
+                .unwrap_or((None, None));
+            Some(GSubscription { stream_id, title, url, category_id, category })
         })
         .collect())
 }
@@ -474,6 +486,7 @@ mod tests {
         let subs = parse_subscriptions(body).unwrap();
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0].stream_id, "feed/2");
+        assert_eq!(subs[0].category_id.as_deref(), Some("user/-/label/Tech"));
         assert_eq!(subs[0].category.as_deref(), Some("Tech"));
         assert_eq!(subs[0].url.as_deref(), Some("https://example.com/feed.xml"));
         assert_eq!(subs[1].category, None);

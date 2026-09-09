@@ -6,9 +6,9 @@
 
 use crate::db;
 use crate::greader::{self, GReaderError};
-use crate::models::{html_to_text, SyncAccount};
+use crate::models::{html_to_text, SyncAccount, SyncAction};
 use crate::AppState;
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 const MAX_PAGES: usize = 20;
 const IDS_PAGE_SIZE: u32 = 1000;
@@ -24,6 +24,8 @@ pub struct SyncReport {
     pub pushed: usize,
     pub failures: usize,
     pub subscription_count: usize,
+    /// Titles of pulled articles matched by a "notify" rule.
+    pub notified: Vec<String>,
 }
 
 /// Cached login session; never persisted to disk.
@@ -74,8 +76,11 @@ async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount) -
     ensure_session(state, http, acct).await
 }
 
-/// Run one full sync cycle. Emits "fetch-done" so the frontend reloads.
-pub async fn run(app: &tauri::AppHandle, background: bool) -> Result<SyncReport, String> {
+/// Run one full sync cycle:
+/// 1. push local queued actions to server (push-queue-first)
+/// 2. sync subscriptions list (creates/updates sources & groups)
+/// 3. incremental pull of new/updated items
+pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
         .sync_account
@@ -87,73 +92,53 @@ pub async fn run(app: &tauri::AppHandle, background: bool) -> Result<SyncReport,
 
     let mut report = SyncReport::default();
 
-    // 1. push queued local actions
-    match push_queue(&state, &http, &acct, &auth).await {
-        Ok(n) => report.pushed = n,
-        Err(GReaderError::Auth(_)) => {
-            auth = relogin(&state, &http, &acct).await.map_err(|e| e.to_string())?;
-            match push_queue(&state, &http, &acct, &auth).await {
-                Ok(n) => report.pushed = n,
+    macro_rules! retry_auth {
+        ($op_name:expr, $expr:expr) => {
+            match $expr {
+                Ok(val) => Some(val),
+                Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct).await {
+                    Ok(new_auth) => {
+                        auth = new_auth;
+                        match $expr {
+                            Ok(val) => Some(val),
+                            Err(e) => {
+                                log::warn!("{} retry failed: {e}", $op_name);
+                                report.failures += 1;
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("relogin for {} failed: {e}", $op_name);
+                        report.failures += 1;
+                        None
+                    }
+                },
                 Err(e) => {
-                    log::warn!("sync push retry failed: {e}");
+                    log::warn!("{} failed: {e}", $op_name);
                     report.failures += 1;
+                    None
                 }
             }
-        }
-        Err(e) => {
-            log::warn!("sync push failed: {e}");
-            report.failures += 1;
-        }
+        };
+    }
+
+    // 1. push queued local actions
+    if let Some(n) = retry_auth!("sync push", push_queue(&state, &http, &acct, &auth).await) {
+        report.pushed = n;
     }
 
     // 2. sync subscriptions
-    match sync_subscriptions(&state, &http, &acct, &auth).await {
-        Ok(n) => report.subscription_count = n,
-        Err(GReaderError::Auth(_)) => {
-            auth = relogin(&state, &http, &acct).await.map_err(|e| e.to_string())?;
-            match sync_subscriptions(&state, &http, &acct, &auth).await {
-                Ok(n) => report.subscription_count = n,
-                Err(e) => {
-                    log::warn!("sync subscriptions retry failed: {e}");
-                    report.failures += 1;
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("sync subscriptions failed: {e}");
-            report.failures += 1;
-        }
+    if let Some(n) = retry_auth!("sync subscriptions", sync_subscriptions(&state, &http, &acct, &auth).await) {
+        report.subscription_count = n;
     }
 
     // 3. incremental item pull
-    match pull_items(&state, &http, &acct, &auth).await {
-        Ok(n) => report.new_items = n,
-        Err(GReaderError::Auth(_)) => {
-            auth = relogin(&state, &http, &acct).await.map_err(|e| e.to_string())?;
-            match pull_items(&state, &http, &acct, &auth).await {
-                Ok(n) => report.new_items = n,
-                Err(e) => {
-                    log::warn!("sync pull retry failed: {e}");
-                    report.failures += 1;
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("sync pull failed: {e}");
-            report.failures += 1;
-        }
+    if let Some((n, notified)) = retry_auth!("sync pull", pull_items(&state, &http, &acct, &auth).await) {
+        report.new_items = n;
+        report.notified = notified;
     }
 
-    crate::tray::update_tray(app).await;
-    let _ = app.emit(
-        "fetch-done",
-        serde_json::json!({
-            "newItems": report.new_items,
-            "failures": report.failures,
-            "background": background,
-            "sync": true,
-        }),
-    );
     Ok(report)
 }
 
@@ -176,10 +161,10 @@ async fn push_queue(
     let token = greader::get_token(http, &acct.server_url, auth).await?;
 
     use std::collections::HashMap;
-    let mut by_action: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+    let mut by_action: HashMap<SyncAction, Vec<(i64, String)>> = HashMap::new();
     let mut stream_actions: Vec<(i64, String)> = Vec::new();
     for e in entries {
-        if e.action == "mark_all_read" {
+        if e.action == SyncAction::MarkAllRead {
             stream_actions.push((e.id, e.target));
         } else {
             by_action.entry(e.action).or_default().push((e.id, e.target));
@@ -188,12 +173,12 @@ async fn push_queue(
 
     let mut pushed_ids: Vec<i64> = Vec::new();
     for (action, items) in &by_action {
-        let (add, remove): (&[&str], &[&str]) = match action.as_str() {
-            "mark_read" => (&[greader::STATE_READ], &[]),
-            "mark_unread" => (&[], &[greader::STATE_READ]),
-            "star" => (&[greader::STATE_STARRED], &[]),
-            "unstar" => (&[], &[greader::STATE_STARRED]),
-            _ => continue,
+        let (add, remove): (&[&str], &[&str]) = match action {
+            SyncAction::MarkRead => (&[greader::STATE_READ], &[]),
+            SyncAction::MarkUnread => (&[], &[greader::STATE_READ]),
+            SyncAction::Star => (&[greader::STATE_STARRED], &[]),
+            SyncAction::Unstar => (&[], &[greader::STATE_STARRED]),
+            SyncAction::MarkAllRead => continue,
         };
         for chunk in items.chunks(PUSH_BATCH) {
             let ids: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
@@ -227,13 +212,18 @@ async fn sync_subscriptions(
     {
         let conn = state.db.lock().await;
         for sub in &subs {
-            let group_id = match &sub.category {
-                Some(label) => Some(
+            let group_id = match (&sub.category_id, &sub.category) {
+                (Some(cid), Some(label)) => Some(
+                    db::find_or_create_group_by_remote(&conn, cid, label)
+                        .map_err(GReaderError::Other)?
+                        .id,
+                ),
+                (None, Some(label)) => Some(
                     db::find_or_create_group(&conn, label)
                         .map_err(GReaderError::Other)?
                         .id,
                 ),
-                None => None,
+                _ => None,
             };
             let url = sub
                 .url
@@ -267,15 +257,34 @@ async fn sync_subscriptions(
     Ok(count)
 }
 
+/// Local identity of a synced feed: (source_id, group_id, source_url).
+type SourceIdentity = (i64, Option<i64>, String);
+
+/// Merge server state with local rule outcome: server read/starred state wins
+/// (LWW), rule flags apply on top. Returns (has_been_read, starred, hidden).
+fn apply_rules_to_remote(
+    server_read: bool,
+    server_starred: bool,
+    outcome: &crate::rules::Outcome,
+) -> (bool, bool, bool) {
+    (
+        server_read || outcome.mark_read || outcome.hide,
+        server_starred || outcome.star,
+        outcome.hide,
+    )
+}
+
 /// Pull items changed since the last sync cursor and upsert them with the
-/// server's read/starred state.
+/// server's read/starred state, running new entries through the rule engine
+/// (mark read / star / hide / notify) like the local refresh path.
+/// Returns (new row count, notify-matched titles).
 async fn pull_items(
     state: &AppState,
     http: &reqwest::Client,
     acct: &SyncAccount,
     auth: &str,
-) -> Result<usize, GReaderError> {
-    let (ot, stream_map): (i64, std::collections::HashMap<String, i64>) = {
+) -> Result<(usize, Vec<String>), GReaderError> {
+    let (ot, stream_map): (i64, std::collections::HashMap<String, SourceIdentity>) = {
         let conn = state.db.lock().await;
         let ot = db::get_state(&conn, "greader.last_sync")
             .map_err(GReaderError::Other)?
@@ -285,9 +294,18 @@ async fn pull_items(
         let map = db::get_sources(&conn)
             .map_err(GReaderError::Other)?
             .into_iter()
-            .filter_map(|s| s.remote_id.map(|r| (r, s.id)))
+            .filter_map(|s| {
+                s.remote_id.map(|r| {
+                    let ctx = (s.id, s.group_id, s.url.clone());
+                    (r, ctx)
+                })
+            })
             .collect();
         (ot, map)
+    };
+    let engine = {
+        let conn = state.db.lock().await;
+        crate::rules::RuleEngine::load(&conn).map_err(GReaderError::Other)?
     };
 
     // Page through the reading-list stream (no read filter: state changes for
@@ -314,20 +332,41 @@ async fn pull_items(
     }
 
     let mut new_count = 0usize;
+    let mut notified: Vec<String> = Vec::new();
     for chunk in ids.chunks(CONTENTS_BATCH) {
         let items = greader::contents(http, &acct.server_url, auth, chunk).await?;
         let conn = state.db.lock().await;
         for item in items {
-            let Some(&source_id) = stream_map.get(&item.stream_id) else {
+            let Some((source_id, group_id, source_url)) = stream_map.get(&item.stream_id) else {
                 continue; // feed not linked locally yet
             };
             let content = ammonia::clean(&item.content);
             let snippet: String = html_to_text(&content).trim().chars().take(200).collect();
+            let (has_been_read, starred, hidden) = if engine.is_empty() {
+                (item.read, item.starred, false)
+            } else {
+                let content_text = html_to_text(&content);
+                let ctx = crate::rules::ArticleEvalContext {
+                    source_id: *source_id,
+                    group_id: *group_id,
+                    source_url,
+                    title: &item.title,
+                    content_text: &content_text,
+                    author: item.author.as_deref(),
+                    url: item.url.as_deref(),
+                };
+                let outcome = engine.evaluate(&ctx);
+                let flags = apply_rules_to_remote(item.read, item.starred, &outcome);
+                if outcome.notify {
+                    notified.push(item.title.clone());
+                }
+                flags
+            };
             let inserted = db::upsert_remote_item(
                 &conn,
                 &db::RemoteItemUpsert {
                     remote_id: &item.remote_id,
-                    source_id,
+                    source_id: *source_id,
                     title: &item.title,
                     url: item.url.as_deref(),
                     author: item.author.as_deref(),
@@ -335,8 +374,9 @@ async fn pull_items(
                     content: Some(&content),
                     summary: None,
                     snippet: Some(&snippet),
-                    has_been_read: item.read,
-                    starred: item.starred,
+                    has_been_read,
+                    starred,
+                    hidden,
                 },
             )
             .map_err(GReaderError::Other)?;
@@ -351,5 +391,34 @@ async fn pull_items(
         db::set_state(&conn, "greader.last_sync", &crate::models::now_ts().to_string())
             .map_err(GReaderError::Other)?;
     }
-    Ok(new_count)
+    Ok((new_count, notified))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rule_flags_apply_on_top_of_server_state() {
+        // Given: server says unread/unstarred, rules say mark-read + star + hide + notify
+        let outcome = crate::rules::Outcome { mark_read: true, star: true, hide: true, notify: true };
+        // When: merged
+        let flags = apply_rules_to_remote(false, false, &outcome);
+        // Then: every rule flag is honored
+        assert_eq!(flags, (true, true, true));
+
+        // Given: server already read/starred, no rules match
+        let quiet = crate::rules::Outcome::default();
+        // When: merged
+        let flags = apply_rules_to_remote(true, true, &quiet);
+        // Then: server state survives untouched
+        assert_eq!(flags, (true, true, false));
+
+        // Given: server unread, only notify matches (no state change)
+        let notify_only = crate::rules::Outcome { notify: true, ..Default::default() };
+        // When: merged
+        let flags = apply_rules_to_remote(false, false, &notify_only);
+        // Then: row state unchanged
+        assert_eq!(flags, (false, false, false));
+    }
 }

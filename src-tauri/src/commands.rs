@@ -1,6 +1,6 @@
 use crate::db;
 use crate::feed;
-use crate::models::{GetItemsParams, Settings};
+use crate::models::{GetItemsParams, Settings, SyncAction};
 use crate::opml_io;
 use crate::settings as settings_io;
 use crate::AppState;
@@ -220,7 +220,7 @@ pub async fn mark_read(
     let conn = state.db.lock().await;
     db::set_items_read(&conn, &ids, read)?;
     if acct.is_some() {
-        let action = if read { "mark_read" } else { "mark_unread" };
+        let action = if read { SyncAction::MarkRead } else { SyncAction::MarkUnread };
         db::enqueue_item_actions(&conn, &ids, action)?;
     }
     drop(conn);
@@ -240,14 +240,17 @@ pub async fn mark_all_read(
     db::mark_all_read(&conn, scope.as_deref(), scope_id)?;
     if acct.as_ref().is_some_and(|a| a.provider == "greader") {
         // Map the scope to a remote stream and queue the server-side mark-all.
+        // Only streams the server actually knows (remote_id) are reported;
+        // fabricating a label stream for never-synced groups would push a
+        // bogus target.
         let stream = match scope.as_deref() {
             Some("source") => db::get_source(&conn, scope_id.unwrap_or(-1))?.remote_id,
             Some("group") => db::get_group(&conn, scope_id.unwrap_or(-1))?
-                .map(|g| format!("user/-/label/{}", g.name)),
+                .and_then(|g| g.remote_id),
             _ => Some(crate::greader::STREAM_READING_LIST.to_string()),
         };
         if let Some(target) = stream.filter(|t| !t.is_empty()) {
-            db::enqueue_stream_action(&conn, "mark_all_read", &target)?;
+            db::enqueue_stream_action(&conn, SyncAction::MarkAllRead, &target)?;
         }
     }
     drop(conn);
@@ -266,7 +269,7 @@ pub async fn star(
     let conn = state.db.lock().await;
     db::set_item_starred(&conn, id, starred)?;
     if acct.is_some() {
-        let action = if starred { "star" } else { "unstar" };
+        let action = if starred { SyncAction::Star } else { SyncAction::Unstar };
         db::enqueue_item_actions(&conn, &[id], action)?;
     }
     Ok(())
@@ -422,8 +425,30 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
 
 /// Run one manual sync cycle.
 #[tauri::command]
-pub async fn sync_now(app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let r = crate::sync::run(&app, false).await?;
+    let settings = settings_io::load(&settings_io::settings_path(&app)?);
+    {
+        let conn = state.db.lock().await;
+        match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
+            Ok(n) if n > 200 => {
+                let _ = db::vacuum(&conn);
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("retention cleanup failed: {e}"),
+        }
+    }
+    crate::tray::update_tray(&app).await;
+    use tauri::Emitter;
+    let _ = app.emit(
+        "fetch-done",
+        serde_json::json!({
+            "newItems": r.new_items,
+            "failures": r.failures,
+            "background": false,
+            "sync": true,
+        }),
+    );
     Ok(serde_json::json!({
         "newItems": r.new_items,
         "pushed": r.pushed,
@@ -441,21 +466,12 @@ fn validate_rule_input(r: &crate::models::RuleInput) -> Result<(), String> {
     if r.pattern.is_empty() {
         return Err("pattern is empty".into());
     }
-    if !crate::rules::valid_target(&r.target_field) {
-        return Err(format!("invalid target field: {}", r.target_field));
-    }
-    if !crate::rules::valid_action(&r.action_type) {
-        return Err(format!("invalid action: {}", r.action_type));
-    }
-    if !crate::rules::valid_scope(&r.source_scope) {
-        return Err(format!("invalid source scope: {}", r.source_scope));
-    }
     let probe = crate::models::Rule {
         id: 0,
         name: String::new(),
         pattern: r.pattern.clone(),
-        target_field: r.target_field.clone(),
-        action_type: r.action_type.clone(),
+        target_field: r.target_field,
+        action_type: r.action_type,
         is_case_sensitive: r.is_case_sensitive,
         is_enabled: r.is_enabled,
         source_scope: r.source_scope.clone(),
@@ -585,7 +601,50 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
     }
     crate::backup::validate_db(&restored_db)?;
 
-    // settings.json is restored before the DB swap so the frontend reload sees it.
+    // Stage the validated DB next to the live file (outside the lock so a
+    // slow copy doesn't block readers) and re-validate the staged copy.
+    let db_path = state.db_path.clone();
+    let staged = db_path.with_extension("db.restoring");
+    std::fs::copy(&restored_db, &staged).map_err(|e| e.to_string())?;
+    crate::backup::validate_db(&staged)?;
+
+    // Snapshot the live DB for rollback (best effort; restore proceeds anyway).
+    let rollback = db_path.with_extension("db.pre-restore-bak");
+    {
+        let conn = state.db.lock().await;
+        let _ = crate::backup::snapshot_live(&conn, &rollback);
+    }
+
+    // Swap the database: drop the live connection, replace files, reopen
+    // (db::open runs migrations, so v1 backups are upgraded in place).
+    // Any failure restores the pre-restore snapshot, so the live data is
+    // never left in a half-replaced state.
+    {
+        let mut guard = state.db.lock().await;
+        *guard = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+        let swapped: Result<(), String> = (|| {
+            let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
+            let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
+            if std::fs::rename(&staged, &db_path).is_err() {
+                std::fs::copy(&staged, &db_path).map_err(|e| e.to_string())?;
+                let _ = std::fs::remove_file(&staged);
+            }
+            *guard = crate::db::open(&db_path)?;
+            Ok(())
+        })();
+        if let Err(e) = swapped {
+            let _ = std::fs::copy(&rollback, &db_path);
+            match crate::db::open(&db_path) {
+                Ok(conn) => *guard = conn,
+                Err(_) => log::warn!("restore rollback reopen failed; running on placeholder"),
+            }
+            let _ = std::fs::remove_file(&staged);
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(e);
+        }
+    }
+
+    // Settings + favicons land only after the DB swap succeeded.
     let restored_settings = tmp_dir.join(crate::backup::SETTINGS_ENTRY);
     if restored_settings.exists() {
         let settings_file = settings_io::settings_path(&app)?;
@@ -607,17 +666,6 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
         }
     }
 
-    // Swap the database: drop the live connection, replace files, reopen
-    // (db::open runs migrations, so v1 backups are upgraded in place).
-    {
-        let mut guard = state.db.lock().await;
-        let db_path = state.db_path.clone();
-        *guard = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
-        let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
-        let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-        std::fs::copy(&restored_db, &db_path).map_err(|e| e.to_string())?;
-        *guard = crate::db::open(&db_path)?;
-    }
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
     crate::tray::update_tray(&app).await;

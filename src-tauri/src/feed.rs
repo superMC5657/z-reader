@@ -153,15 +153,17 @@ pub fn store(
         if let Some(engine) = engine.filter(|eng| !eng.is_empty()) {
             let content_text = html_to_text(&e.content);
             let summary_text = e.summary.as_deref().map(html_to_text).unwrap_or_default();
-            let outcome = engine.evaluate(
-                source.id,
-                source.group_id,
-                &source.url,
-                &e.title,
-                &format!("{content_text} {summary_text}"),
-                e.author.as_deref(),
-                e.url.as_deref(),
-            );
+            let full_text = format!("{content_text} {summary_text}");
+            let ctx = crate::rules::ArticleEvalContext {
+                source_id: source.id,
+                group_id: source.group_id,
+                source_url: &source.url,
+                title: &e.title,
+                content_text: &full_text,
+                author: e.author.as_deref(),
+                url: e.url.as_deref(),
+            };
+            let outcome = engine.evaluate(&ctx);
             has_been_read = outcome.mark_read || outcome.hide;
             starred = outcome.star;
             hidden = outcome.hide;
@@ -198,7 +200,7 @@ pub async fn fetch_favicon(
     feed_url: &str,
     icon_url: Option<&str>,
     site_url: Option<&str>,
-    favicon_dir: &std::path::PathBuf,
+    favicon_dir: &std::path::Path,
     source_id: i64,
 ) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();

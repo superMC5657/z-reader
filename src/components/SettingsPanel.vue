@@ -530,7 +530,7 @@ function adjustFontSize(delta: number) {
             </div>
             <input
               class="apple-text-input"
-              style="width: 13rem"
+              style="width: 200px"
               placeholder="http://127.0.0.1:7890"
               :value="app.s.proxyUrl"
               @change="app.patch({ proxyUrl: ($event.target as HTMLInputElement).value.trim() })"
@@ -543,14 +543,14 @@ function adjustFontSize(delta: number) {
             <div class="auth-inputs">
               <input
                 class="apple-text-input"
-                style="width: 6.5rem"
+                style="width: 100px"
                 :placeholder="t('settings.general.proxyUser')"
                 :value="app.s.proxyUsername"
                 @change="app.patch({ proxyUsername: ($event.target as HTMLInputElement).value })"
               />
               <input
                 class="apple-text-input"
-                style="width: 6.5rem"
+                style="width: 100px"
                 type="password"
                 :placeholder="t('settings.general.proxyPassword')"
                 :value="app.s.proxyPassword"
@@ -908,7 +908,7 @@ function adjustFontSize(delta: number) {
             type="number"
             min="1"
             max="1440"
-            style="width: 6.5rem; text-align: center"
+            style="width: 100px; text-align: center"
             :value="app.s.fetchInterval"
             @change="app.patch({ fetchInterval: Math.max(1, Number(($event.target as HTMLInputElement).value) || 30) })"
           />
@@ -1569,27 +1569,27 @@ function adjustFontSize(delta: number) {
 /* General & Rules Tab Styles */
 .auth-inputs {
   display: flex;
-  gap: 0.4rem;
+  gap: 6px;
 }
 
 .rules-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.85rem;
-  padding: 0 0.2rem;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 0 3px;
 }
 
 .rules-hint {
-  font-size: 0.8rem;
+  font-size: 12px;
   color: var(--text-tertiary);
   margin: 0;
 }
 
 .rules-toolbar-actions {
   display: flex;
-  gap: 0.45rem;
+  gap: 7px;
   flex-shrink: 0;
 }
 
@@ -1598,19 +1598,19 @@ function adjustFontSize(delta: number) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.18rem;
+  gap: 3px;
 }
 
 .rule-name-row {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 6px;
   min-width: 0;
 }
 
 .rule-name {
   font-weight: 600;
-  font-size: 0.88rem;
+  font-size: 13px;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1618,9 +1618,9 @@ function adjustFontSize(delta: number) {
 }
 
 .rule-badge {
-  font-size: 0.68rem;
+  font-size: 11px;
   font-weight: 600;
-  padding: 0.08rem 0.42rem;
+  padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--bg-track);
   color: var(--text-secondary);
@@ -1635,7 +1635,7 @@ function adjustFontSize(delta: number) {
 
 .rule-pattern {
   font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-  font-size: 0.72rem;
+  font-size: 11px;
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1643,11 +1643,11 @@ function adjustFontSize(delta: number) {
 }
 
 .hidden-section {
-  margin-top: 1rem;
+  margin-top: 16px;
 }
 
 .restore-confirm-text {
-  font-size: 0.88rem;
+  font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.55;
   margin: 0;
@@ -1657,44 +1657,44 @@ function adjustFontSize(delta: number) {
 .sync-form {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0 0.2rem;
+  gap: 5px;
+  padding: 0 3px;
 }
 
 .sync-hint {
-  font-size: 0.74rem;
+  font-size: 11px;
   color: var(--text-tertiary);
-  margin: 0.15rem 0 0.3rem;
+  margin: 2px 0 5px;
   line-height: 1.45;
 }
 
 .sync-hint.warning {
   color: var(--text-tertiary);
   border-left: 2px solid var(--border-strong);
-  padding-left: 0.5rem;
+  padding-left: 8px;
 }
 
 .sync-connect-btn {
   align-self: flex-start;
-  margin-top: 0.7rem;
+  margin-top: 10px;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 6px;
 }
 
 .sync-provider-badge {
-  font-size: 0.72rem;
+  font-size: 11px;
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-tint);
-  padding: 0.14rem 0.55rem;
+  padding: 2px 8px;
   border-radius: var(--radius-pill);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .sync-time {
-  font-size: 0.8rem;
+  font-size: 12px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }

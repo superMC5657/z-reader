@@ -82,14 +82,9 @@ fn handle_menu(app: &AppHandle, id: &str) {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let state = handle.state::<crate::AppState>();
-                {
-                    let conn = state.db.lock().await;
-                    let _ = crate::db::mark_all_read(&conn, None, None);
-                }
-                drop(state);
+                let _ = crate::commands::mark_all_read(handle.clone(), state, None, None).await;
                 use tauri::Emitter;
                 let _ = handle.emit("unread-changed", ());
-                update_tray(&handle).await;
             });
         }
         ID_SHOW => show_main_window(app),
@@ -119,7 +114,7 @@ pub async fn update_tray(app: &AppHandle) {
     let mut handles = guard.0.lock().expect("tray state lock");
     let Some(handles) = handles.as_mut() else { return };
     let zh = locale_is_zh(app);
-    let _ = handles.unread_item.set_text(&label(
+    let _ = handles.unread_item.set_text(label(
         zh,
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),

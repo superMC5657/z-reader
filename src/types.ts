@@ -17,6 +17,7 @@ export interface Group {
   name: string
   expanded: boolean
   sort: number
+  remoteId?: string | null
 }
 
 export interface Item {

@@ -179,26 +179,26 @@ async function save() {
 .rule-form {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 6px;
 }
 
 .form-label {
-  font-size: 0.76rem;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-tertiary);
-  margin-top: 0.4rem;
+  margin-top: 6px;
 }
 
 .rule-pattern-input {
   font-family: ui-monospace, 'SF Mono', Consolas, monospace;
-  font-size: 0.82rem;
-  padding: 0.5rem 0.7rem;
+  font-size: 13px;
+  padding: 8px 11px;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-input);
   color: var(--text-primary);
   resize: vertical;
-  min-height: 3.2rem;
+  min-height: 50px;
   outline: none;
 }
 
@@ -210,27 +210,27 @@ async function save() {
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.8rem;
+  gap: 12px;
 }
 
 .standalone-row {
   border-radius: 10px;
   background: var(--bg-card);
   border: 0.5px solid var(--border);
-  margin-top: 0.7rem;
+  margin-top: 10px;
 }
 
 .rule-test {
-  margin-top: 0.7rem;
+  margin-top: 10px;
 }
 
 .test-result {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.8rem;
+  gap: 6px;
+  font-size: 12px;
   color: var(--danger);
-  margin-top: 0.35rem;
+  margin-top: 6px;
 }
 
 .test-result.match {
@@ -238,11 +238,11 @@ async function save() {
 }
 
 .rule-error {
-  margin-top: 0.6rem;
-  padding: 0.55rem 0.8rem;
+  margin-top: 10px;
+  padding: 9px 12px;
   border-radius: 8px;
   background: var(--danger-tint);
   color: var(--danger);
-  font-size: 0.8rem;
+  font-size: 12px;
 }
 </style>

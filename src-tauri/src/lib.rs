@@ -159,82 +159,85 @@ pub async fn refresh_all_sources(
     let settings = settings::load(&settings::settings_path(&app)?);
 
     // Cloud sync mode: subscriptions live on the server, so refresh = sync.
-    if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+    // Rule-engine notify matches from the pull are forwarded so background
+    // notifications behave like the local refresh path.
+    let (total_new, failures, notified) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
         let report = sync::run(&app, background).await?;
-        return Ok(report.new_items);
-    }
+        (report.new_items, report.failures, report.notified)
+    } else {
+        let client = state.http_client();
+        let engine = {
+            let conn = state.db.lock().await;
+            rules::RuleEngine::load(&conn)?
+        };
+        let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
+            let conn = state.db.lock().await;
+            match ids {
+                Some(v) => db::get_sources(&conn)?
+                    .into_iter()
+                    .filter(|s| v.contains(&s.id))
+                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
+                    .collect(),
+                None => db::get_sources(&conn)?
+                    .into_iter()
+                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
+                    .collect(),
+            }
+        };
+        let dir = commands::favicon_dir(&app)?;
 
-    let client = state.http_client();
-    let engine = {
-        let conn = state.db.lock().await;
-        rules::RuleEngine::load(&conn)?
-    };
-    let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
-        let conn = state.db.lock().await;
-        match ids {
-            Some(v) => db::get_sources(&conn)?
-                .into_iter()
-                .filter(|s| v.contains(&s.id))
-                .map(|s| (s.id, s.group_id, s.url, s.favicon))
-                .collect(),
-            None => db::get_sources(&conn)?
-                .into_iter()
-                .map(|s| (s.id, s.group_id, s.url, s.favicon))
-                .collect(),
-        }
-    };
-    let dir = commands::favicon_dir(&app)?;
-
-    let mut total_new = 0usize;
-    let mut failures = 0usize;
-    let mut notified: Vec<String> = Vec::new();
-    for (id, group_id, url, favicon) in &targets {
-        if !background {
-            let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
-        }
-        let ctx = feed::SourceCtx { id: *id, group_id: *group_id, url: url.clone() };
-        match feed::fetch_and_parse(&client, url).await {
-            Ok(parsed) => {
-                let outcome = {
+        let mut total_new = 0usize;
+        let mut failures = 0usize;
+        let mut notified: Vec<String> = Vec::new();
+        for (id, group_id, url, favicon) in &targets {
+            if !background {
+                let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
+            }
+            let ctx = feed::SourceCtx { id: *id, group_id: *group_id, url: url.clone() };
+            match feed::fetch_and_parse(&client, url).await {
+                Ok(parsed) => {
+                    let outcome = {
+                        let conn = state.db.lock().await;
+                        feed::store(&conn, &ctx, &parsed, Some(&engine))
+                    };
+                    match outcome {
+                        Ok(out) => {
+                            total_new += out.inserted;
+                            notified.extend(out.notified);
+                        }
+                        Err(e) => {
+                            failures += 1;
+                            log::warn!("store source {id} failed: {e}");
+                            let conn = state.db.lock().await;
+                            let _ = db::mark_source_fetched(&conn, *id, false);
+                        }
+                    }
+                    if favicon.is_none() {
+                        let icon_url = parsed.icon_url.as_deref();
+                        let site_url = parsed.site_url.as_deref();
+                        if let Some(fav) =
+                            feed::fetch_favicon(&client, url, icon_url, site_url, &dir, *id).await
+                        {
+                            let conn = state.db.lock().await;
+                            let _ = db::set_source_favicon(&conn, *id, fav.to_string_lossy().as_ref());
+                        }
+                    }
                     let conn = state.db.lock().await;
-                    feed::store(&conn, &ctx, &parsed, Some(&engine))
-                };
-                match outcome {
-                    Ok(out) => {
-                        total_new += out.inserted;
-                        notified.extend(out.notified);
-                    }
-                    Err(e) => {
-                        failures += 1;
-                        log::warn!("store source {id} failed: {e}");
-                        let conn = state.db.lock().await;
-                        let _ = db::mark_source_fetched(&conn, *id, false);
-                    }
+                    let _ = db::mark_source_fetched(&conn, *id, true);
                 }
-                if favicon.is_none() {
-                    let icon_url = parsed.icon_url.as_deref();
-                    let site_url = parsed.site_url.as_deref();
-                    if let Some(fav) =
-                        feed::fetch_favicon(&client, url, icon_url, site_url, &dir, *id).await
-                    {
-                        let conn = state.db.lock().await;
-                        let _ = db::set_source_favicon(&conn, *id, fav.to_string_lossy().as_ref());
-                    }
+                Err(e) => {
+                    failures += 1;
+                    log::warn!("refresh source {id} failed: {e}");
+                    let conn = state.db.lock().await;
+                    let _ = db::mark_source_fetched(&conn, *id, false);
                 }
-                let conn = state.db.lock().await;
-                let _ = db::mark_source_fetched(&conn, *id, true);
             }
-            Err(e) => {
-                failures += 1;
-                log::warn!("refresh source {id} failed: {e}");
-                let conn = state.db.lock().await;
-                let _ = db::mark_source_fetched(&conn, *id, false);
+            if !background {
+                let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
             }
         }
-        if !background {
-            let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
-        }
-    }
+        (total_new, failures, notified)
+    };
 
     // Retention policy; VACUUM only after large deletions to avoid churn.
     {
@@ -250,10 +253,11 @@ pub async fn refresh_all_sources(
 
     tray::update_tray(&app).await;
 
+    let is_sync = settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader");
     if background {
         let _ = app.emit(
             "fetch-done",
-            serde_json::json!({ "newItems": total_new, "failures": failures, "background": true }),
+            serde_json::json!({ "newItems": total_new, "failures": failures, "background": true, "sync": is_sync }),
         );
         if (settings.notify_on_new && total_new > 0) || !notified.is_empty() {
             notify_new_articles(&app, &settings, total_new, &notified);
@@ -261,7 +265,7 @@ pub async fn refresh_all_sources(
     } else {
         let _ = app.emit(
             "fetch-done",
-            serde_json::json!({ "newItems": total_new, "failures": failures }),
+            serde_json::json!({ "newItems": total_new, "failures": failures, "sync": is_sync }),
         );
     }
     Ok(total_new)

@@ -1,4 +1,4 @@
-use crate::models::{Group, Item, Source};
+use crate::models::{Group, Item, RuleActionType, RuleSourceScope, RuleTargetField, Source, SyncAction};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::Path;
 
@@ -123,16 +123,98 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         conn.pragma_update(None, "user_version", 3).ok();
     }
+    if version < 4 {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE groups ADD COLUMN remote_id TEXT;
+            CREATE INDEX IF NOT EXISTS idx_groups_remote ON groups(remote_id) WHERE remote_id IS NOT NULL;
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "user_version", 4).ok();
+    }
     Ok(())
 }
 
 /// Current schema version; bump when adding a migration block above.
-pub const CURRENT_VERSION: i64 = 3;
+pub const CURRENT_VERSION: i64 = 4;
 
 /// Test helper so other modules' tests can build a fully-migrated in-memory DB.
 #[cfg(test)]
 pub fn migrate_for_tests(conn: &Connection) -> Result<(), String> {
     migrate(conn)
+}
+
+impl rusqlite::ToSql for RuleTargetField {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl rusqlite::types::FromSql for RuleTargetField {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        let text = value.as_str()?;
+        text.parse().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
+    }
+}
+
+impl rusqlite::ToSql for RuleActionType {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl rusqlite::types::FromSql for RuleActionType {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        let text = value.as_str()?;
+        text.parse().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
+    }
+}
+
+impl rusqlite::ToSql for RuleSourceScope {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.to_string().into())
+    }
+}
+
+impl rusqlite::types::FromSql for RuleSourceScope {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        let text = value.as_str()?;
+        text.parse().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
+    }
+}
+
+impl rusqlite::ToSql for SyncAction {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_str().into())
+    }
+}
+
+impl rusqlite::types::FromSql for SyncAction {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        let text = value.as_str()?;
+        text.parse().map_err(|e| {
+            rusqlite::types::FromSqlError::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e,
+            )))
+        })
+    }
 }
 
 fn row_to_group(row: &Row) -> rusqlite::Result<Group> {
@@ -141,12 +223,13 @@ fn row_to_group(row: &Row) -> rusqlite::Result<Group> {
         name: row.get(1)?,
         expanded: row.get::<_, i64>(2)? != 0,
         sort: row.get(3)?,
+        remote_id: row.get(4)?,
     })
 }
 
 pub fn get_groups(conn: &Connection) -> Result<Vec<Group>, String> {
     let mut stmt = conn
-        .prepare("SELECT id, name, expanded, sort FROM groups ORDER BY sort, id")
+        .prepare("SELECT id, name, expanded, sort, remote_id FROM groups ORDER BY sort, id")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], row_to_group)
@@ -158,7 +241,7 @@ pub fn create_group(conn: &Connection, name: &str) -> Result<Group, String> {
     conn.execute("INSERT INTO groups (name) VALUES (?1)", params![name])
         .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
-    Ok(Group { id, name: name.into(), expanded: true, sort: 0 })
+    Ok(Group { id, name: name.into(), expanded: true, sort: 0, remote_id: None })
 }
 
 pub fn rename_group(conn: &Connection, id: i64, name: &str) -> Result<(), String> {
@@ -674,7 +757,7 @@ pub fn vacuum(conn: &Connection) -> Result<(), String> {
 
 pub fn get_group(conn: &Connection, id: i64) -> Result<Option<Group>, String> {
     conn.query_row(
-        "SELECT id, name, expanded, sort FROM groups WHERE id = ?1",
+        "SELECT id, name, expanded, sort, remote_id FROM groups WHERE id = ?1",
         params![id],
         row_to_group,
     )
@@ -682,9 +765,28 @@ pub fn get_group(conn: &Connection, id: i64) -> Result<Option<Group>, String> {
     .map_err(|e| e.to_string())
 }
 
+pub fn get_group_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Option<Group>, String> {
+    conn.query_row(
+        "SELECT id, name, expanded, sort, remote_id FROM groups WHERE remote_id = ?1",
+        params![remote_id],
+        row_to_group,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+pub fn set_group_remote(conn: &Connection, group_id: i64, remote_id: Option<&str>) -> Result<(), String> {
+    conn.execute(
+        "UPDATE groups SET remote_id=?1 WHERE id=?2",
+        params![remote_id, group_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn find_or_create_group(conn: &Connection, name: &str) -> Result<Group, String> {
     conn.query_row(
-        "SELECT id, name, expanded, sort FROM groups WHERE name = ?1",
+        "SELECT id, name, expanded, sort, remote_id FROM groups WHERE name = ?1",
         params![name],
         row_to_group,
     )
@@ -692,6 +794,47 @@ pub fn find_or_create_group(conn: &Connection, name: &str) -> Result<Group, Stri
     .map_err(|e| e.to_string())?
     .map(Ok)
     .unwrap_or_else(|| create_group(conn, name))
+}
+
+pub fn find_or_create_group_by_remote(
+    conn: &Connection,
+    remote_id: &str,
+    name: &str,
+) -> Result<Group, String> {
+    if let Some(mut g) = get_group_by_remote_id(conn, remote_id)? {
+        if g.name != name {
+            rename_group(conn, g.id, name)?;
+            g.name = name.to_string();
+        }
+        return Ok(g);
+    }
+    let existing = conn
+        .query_row(
+            "SELECT id, name, expanded, sort, remote_id FROM groups WHERE name = ?1",
+            params![name],
+            row_to_group,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut g) = existing {
+        set_group_remote(conn, g.id, Some(remote_id))?;
+        g.remote_id = Some(remote_id.to_string());
+        Ok(g)
+    } else {
+        conn.execute(
+            "INSERT INTO groups (name, remote_id) VALUES (?1, ?2)",
+            params![name, remote_id],
+        )
+        .map_err(|e| e.to_string())?;
+        let id = conn.last_insert_rowid();
+        Ok(Group {
+            id,
+            name: name.to_string(),
+            expanded: true,
+            sort: 0,
+            remote_id: Some(remote_id.to_string()),
+        })
+    }
 }
 
 pub fn get_source_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Option<Source>, String> {
@@ -715,8 +858,10 @@ pub fn set_source_remote(conn: &Connection, source_id: i64, remote_id: Option<&s
 
 /// Insert or reconcile one remote article. Matching order: by remote id, then
 /// by (source, url) for rows that were fetched locally before linking. On
-/// match the remote read/starred state overwrites local (server wins / LWW);
-/// otherwise a new row is inserted. Returns true when a new row was created.
+/// match the remote read/starred state overwrites local (server wins / LWW),
+/// OR-ed with the caller's rule-engine flags (mark_read/star/hide from local
+/// rules apply on top); otherwise a new row is inserted. Returns true when a
+/// new row was created.
 pub struct RemoteItemUpsert<'a> {
     pub remote_id: &'a str,
     pub source_id: i64,
@@ -729,6 +874,8 @@ pub struct RemoteItemUpsert<'a> {
     pub snippet: Option<&'a str>,
     pub has_been_read: bool,
     pub starred: bool,
+    /// Rule-engine "hide" flag (excluded from normal lists).
+    pub hidden: bool,
 }
 
 pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<bool, String> {
@@ -755,16 +902,16 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
     match existing {
         Some(id) => {
             conn.execute(
-                "UPDATE items SET has_been_read=?1, starred=?2, remote_id=?3 WHERE id=?4",
-                params![r.has_been_read as i64, r.starred as i64, r.remote_id, id],
+                "UPDATE items SET has_been_read=?1, starred=?2, hidden=?3, remote_id=?4 WHERE id=?5",
+                params![r.has_been_read as i64, r.starred as i64, r.hidden as i64, r.remote_id, id],
             )
             .map_err(|e| e.to_string())?;
             Ok(false)
         }
         None => {
             conn.execute(
-                "INSERT INTO items (source_id, guid, title, url, author, published_at, content, summary, snippet, remote_id, has_been_read, starred, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                "INSERT INTO items (source_id, guid, title, url, author, published_at, content, summary, snippet, remote_id, has_been_read, starred, hidden, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     r.source_id,
                     r.remote_id, // guid: stable per source
@@ -778,6 +925,7 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
                     r.remote_id,
                     r.has_been_read as i64,
                     r.starred as i64,
+                    r.hidden as i64,
                     crate::models::now_ts()
                 ],
             )
@@ -790,13 +938,16 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
 #[derive(Clone, Debug)]
 pub struct QueueEntry {
     pub id: i64,
-    pub action: String,
+    pub action: SyncAction,
     pub target: String,
 }
 
 /// Queue one action per item, skipping items without a remote id.
-pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: &str) -> Result<usize, String> {
+/// Returns the queued count; skipped items are logged so silent drops show up
+/// in diagnostics instead of vanishing.
+pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAction) -> Result<usize, String> {
     let mut n = 0usize;
+    let mut skipped = 0usize;
     for id in item_ids {
         let remote: Option<String> = conn
             .query_row("SELECT remote_id FROM items WHERE id=?1", params![id], |row| row.get(0))
@@ -808,13 +959,18 @@ pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: &str) -
             )
             .map_err(|e| e.to_string())?;
             n += 1;
+        } else {
+            skipped += 1;
         }
+    }
+    if skipped > 0 {
+        log::warn!("sync queue: skipped {skipped} local-only item(s) without remote id");
     }
     Ok(n)
 }
 
 /// Queue a stream-level action (e.g. mark-all-read for feed/label/reading-list).
-pub fn enqueue_stream_action(conn: &Connection, action: &str, target: &str) -> Result<(), String> {
+pub fn enqueue_stream_action(conn: &Connection, action: SyncAction, target: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sync_queue (action, target, created_at) VALUES (?1, ?2, ?3)",
         params![action, target, crate::models::now_ts()],
@@ -881,7 +1037,7 @@ pub fn set_state(conn: &Connection, key: &str, value: &str) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::GetItemsParams;
+    use crate::models::{GetItemsParams, SyncAction};
 
     #[test]
     fn test_mark_all_read() {
@@ -1038,6 +1194,7 @@ mod tests {
                 snippet: Some("c"),
                 has_been_read: true,
                 starred: false,
+                hidden: false,
             },
         )
         .unwrap();
@@ -1058,6 +1215,7 @@ mod tests {
                 snippet: Some("c"),
                 has_been_read: false,
                 starred: true,
+                hidden: false,
             },
         )
         .unwrap();
@@ -1088,6 +1246,7 @@ mod tests {
                 snippet: Some("x"),
                 has_been_read: true,
                 starred: false,
+                hidden: false,
             },
         )
         .unwrap();
@@ -1107,13 +1266,13 @@ mod tests {
         let no_remote: i64 = conn
             .query_row("SELECT id FROM items WHERE guid='plain'", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(enqueue_item_actions(&conn, &[with_remote], "mark_unread").unwrap(), 1);
-        assert_eq!(enqueue_item_actions(&conn, &[no_remote], "mark_read").unwrap(), 0);
-        enqueue_stream_action(&conn, "mark_all_read", "user/-/state/com.google/reading-list").unwrap();
+        assert_eq!(enqueue_item_actions(&conn, &[with_remote], SyncAction::MarkUnread).unwrap(), 1);
+        assert_eq!(enqueue_item_actions(&conn, &[no_remote], SyncAction::MarkRead).unwrap(), 0);
+        enqueue_stream_action(&conn, SyncAction::MarkAllRead, "user/-/state/com.google/reading-list").unwrap();
         let queue = queue_fetch(&conn, 100).unwrap();
         assert_eq!(queue.len(), 2);
-        assert_eq!(queue[0].action, "mark_unread");
-        assert_eq!(queue[1].action, "mark_all_read");
+        assert_eq!(queue[0].action, SyncAction::MarkUnread);
+        assert_eq!(queue[1].action, SyncAction::MarkAllRead);
         queue_delete(&conn, &[queue[0].id]).unwrap();
         assert_eq!(queue_len(&conn).unwrap(), 1);
         queue_clear(&conn).unwrap();
@@ -1129,5 +1288,16 @@ mod tests {
         let g1 = find_or_create_group(&conn, "Tech").unwrap();
         let g2 = find_or_create_group(&conn, "Tech").unwrap();
         assert_eq!(g1.id, g2.id);
+
+        // find_or_create_group_by_remote links existing name or creates new with remote_id
+        let g3 = find_or_create_group_by_remote(&conn, "user/-/label/Tech", "Tech").unwrap();
+        assert_eq!(g3.id, g1.id);
+        assert_eq!(g3.remote_id.as_deref(), Some("user/-/label/Tech"));
+        assert_eq!(get_group_by_remote_id(&conn, "user/-/label/Tech").unwrap().map(|g| g.id), Some(g1.id));
+
+        // remote rename updates local name
+        let g4 = find_or_create_group_by_remote(&conn, "user/-/label/Tech", "Technology").unwrap();
+        assert_eq!(g4.id, g1.id);
+        assert_eq!(g4.name, "Technology");
     }
 }
