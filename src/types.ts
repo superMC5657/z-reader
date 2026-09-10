@@ -46,6 +46,7 @@ export interface Settings {
   theme: 'system' | 'light' | 'dark'
   view: 'cards' | 'magazine' | 'list'
   locale: string
+  uiScale: number
   fontSize: number
   fetchInterval: number
   /** 0 = all, 1 = unread, 2 = starred */

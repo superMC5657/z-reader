@@ -21,6 +21,7 @@ const DEFAULTS: Settings = {
   theme: 'system',
   view: 'cards',
   locale: navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-US',
+  uiScale: 100,
   fontSize: 16,
   fetchInterval: 30,
   filterType: 0,
@@ -40,6 +41,23 @@ const DEFAULTS: Settings = {
   syncAccount: null,
 }
 
+export async function setAppZoom(scaleFactor: number) {
+  try {
+    if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+      const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+      const webview = getCurrentWebview()
+      await webview.setZoom(scaleFactor)
+      ;(document.documentElement.style as any).zoom = ''
+      return
+    }
+  } catch (err) {
+    console.warn('Tauri webview setZoom failed, fallback to CSS zoom:', err)
+  }
+  if (typeof document !== 'undefined') {
+    ;(document.documentElement.style as any).zoom = `${scaleFactor}`
+  }
+}
+
 function resolveTheme(theme: Settings['theme']): 'light' | 'dark' {
   if (theme === 'system') {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -51,6 +69,7 @@ function apply(s: Settings) {
   document.documentElement.dataset.theme = resolveTheme(s.theme)
   document.documentElement.style.setProperty('--app-font-size', `${s.fontSize}px`)
   i18n.global.locale.value = s.locale as 'zh-CN' | 'en-US'
+  setAppZoom((s.uiScale || 100) / 100)
 }
 
 export const useAppStore = defineStore('app', {

@@ -71,6 +71,12 @@ function scrollArticleList(delta: number) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // Block native zoom shortcuts (Ctrl/Cmd +/-, Ctrl/Cmd 0)
+  if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '_', '0'].includes(e.key)) {
+    e.preventDefault()
+    return
+  }
+
   const target = e.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return
   if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -137,13 +143,21 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+function onWheel(e: WheelEvent) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+  }
+}
+
 onMounted(() => {
   app.init()
   data.init()
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('wheel', onWheel, { passive: false })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('wheel', onWheel)
 })
 </script>
 
@@ -331,7 +345,7 @@ onBeforeUnmount(() => {
 }
 
 .focus-modal-card {
-  width: 920px;
+  width: 780px;
   max-width: 94vw;
   height: 90vh;
   max-height: 92vh;

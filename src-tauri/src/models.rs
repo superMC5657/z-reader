@@ -286,6 +286,8 @@ pub struct Settings {
     /// "cards" | "magazine" | "list"
     pub view: String,
     pub locale: String,
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: f64,
     pub font_size: f64,
     /// background refresh interval in minutes
     pub fetch_interval: u64,
@@ -337,6 +339,7 @@ impl Default for Settings {
             view: "cards".into(),
             // Empty means "not chosen yet"; the frontend fills it from the system locale.
             locale: String::new(),
+            ui_scale: 100.0,
             font_size: 16.0,
             fetch_interval: 30,
             filter_type: 0,
@@ -360,6 +363,10 @@ impl Default for Settings {
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+fn default_ui_scale() -> f64 {
+    100.0
 }
 
 /// Pre-redaction default: third-party favicon fallback stays on for settings

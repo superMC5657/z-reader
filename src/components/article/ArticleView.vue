@@ -6,9 +6,10 @@ import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
 import { formatFullTime } from '../../lib/time'
+import { decodeHtmlEntities } from '../../lib/highlight'
 import Icon from '../ui/Icon.vue'
 
-defineProps<{
+const props = defineProps<{
   isFocusModal?: boolean
 }>()
 
@@ -20,6 +21,7 @@ const extractError = ref('')
 
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
+const displayTitle = computed(() => decodeHtmlEntities(item.value?.title || ''))
 
 // Match the reader iframe's palette to the app theme
 const isDark = computed(() => app.isDark)
@@ -42,6 +44,8 @@ const docHtml = computed(() => {
   const chip = isDark.value ? 'rgba(120,120,128,0.25)' : 'rgba(120,120,128,0.12)'
   const codeBg = isDark.value ? '#1e1e20' : '#f2f2f7'
   const accent = isDark.value ? '#0a84ff' : '#007aff'
+  const rootFontSize = `${app.s.fontSize || 16}px`
+  const padX = props.isFocusModal ? '2.25rem' : '1.75rem'
 
   const baseTag = item.value?.url
     ? `<base href="${escapeHtmlAttr(item.value.url)}" target="_blank">`
@@ -55,8 +59,10 @@ const docHtml = computed(() => {
       box-sizing: border-box;
     }
     html {
+      font-size: ${rootFontSize};
       background-color: ${bg};
       color: ${fg};
+      scrollbar-gutter: stable;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
@@ -64,9 +70,9 @@ const docHtml = computed(() => {
       background-color: ${bg};
       color: ${fg};
       line-height: 1.82;
-      padding: 0 2rem 3.5rem;
-      max-width: 42rem;
-      margin: 0 auto;
+      padding: 0.8rem ${padX} 3.5rem;
+      max-width: 100%;
+      margin: 0;
       font-size: 1.05rem;
       -webkit-font-smoothing: antialiased;
       word-break: break-word;
@@ -218,6 +224,10 @@ function onIframeLoad(e: Event) {
     }
   })
   doc.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if ((ev.ctrlKey || ev.metaKey) && ['+', '-', '=', '_', '0'].includes(ev.key)) {
+      ev.preventDefault()
+      return
+    }
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(ev.key)) {
       return
     }
@@ -234,11 +244,16 @@ function onIframeLoad(e: Event) {
       })
     )
   })
+  doc.addEventListener('wheel', (ev: WheelEvent) => {
+    if (ev.ctrlKey || ev.metaKey) {
+      ev.preventDefault()
+    }
+  }, { passive: false })
 }
 </script>
 
 <template>
-  <section v-if="item" class="article-view">
+  <section v-if="item" class="article-view" :class="{ 'in-focus-modal': isFocusModal }">
     <!-- Safari Reader Header -->
     <header class="reader-head" data-tauri-drag-region>
       <div class="head-top" data-tauri-drag-region>
@@ -324,7 +339,9 @@ function onIframeLoad(e: Event) {
         </div>
       </div>
 
-      <h1 class="title">{{ item.title }}</h1>
+      <div class="title-container">
+        <h1 class="title">{{ displayTitle }}</h1>
+      </div>
     </header>
 
     <div v-if="extractError" class="error-banner">
@@ -358,6 +375,7 @@ function onIframeLoad(e: Event) {
 
 <style scoped>
 .article-view {
+  --reader-pad-x: 1.75rem;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -365,12 +383,17 @@ function onIframeLoad(e: Event) {
   background: var(--bg-card);
 }
 
+.article-view.in-focus-modal {
+  --reader-pad-x: 2.25rem;
+}
+
 .reader-head {
-  padding: 1.1rem 1.8rem 1rem;
+  padding: 1.15rem 0 1.05rem;
   border-bottom: 0.5px solid var(--border);
   background: var(--bg-card);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  flex-shrink: 0;
 }
 
 .head-top {
@@ -378,6 +401,9 @@ function onIframeLoad(e: Event) {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding: 0 var(--reader-pad-x);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .head-meta {
@@ -431,14 +457,23 @@ function onIframeLoad(e: Event) {
   color: var(--danger);
 }
 
+.title-container {
+  margin: 0.85rem 0 0;
+  padding: 0 var(--reader-pad-x);
+  box-sizing: border-box;
+  width: 100%;
+}
+
 .title {
-  font-size: 1.7rem;
+  font-size: 1.68rem;
   font-weight: 750;
-  line-height: 1.28;
-  letter-spacing: -0.03em;
-  margin-top: 0.7rem;
-  max-width: 44rem;
+  line-height: 1.32;
+  letter-spacing: -0.025em;
   color: var(--text-primary);
+  text-align: left;
+  margin: 0;
+  width: 100%;
+  word-break: break-word;
 }
 
 .reader-frame {
@@ -450,7 +485,7 @@ function onIframeLoad(e: Event) {
 }
 
 .error-banner {
-  padding: 0.65rem 1.8rem;
+  padding: 0.65rem var(--reader-pad-x);
   font-size: 0.82rem;
   color: var(--danger);
   background: var(--danger-tint);

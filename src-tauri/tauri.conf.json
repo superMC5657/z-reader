@@ -20,7 +20,7 @@
         "minHeight": 480,
         "decorations": false,
         "shadow": true,
-        "zoomHotkeysEnabled": true
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {

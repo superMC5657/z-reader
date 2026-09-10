@@ -462,6 +462,12 @@ function toggleViewConfig(bit: number, val: boolean) {
   }
 }
 
+function adjustUiScale(delta: number) {
+  const cur = app.s.uiScale || 100
+  const next = Math.min(150, Math.max(80, cur + delta))
+  app.patch({ uiScale: next })
+}
+
 function adjustFontSize(delta: number) {
   const cur = app.s.fontSize || 16
   const next = Math.min(22, Math.max(12, cur + delta))
@@ -898,6 +904,48 @@ function adjustFontSize(delta: number) {
             :options="localeOptions"
             @update:model-value="app.patch({ locale: $event })"
           />
+        </div>
+
+        <!-- UI Scale / Resolution -->
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.app.uiScale') }}</span>
+            <span class="label-desc">{{ t('settings.app.uiScaleDesc') }}</span>
+          </div>
+          <div class="slider-row">
+            <button
+              class="f-icon-btn stepper-btn"
+              title="-"
+              :disabled="(app.s.uiScale || 100) <= 80"
+              @click="adjustUiScale(-5)"
+            >
+              <span class="stepper-label small">-</span>
+            </button>
+            <input
+              type="range"
+              min="80"
+              max="150"
+              step="5"
+              :value="app.s.uiScale || 100"
+              @input="app.patch({ uiScale: Number(($event.target as HTMLInputElement).value) })"
+            />
+            <button
+              class="f-icon-btn stepper-btn"
+              title="+"
+              :disabled="(app.s.uiScale || 100) >= 150"
+              @click="adjustUiScale(5)"
+            >
+              <span class="stepper-label large">+</span>
+            </button>
+            <span
+              class="value-badge"
+              style="cursor: pointer"
+              :title="t('settings.shortcuts.reset')"
+              @click="app.patch({ uiScale: 100 })"
+            >
+              {{ app.s.uiScale || 100 }}%
+            </span>
+          </div>
         </div>
 
         <!-- Font Size Slider -->
