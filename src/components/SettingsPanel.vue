@@ -38,6 +38,10 @@ const tabs = computed(() => [
   { value: 'about', label: t('settings.tabs.about'), icon: 'info' },
 ])
 
+const currentTabLabel = computed(() => {
+  return tabs.value.find((t) => t.value === tab.value)?.label ?? ''
+})
+
 // ---------- General tab: proxy / notification / tray / storage ----------
 
 const proxyModeOptions = computed(() => [
@@ -466,25 +470,39 @@ function adjustFontSize(delta: number) {
 </script>
 
 <template>
-  <Modal :title="t('settings.title')" wide @close="emit('close')">
-    <!-- Apple macOS Segmented Settings Tabs -->
-    <div class="tabs-container">
-      <div class="segmented settings-segmented">
-        <button
-          v-for="tab_ in tabs"
-          :key="tab_.value"
-          class="seg settings-seg"
-          :class="{ active: tab === tab_.value }"
-          @click="tab = tab_.value as typeof tab"
-        >
-          <Icon :name="tab_.icon" :size="14" />
-          <span>{{ tab_.label }}</span>
-        </button>
-      </div>
-    </div>
+  <Modal custom-layout extra-wide @close="emit('close')">
+    <div class="settings-layout">
+      <!-- Left Sidebar -->
+      <aside class="settings-sidebar">
+        <div class="settings-sidebar-header">
+          <span class="settings-title">{{ t('settings.title') }}</span>
+        </div>
+        <nav class="settings-nav">
+          <button
+            v-for="tab_ in tabs"
+            :key="tab_.value"
+            class="settings-nav-item"
+            :class="{ active: tab === tab_.value }"
+            @click="tab = tab_.value as typeof tab"
+          >
+            <Icon :name="tab_.icon" :size="16" class="nav-item-icon" />
+            <span class="nav-item-label">{{ tab_.label }}</span>
+          </button>
+        </nav>
+      </aside>
 
-    <!-- Tab: Sources -->
-    <div v-if="tab === 'sources'" class="tab-body">
+      <!-- Right Main Panel -->
+      <main class="settings-main">
+        <header class="settings-main-header">
+          <span class="settings-current-title">{{ currentTabLabel }}</span>
+          <button class="f-icon-btn close-btn" title="Close" @click="emit('close')">
+            <Icon name="xmark" :size="16" />
+          </button>
+        </header>
+
+        <div class="settings-main-content">
+          <!-- Tab: Sources -->
+          <div v-if="tab === 'sources'" class="settings-tab-pane">
       <div v-if="data.sources.length" class="grouped-inset-box">
         <div v-for="s in data.sources" :key="s.id" class="grouped-inset-row">
           <div class="source-info">
@@ -514,7 +532,7 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: General (network / notification / tray / storage) -->
-    <div v-else-if="tab === 'general'" class="tab-body">
+    <div v-else-if="tab === 'general'" class="settings-tab-pane">
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
           <div class="label-box">
@@ -536,7 +554,7 @@ function adjustFontSize(delta: number) {
             </div>
             <input
               class="apple-text-input"
-              style="width: 200px"
+              style="width: 220px"
               placeholder="http://127.0.0.1:7890"
               :value="app.s.proxyUrl"
               @change="app.patch({ proxyUrl: ($event.target as HTMLInputElement).value.trim() })"
@@ -549,14 +567,12 @@ function adjustFontSize(delta: number) {
             <div class="auth-inputs">
               <input
                 class="apple-text-input"
-                style="width: 100px"
                 :placeholder="t('settings.general.proxyUser')"
                 :value="app.s.proxyUsername"
                 @change="app.patch({ proxyUsername: ($event.target as HTMLInputElement).value })"
               />
               <input
                 class="apple-text-input"
-                style="width: 100px"
                 type="password"
                 :placeholder="t('settings.general.proxyPassword')"
                 :value="app.s.proxyPassword"
@@ -663,7 +679,7 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: Regex Rules -->
-    <div v-else-if="tab === 'rules'" class="tab-body">
+    <div v-else-if="tab === 'rules'" class="settings-tab-pane">
       <div class="rules-toolbar">
         <p class="rules-hint">{{ t('settings.rules.hint') }}</p>
         <div class="rules-toolbar-actions">
@@ -734,24 +750,26 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: Cloud Sync -->
-    <div v-else-if="tab === 'sync'" class="tab-body">
+    <div v-else-if="tab === 'sync'" class="settings-tab-pane">
       <template v-if="!app.s.syncAccount">
         <div class="sync-form">
-          <label class="form-label">{{ t('settings.sync.serverUrl') }}</label>
-          <input
-            v-model="syncServerUrl"
-            class="apple-text-input"
-            placeholder="https://example.com/api/greader.php"
-            spellcheck="false"
-          />
-          <p class="sync-hint">{{ t('settings.sync.serverHint') }}</p>
+          <div class="form-field">
+            <label class="form-label">{{ t('settings.sync.serverUrl') }}</label>
+            <input
+              v-model="syncServerUrl"
+              class="apple-text-input"
+              placeholder="https://example.com/api/greader.php"
+              spellcheck="false"
+            />
+            <p class="sync-hint">{{ t('settings.sync.serverHint') }}</p>
+          </div>
 
           <div class="form-grid">
-            <div>
+            <div class="form-field">
               <label class="form-label">{{ t('settings.sync.username') }}</label>
               <input v-model="syncUsername" class="apple-text-input" autocomplete="off" spellcheck="false" />
             </div>
-            <div>
+            <div class="form-field">
               <label class="form-label">{{ t('settings.sync.password') }}</label>
               <input v-model="syncPassword" class="apple-text-input" type="password" autocomplete="off" />
             </div>
@@ -832,7 +850,7 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: App Settings (macOS Inset Grouped) -->
-    <div v-else-if="tab === 'app'" class="tab-body">
+    <div v-else-if="tab === 'app'" class="settings-tab-pane">
       <div class="grouped-inset-box">
         <!-- Theme -->
         <div class="grouped-inset-row">
@@ -967,7 +985,7 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: Shortcuts -->
-    <div v-else-if="tab === 'shortcuts'" class="tab-body">
+    <div v-else-if="tab === 'shortcuts'" class="settings-tab-pane">
       <div class="shortcuts-header-bar">
         <p class="shortcuts-hint">{{ t('settings.shortcuts.hint') }}</p>
         <button class="f-btn compact-btn" @click="app.resetShortcuts()">
@@ -998,7 +1016,7 @@ function adjustFontSize(delta: number) {
     </div>
 
     <!-- Tab: Data (OPML) -->
-    <div v-else-if="tab === 'data'" class="tab-body">
+    <div v-else-if="tab === 'data'" class="settings-tab-pane">
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
           <div class="label-box">
@@ -1065,7 +1083,7 @@ function adjustFontSize(delta: number) {
         </template>
       </Modal>
     </div>
-    <div v-else class="tab-body">
+    <div v-else class="settings-tab-pane">
       <div class="about-card">
         <div class="about-logo">
           <Icon name="rss" :size="28" color="#ffffff" />
@@ -1146,33 +1164,176 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
     </div>
+        </div>
 
-    <template #footer>
-      <button class="f-btn primary" @click="emit('close')">{{ t('common.confirm') }}</button>
-    </template>
+        <footer class="settings-main-footer">
+          <button class="f-btn primary" @click="emit('close')">{{ t('common.confirm') }}</button>
+        </footer>
+      </main>
+    </div>
   </Modal>
 </template>
 
 <style scoped>
-.tabs-container {
+.settings-layout {
   display: flex;
-  justify-content: center;
-  margin-bottom: 1.1rem;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
 }
 
-.settings-segmented {
-  padding: 3px;
+/* Left Sidebar */
+.settings-sidebar {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-right: 0.5px solid var(--border);
+  overflow: hidden;
 }
 
-.settings-seg {
-  padding: 0.35rem 1.1rem;
-  font-size: 0.84rem;
+.settings-sidebar-header {
+  height: 52px;
+  padding: 0 1.25rem;
+  display: flex;
+  align-items: center;
+  border-bottom: 0.5px solid var(--border-subtle);
+  flex-shrink: 0;
 }
 
-.tab-body {
-  min-height: 18rem;
-  max-height: 24rem;
+.settings-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.settings-nav {
+  padding: 0.75rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   overflow-y: auto;
+  flex: 1;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  height: 36px;
+  padding: 0 0.75rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+}
+
+.settings-nav-item:active {
+  background: var(--bg-hover-strong);
+}
+
+.settings-nav-item.active {
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nav-item-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  transition: color 0.15s var(--ease);
+}
+
+.settings-nav-item.active .nav-item-icon {
+  color: #ffffff !important;
+}
+
+.nav-item-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right Main Area */
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.settings-main-header {
+  height: 52px;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 0.5px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.settings-current-title {
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-btn:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+
+.settings-main-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+  user-select: text;
+}
+
+.settings-tab-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-main-footer {
+  height: 52px;
+  padding: 0 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  border-top: 0.5px solid var(--border-subtle);
+  background: var(--bg-card-secondary);
+  flex-shrink: 0;
 }
 
 .source-info {
@@ -1583,10 +1744,18 @@ function adjustFontSize(delta: number) {
   word-break: break-word;
 }
 
-/* General & Rules Tab Styles */
 .auth-inputs {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+}
+
+.auth-inputs .apple-text-input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .rules-toolbar {
@@ -1674,8 +1843,34 @@ function adjustFontSize(delta: number) {
 .sync-form {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 12px;
   padding: 0 3px;
+  width: 100%;
+}
+
+.sync-form .apple-text-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
 }
 
 .sync-hint {

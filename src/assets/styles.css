@@ -454,6 +454,17 @@ input[type='range']:focus {
   max-width: min(760px, 94vw);
 }
 
+.modal-card.extra-wide {
+  width: 780px;
+  max-width: min(860px, 94vw);
+  height: 560px;
+  max-height: min(640px, 90vh);
+}
+
+.modal-card.custom-modal {
+  padding: 0;
+}
+
 .modal-header {
   padding: 1.1rem 1.5rem 0.6rem;
   font-size: 1.15rem;

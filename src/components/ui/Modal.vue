@@ -1,26 +1,43 @@
 <script setup lang="ts">
 import Icon from './Icon.vue'
 
-defineProps<{ title: string; wide?: boolean }>()
+defineProps<{
+  title?: string
+  wide?: boolean
+  extraWide?: boolean
+  customLayout?: boolean
+}>()
 const emit = defineEmits<{ close: [] }>()
 </script>
 
 <template>
   <Teleport to="body">
     <div class="modal-mask" @click.self="emit('close')">
-      <div class="modal-card" :class="{ wide }">
-        <div class="modal-header">
-          <span class="header-title">{{ title }}</span>
-          <button class="f-icon-btn close-btn" title="Close" @click="emit('close')">
-            <Icon name="xmark" :size="16" />
-          </button>
-        </div>
-        <div class="modal-body">
+      <div
+        class="modal-card"
+        :class="{
+          wide,
+          'extra-wide': extraWide,
+          'custom-modal': customLayout,
+        }"
+      >
+        <template v-if="!customLayout">
+          <div class="modal-header">
+            <span class="header-title">{{ title }}</span>
+            <button class="f-icon-btn close-btn" title="Close" @click="emit('close')">
+              <Icon name="xmark" :size="16" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <slot />
+          </div>
+          <div v-if="$slots.footer" class="modal-footer">
+            <slot name="footer" />
+          </div>
+        </template>
+        <template v-else>
           <slot />
-        </div>
-        <div class="modal-footer">
-          <slot name="footer" />
-        </div>
+        </template>
       </div>
     </div>
   </Teleport>
