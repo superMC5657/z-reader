@@ -66,6 +66,8 @@ export interface Settings {
   retentionDays: number
   /** cap unstarred articles kept per source; 0 = unlimited */
   maxItemsPerSource: number
+  /** allow favicon lookup via Google/DuckDuckGo (discloses domains); off = origin only */
+  faviconThirdParty: boolean
   /** cloud sync account; null = pure local mode */
   syncAccount: SyncAccount | null
 }

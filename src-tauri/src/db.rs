@@ -521,12 +521,18 @@ fn get_items_impl(
                 }
             }
             if !matched {
-                args.push(Box::new(format!("%{q}%")));
-                args.push(Box::new(format!("%{q}%")));
+                // LIKE fallback mirrors the FTS index shape (title/summary/
+                // content) plus author, so results stay consistent when FTS
+                // rejects the query syntax.
+                for _ in 0..4 {
+                    args.push(Box::new(format!("%{q}%")));
+                }
+                let base = args.len() - 3;
                 conditions.push(format!(
-                    "(title LIKE ?{} OR content LIKE ?{})",
-                    args.len() - 1,
-                    args.len()
+                    "(title LIKE ?{base} OR summary LIKE ?{} OR content LIKE ?{} OR author LIKE ?{})",
+                    base + 1,
+                    base + 2,
+                    base + 3
                 ));
             }
         }
@@ -739,21 +745,20 @@ pub fn cleanup_retention(
             .map_err(|e| e.to_string())?;
     }
     if max_per_source > 0 {
-        let source_ids: Vec<i64> = {
-            let mut stmt = tx.prepare("SELECT id FROM sources").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| row.get(0)).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
-        };
-        for sid in source_ids {
-            deleted += tx
-                .execute(
-                    "DELETE FROM items WHERE source_id = ?1 AND starred = 0 AND id NOT IN (
-                        SELECT id FROM items WHERE source_id = ?1
-                        ORDER BY published_at DESC, id DESC LIMIT ?2)",
-                    params![sid, max_per_source as i64],
-                )
-                .map_err(|e| e.to_string())?;
-        }
+        // One statement for all sources: rank every row within its source by
+        // recency and drop unstarred rows past the per-source cap. Starred
+        // rows are never deleted even when they sit inside the keep window.
+        deleted += tx
+            .execute(
+                "DELETE FROM items WHERE starred = 0 AND id IN (
+                    SELECT id FROM (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY source_id ORDER BY published_at DESC, id DESC
+                        ) AS rn FROM items
+                    ) WHERE rn > ?1)",
+                params![max_per_source as i64],
+            )
+            .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(deleted)
@@ -1050,6 +1055,65 @@ pub fn set_state(conn: &Connection, key: &str, value: &str) -> Result<(), String
 mod tests {
     use super::*;
     use crate::models::{GetItemsParams, SyncAction};
+
+    #[test]
+    fn test_items_pagination_is_stable() {
+        let conn = Connection::open_in_memory().expect("init db");
+        migrate(&conn).expect("migrate");
+        let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        for i in 1..=5 {
+            insert_item(&conn, s.id, &item(&format!("g{i}"), "t", "x", i, false, false, false)).unwrap();
+        }
+        // Given: newest-first ordering (published_at 5..1)
+        // When: fetched in limit-2 pages
+        let page = |offset| {
+            get_items(&conn, &GetItemsParams { limit: Some(2), offset: Some(offset), ..Default::default() }).unwrap()
+        };
+        let (p0, p1, p2) = (page(0), page(2), page(4));
+        // Then: pages tile the full list with no overlap and no gaps
+        let ids = |v: Vec<Item>| v.into_iter().map(|i| i.guid).collect::<Vec<_>>();
+        assert_eq!(ids(p0), vec!["g5".to_string(), "g4".to_string()]);
+        assert_eq!(ids(p1), vec!["g3".to_string(), "g2".to_string()]);
+        assert_eq!(ids(p2), vec!["g1".to_string()]);
+    }
+
+    #[test]
+    fn test_like_fallback_covers_summary_and_author() {
+        let conn = Connection::open_in_memory().expect("init db");
+        migrate(&conn).expect("migrate");
+        let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        insert_item(
+            &conn,
+            s.id,
+            &UpsertEntry {
+                guid: "g1",
+                title: "plain title",
+                url: None,
+                author: Some("Austen"),
+                published_at: 100,
+                content: Some("boring body"),
+                summary: Some("unique-summary-xyz"),
+                snippet: Some("s"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+
+        // Given: the FTS path is unavailable (simulates a rejected MATCH query)
+        // When/Then: author and summary still match via the LIKE fallback
+        for q in ["Austen", "unique-summary-xyz", "boring", "plain"] {
+            let found = get_items_impl(
+                &conn,
+                &GetItemsParams { search: Some(q.into()), ..Default::default() },
+                false,
+            )
+            .unwrap();
+            assert_eq!(found.len(), 1, "fallback should match {q}");
+        }
+    }
 
     #[test]
     fn test_mark_source_fetched_records_error() {

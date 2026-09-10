@@ -1,6 +1,23 @@
 use crate::models::Settings;
 
+/// Validate a manual proxy URL before it is saved or tested, so a typo fails
+/// loudly instead of silently falling back to a direct connection.
+pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
+    if settings.proxy_mode == "manual" {
+        let url = settings.proxy_url.trim();
+        if url.is_empty() {
+            return Err("manual proxy URL is empty".into());
+        }
+        reqwest::Proxy::all(url).map_err(|e| format!("invalid proxy URL: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Build the shared HTTP client honoring the user's proxy configuration.
+///
+/// Note: an invalid manual URL falls back to direct here with a warning; the
+/// settings and connectivity-test paths reject it upfront via
+/// [`validate_proxy`], so this branch only covers hand-edited config files.
 pub fn build_http_client(settings: &Settings) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; ZReader/0.2)")
@@ -18,6 +35,9 @@ pub fn build_http_client(settings: &Settings) -> reqwest::Client {
                     proxy = proxy.basic_auth(&settings.proxy_username, &settings.proxy_password);
                 }
                 builder = builder.proxy(proxy);
+            } else {
+                log::warn!("invalid manual proxy URL {url:?}; using a direct connection");
+                builder = builder.no_proxy();
             }
         }
         // "system": keep reqwest defaults (env vars + OS proxy integration).
@@ -52,5 +72,16 @@ mod tests {
         assert!(reqwest::Proxy::all("http://127.0.0.1:7890").is_ok());
         assert!(reqwest::Proxy::all("socks5://127.0.0.1:1080").is_ok());
         assert!(reqwest::Proxy::all("not a url").is_err());
+    }
+
+    #[test]
+    fn validate_proxy_rejects_bad_manual_url() {
+        // Given: manual mode with a typo'd URL
+        // When/Then: validation fails instead of silently going direct
+        assert!(validate_proxy(&settings("manual", "not a url")).is_err());
+        assert!(validate_proxy(&settings("manual", "")).is_err());
+        assert!(validate_proxy(&settings("manual", "http://127.0.0.1:7890")).is_ok());
+        assert!(validate_proxy(&settings("system", "")).is_ok());
+        assert!(validate_proxy(&settings("none", "")).is_ok());
     }
 }

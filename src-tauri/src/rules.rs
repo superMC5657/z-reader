@@ -445,8 +445,53 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_rejects_invalid() {
+    fn test_backfill_pages_through_thousands() {
+        // Given: 2500 articles (multiple id pages) with every other matching
         let conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&conn).unwrap();
+        let s = crate::db::insert_source(&conn, "https://s.example", "S", None, None).unwrap();
+        let _r = crate::db::create_rule(
+            &conn,
+            &rule_input("m", "matchme", RuleTargetField::Title, RuleActionType::MarkRead, false, RuleSourceScope::All),
+        )
+        .unwrap();
+        for i in 0..2500 {
+            let title = if i % 2 == 0 { "matchme article" } else { "other article" };
+            crate::db::insert_item(
+                &conn,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: &format!("g{i}"),
+                    title,
+                    url: None,
+                    author: None,
+                    published_at: i,
+                    content: Some("x"),
+                    summary: None,
+                    snippet: Some("x"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        // When: backfilled
+        let engine = RuleEngine::load(&conn).unwrap();
+        let stats = backfill(&conn, &engine).unwrap();
+        // Then: exactly the matching half is marked, nothing lost to paging
+        assert_eq!(stats.marked_read, 1250);
+        let remaining = crate::db::get_items(
+            &conn,
+            &crate::models::GetItemsParams { filter: Some(1), limit: Some(3000), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(remaining.len(), 1250);
+    }
+
+    #[test]
+    fn test_compile_rejects_invalid() {        let conn = Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
         let bad = crate::db::create_rule(&conn, &rule_input("bad", "([unclosed", RuleTargetField::Title, RuleActionType::Star, false, RuleSourceScope::All)).unwrap();
         let rule = crate::db::get_rule(&conn, bad.id).unwrap();

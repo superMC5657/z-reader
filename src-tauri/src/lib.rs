@@ -159,6 +159,7 @@ struct RefreshTask {
     engine: std::sync::Arc<rules::RuleEngine>,
     favicon_dir: std::path::PathBuf,
     background: bool,
+    allow_third_party: bool,
     id: i64,
     group_id: Option<i64>,
     url: String,
@@ -170,7 +171,7 @@ struct RefreshTask {
 /// them on the source row and reports them via the outcome.
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { app, client, engine, favicon_dir, background, id, group_id, url, favicon } = task;
+    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon } = task;
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
@@ -199,7 +200,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 let icon_url = parsed.icon_url.as_deref();
                 let site_url = parsed.site_url.as_deref();
                 if let Some(fav) =
-                    feed::fetch_favicon(&client, &url, icon_url, site_url, &favicon_dir, id).await
+                    feed::fetch_favicon(&client, &url, icon_url, site_url, &favicon_dir, id, allow_third_party).await
                 {
                     let conn = state.db.lock().await;
                     let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
@@ -221,6 +222,20 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
     }
     out
+}
+
+/// Fold one per-source outcome into the refresh-cycle totals.
+fn merge_outcome(
+    total_new: &mut usize,
+    failures: &mut usize,
+    notified: &mut Vec<String>,
+    out: SourceRefreshOutcome,
+) {
+    *total_new += out.inserted;
+    if out.failed {
+        *failures += 1;
+    }
+    notified.extend(out.notified);
 }
 
 /// Fetch all (or selected) sources, run new entries through the rule engine,
@@ -284,6 +299,7 @@ pub async fn refresh_all_sources(
                 engine: engine.clone(),
                 favicon_dir: dir.clone(),
                 background,
+                allow_third_party: settings.favicon_third_party,
                 id,
                 group_id,
                 url,
@@ -300,13 +316,7 @@ pub async fn refresh_all_sources(
         let mut notified: Vec<String> = Vec::new();
         while let Some(res) = set.join_next().await {
             match res {
-                Ok(out) => {
-                    total_new += out.inserted;
-                    if out.failed {
-                        failures += 1;
-                    }
-                    notified.extend(out.notified);
-                }
+                Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, out),
                 Err(e) => {
                     failures += 1;
                     log::warn!("refresh task failed: {e}");
@@ -379,4 +389,28 @@ fn notify_new_articles(
         .title("ZReader")
         .body(&body)
         .show();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_outcome_folds_totals() {
+        // Given: a mix of successful, notifying and failed per-source outcomes
+        let outcomes = vec![
+            SourceRefreshOutcome { inserted: 3, notified: vec!["a".into()], failed: false },
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true },
+            SourceRefreshOutcome { inserted: 2, notified: vec!["b".into(), "c".into()], failed: false },
+        ];
+        // When: folded
+        let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
+        for out in outcomes {
+            merge_outcome(&mut total, &mut failures, &mut notified, out);
+        }
+        // Then: inserts sum, failures count, titles concatenate in order
+        assert_eq!(total, 5);
+        assert_eq!(failures, 1);
+        assert_eq!(notified, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
 }

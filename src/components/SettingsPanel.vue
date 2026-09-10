@@ -68,9 +68,15 @@ const proxyResult = ref<string>('')
 async function testProxy() {
   proxyTesting.value = true
   proxyResult.value = ''
+  // Probe a failing feed when one exists so the test reflects real conditions.
+  const failing = data.sources.find((s) => s.errorCount > 0)
+  const target = failing?.url ?? null
   try {
-    const ms = await api.testProxy(app.s)
-    proxyResult.value = t('settings.general.proxyOk', { ms })
+    const ms = await api.testProxy(app.s, target)
+    proxyResult.value = t('settings.general.proxyOk', {
+      ms,
+      target: target ?? t('settings.general.proxyTargetDefault'),
+    })
   } catch (err) {
     proxyResult.value = t('settings.general.proxyFail', { err: String(err) })
   } finally {
@@ -592,6 +598,17 @@ function adjustFontSize(delta: number) {
           <Switch
             :model-value="app.s.closeToTray"
             @update:model-value="app.patch({ closeToTray: $event })"
+          />
+        </div>
+
+        <div class="grouped-inset-row">
+          <div class="label-box">
+            <span class="label-title">{{ t('settings.general.faviconThirdParty') }}</span>
+            <span class="label-desc">{{ t('settings.general.faviconThirdPartyDesc') }}</span>
+          </div>
+          <Switch
+            :model-value="app.s.faviconThirdParty"
+            @update:model-value="app.patch({ faviconThirdParty: $event })"
           />
         </div>
       </div>

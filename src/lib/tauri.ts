@@ -51,7 +51,8 @@ export const refreshFavicon = (id: number) => invoke<string | null>('refresh_fav
 export const setCustomFavicon = (id: number, dataBase64: string) => invoke<string>('set_custom_favicon', { id, dataBase64 })
 
 // ---------- Phase 2: proxy ----------
-export const testProxy = (settings: Settings) => invoke<number>('test_proxy', { settings })
+export const testProxy = (settings: Settings, target?: string | null) =>
+  invoke<number>('test_proxy', { settings, target: target ?? null })
 
 // ---------- Phase 2: regex rules ----------
 export const getRules = () => invoke<Rule[]>('get_rules')

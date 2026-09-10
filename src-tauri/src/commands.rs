@@ -88,9 +88,13 @@ pub async fn add_source(
     };
     if source.favicon.is_none() {
         let dir = favicon_dir(&app)?;
+        let third_party =
+            settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
         let icon_url = parsed.icon_url.as_deref();
         let site_url = parsed.site_url.as_deref();
-        if let Some(fav) = feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, source.id).await {
+        if let Some(fav) =
+            feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, source.id, third_party).await
+        {
             let conn = state.db.lock().await;
             db::set_source_favicon(&conn, source.id, fav.to_string_lossy().as_ref())?;
         }
@@ -136,12 +140,10 @@ pub async fn set_custom_favicon(
     if bytes.is_empty() || bytes.len() > 5_000_000 {
         return Err("image data too large or empty".into());
     }
-    let ext = if data_base64.contains("image/svg") {
-        "svg"
-    } else if data_base64.contains("image/jpeg") || data_base64.contains("image/jpg") {
-        "jpg"
-    } else {
-        "png"
+    // Extension comes from the payload, never the data-URL hint: SVG and
+    // non-image uploads are rejected instead of being stored.
+    let Some(ext) = crate::feed::sniff_image_ext(&bytes) else {
+        return Err("unsupported image format (SVG is not accepted)".into());
     };
     let path = dir.join(format!("{id}.{ext}"));
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
@@ -169,9 +171,12 @@ pub async fn refresh_favicon(
         parsed = Some(p);
     }
     let dir = favicon_dir(&app)?;
+    let third_party = settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
     let icon_url = parsed.as_ref().and_then(|p| p.icon_url.as_deref());
     let site_url = parsed.as_ref().and_then(|p| p.site_url.as_deref());
-    if let Some(fav) = feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, id).await {
+    if let Some(fav) =
+        feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, id, third_party).await
+    {
         let path_str = fav.to_string_lossy().to_string();
         let conn = state.db.lock().await;
         db::set_source_favicon(&conn, id, &path_str)?;
@@ -305,15 +310,22 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: Settings,
 ) -> Result<(), String> {
+    crate::net::validate_proxy(&settings)?;
     let path = settings_io::settings_path(&app)?;
     let old = settings_io::load(&path);
     let proxy_changed = old.proxy_mode != settings.proxy_mode
         || old.proxy_url != settings.proxy_url
         || old.proxy_username != settings.proxy_username
         || old.proxy_password != settings.proxy_password;
+    let locale_changed = old.locale != settings.locale;
     settings_io::save(&path, &settings)?;
     if proxy_changed {
         state.set_http_client(crate::net::build_http_client(&settings));
+    }
+    if locale_changed {
+        // Tray menu labels are baked at creation; refresh them so the
+        // language switch applies outside the main window too.
+        crate::tray::update_tray(&app).await;
     }
     Ok(())
 }
@@ -339,13 +351,21 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
 // ---------- Phase 2: proxy ----------
 
 /// Probe connectivity with candidate proxy settings (before they are saved).
+/// `target` is the URL actually fetched: the caller passes a failing feed URL
+/// when one exists so the test reflects real conditions, else a default probe.
 /// Returns the request latency in milliseconds.
 #[tauri::command]
-pub async fn test_proxy(settings: Settings) -> Result<u64, String> {
+pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
+    crate::net::validate_proxy(&settings)?;
+    let url = target
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .unwrap_or("https://example.com");
     let client = crate::net::build_http_client(&settings);
     let start = std::time::Instant::now();
     client
-        .get("https://example.com")
+        .get(url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -399,6 +419,8 @@ pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(
     let mut s = settings_io::load(&path);
     s.sync_account = None;
     settings_io::save(&path, &s)?;
+    // Best effort: a stale account password must not survive next to logout.
+    let _ = settings_io::clear_sync_secret(&path);
     crate::sync::clear_session(&state);
     {
         let conn = state.db.lock().await;
@@ -625,10 +647,8 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
         let swapped: Result<(), String> = (|| {
             let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
             let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-            if std::fs::rename(&staged, &db_path).is_err() {
-                std::fs::copy(&staged, &db_path).map_err(|e| e.to_string())?;
-                let _ = std::fs::remove_file(&staged);
-            }
+            // Same-directory rename/copy is the atomic point; see replace_live.
+            crate::backup::replace_live(&staged, &db_path)?;
             *guard = crate::db::open(&db_path)?;
             Ok(())
         })();
@@ -696,7 +716,8 @@ pub async fn vacuum_now(state: State<'_, AppState>) -> Result<(), String> {
     db::vacuum(&conn)
 }
 
-/// Apply the retention policy immediately, then compact the database.
+/// Apply the retention policy immediately, compacting only when something
+/// was actually deleted.
 #[tauri::command]
 pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
     let s = settings_io::load(&settings_io::settings_path(&app)?);
@@ -704,7 +725,7 @@ pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<u
         let conn = state.db.lock().await;
         db::cleanup_retention(&conn, s.retention_days, s.max_items_per_source)?
     };
-    {
+    if deleted > 0 {
         let conn = state.db.lock().await;
         db::vacuum(&conn)?;
     }

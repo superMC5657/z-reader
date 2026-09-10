@@ -13,6 +13,10 @@ const ID_QUIT: &str = "zreader-quit";
 pub struct TrayHandles {
     pub icon: TrayIcon,
     pub unread_item: MenuItem<Wry>,
+    pub refresh_item: MenuItem<Wry>,
+    pub mark_all_item: MenuItem<Wry>,
+    pub show_item: MenuItem<Wry>,
+    pub quit_item: MenuItem<Wry>,
     pub base_icon: Option<tauri::image::Image<'static>>,
 }
 
@@ -32,11 +36,11 @@ pub fn create_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     let zh = locale_is_zh(app);
 
     let unread_item = MenuItem::with_id(app, ID_UNREAD, label(zh, "未读 0 篇", "0 unread"), false, None::<&str>)?;
-    let refresh = MenuItem::with_id(app, ID_REFRESH, label(zh, "立即刷新所有订阅", "Refresh All"), true, None::<&str>)?;
-    let mark_all = MenuItem::with_id(app, ID_MARK_ALL, label(zh, "全部标记已读", "Mark All as Read"), true, None::<&str>)?;
-    let show = MenuItem::with_id(app, ID_SHOW, label(zh, "显示主窗口", "Show ZReader"), true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, ID_QUIT, label(zh, "退出", "Quit"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&unread_item, &refresh, &mark_all, &show, &quit])?;
+    let refresh_item = MenuItem::with_id(app, ID_REFRESH, label(zh, "立即刷新所有订阅", "Refresh All"), true, None::<&str>)?;
+    let mark_all_item = MenuItem::with_id(app, ID_MARK_ALL, label(zh, "全部标记已读", "Mark All as Read"), true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, ID_SHOW, label(zh, "显示主窗口", "Show ZReader"), true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, ID_QUIT, label(zh, "退出", "Quit"), true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&unread_item, &refresh_item, &mark_all_item, &show_item, &quit_item])?;
 
     let base_icon = app.default_window_icon().map(|img| {
         tauri::image::Image::new_owned(img.rgba().to_vec(), img.width(), img.height())
@@ -65,6 +69,10 @@ pub fn create_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     app.manage(TrayState(Mutex::new(Some(TrayHandles {
         icon,
         unread_item,
+        refresh_item,
+        mark_all_item,
+        show_item,
+        quit_item,
         base_icon,
     }))));
     Ok(())
@@ -119,6 +127,12 @@ pub async fn update_tray(app: &AppHandle) {
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),
     ));
+    // Menu labels are baked at creation; re-apply them so a language switch
+    // (which triggers this via save_settings) propagates to the tray.
+    let _ = handles.refresh_item.set_text(label(zh, "立即刷新所有订阅", "Refresh All"));
+    let _ = handles.mark_all_item.set_text(label(zh, "全部标记已读", "Mark All as Read"));
+    let _ = handles.show_item.set_text(label(zh, "显示主窗口", "Show ZReader"));
+    let _ = handles.quit_item.set_text(label(zh, "退出", "Quit"));
     if let Some(base) = &handles.base_icon {
         let _ = handles.icon.set_icon(Some(with_badge(base, unread > 0)));
     }

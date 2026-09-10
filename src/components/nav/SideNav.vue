@@ -282,7 +282,7 @@ async function toggleExpand(gid: number) {
       <input
         ref="iconFileInput"
         type="file"
-        accept="image/png,image/jpeg,image/svg+xml,image/x-icon,image/webp,image/gif"
+        accept="image/png,image/jpeg,image/x-icon,image/webp,image/gif"
         style="display: none;"
         @change="onIconFileSelected"
       />

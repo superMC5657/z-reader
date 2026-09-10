@@ -36,6 +36,7 @@ const DEFAULTS: Settings = {
   closeToTray: true,
   retentionDays: 0,
   maxItemsPerSource: 0,
+  faviconThirdParty: true,
   syncAccount: null,
 }
 
@@ -110,6 +111,10 @@ export const useAppStore = defineStore('app', {
       }
       if (!this.s.readerMode) {
         this.settings.readerMode = 'split'
+      }
+      if (this.s.faviconThirdParty === undefined) {
+        // Settings files written before the toggle existed.
+        this.settings.faviconThirdParty = true
       }
       if ((this.s.view as string) === 'compact') {
         this.settings.view = 'cards'

@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_normalize_item_id() {
         // decimal (from stream/items/ids) and long form (from contents) agree
-        let decimal = 0x00000000175c6d3b as i64;
+        let decimal = 0x00000000175c6d3b_i64;
         assert_eq!(
             normalize_item_id(&decimal.to_string()).unwrap(),
             "00000000175c6d3b"

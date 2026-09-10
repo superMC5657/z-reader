@@ -195,6 +195,25 @@ pub fn store(
     Ok(out)
 }
 
+/// Sniff the image format from magic bytes. Returns the file extension to
+/// store under, or `None` for unknown payloads. SVG is deliberately rejected:
+/// favicons render in the UI and inline SVG can carry active content.
+pub fn sniff_image_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some("png")
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("gif")
+    } else if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        Some("ico")
+    } else if bytes.len() >= 12 && bytes[0..4] == *b"RIFF" && bytes[8..12] == *b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
 pub async fn fetch_favicon(
     client: &reqwest::Client,
     feed_url: &str,
@@ -202,6 +221,7 @@ pub async fn fetch_favicon(
     site_url: Option<&str>,
     favicon_dir: &std::path::Path,
     source_id: i64,
+    allow_third_party: bool,
 ) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
 
@@ -224,7 +244,9 @@ pub async fn fetch_favicon(
         candidates.push(format!("{origin}/apple-touch-icon.png"));
         candidates.push(format!("{origin}/apple-touch-icon-precomposed.png"));
 
-        if !host.is_empty() {
+        // Third-party fallbacks disclose subscribed domains to Google/DuckDuckGo;
+        // only include them when the user opted in.
+        if allow_third_party && !host.is_empty() {
             candidates.push(format!("https://www.google.com/s2/favicons?domain={host}&sz=64"));
             candidates.push(format!("https://icons.duckduckgo.com/ip2/{host}.ico"));
         }
@@ -244,16 +266,13 @@ pub async fn fetch_favicon(
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if bytes.len() > 80 && bytes.len() < 2_000_000 {
-                        let ext = if candidate.contains(".png") || candidate.contains("google.com") {
-                            "png"
-                        } else if candidate.contains(".svg") {
-                            "svg"
-                        } else {
-                            "ico"
-                        };
-                        let path = favicon_dir.join(format!("{source_id}.{ext}"));
-                        if tokio::fs::write(&path, &bytes).await.is_ok() {
-                            return Some(path);
+                        // Extension comes from the payload, never the URL:
+                        // mislabeled or non-image bodies are skipped.
+                        if let Some(ext) = sniff_image_ext(&bytes) {
+                            let path = favicon_dir.join(format!("{source_id}.{ext}"));
+                            if tokio::fs::write(&path, &bytes).await.is_ok() {
+                                return Some(path);
+                            }
                         }
                     }
                 }
@@ -266,6 +285,20 @@ pub async fn fetch_favicon(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sniff_image_ext() {
+        // Given: canonical magic headers
+        // When/Then: each format is recognized, SVG and junk are refused
+        assert_eq!(sniff_image_ext(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00]), Some("png"));
+        assert_eq!(sniff_image_ext(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]), Some("jpg"));
+        assert_eq!(sniff_image_ext(b"GIF89a\x01\x00"), Some("gif"));
+        assert_eq!(sniff_image_ext(&[0x00, 0x00, 0x01, 0x00, 0x01]), Some("ico"));
+        assert_eq!(sniff_image_ext(b"RIFF\x00\x00\x00\x00WEBP"), Some("webp"));
+        assert_eq!(sniff_image_ext(b"<svg xmlns='http://www.w3.org/2000/svg'>"), None);
+        assert_eq!(sniff_image_ext(b"<html>not an image</html>"), None);
+        assert_eq!(sniff_image_ext(&[]), None);
+    }
 
     #[test]
     fn test_feed_parse_with_base_uri() {

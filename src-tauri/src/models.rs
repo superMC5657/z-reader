@@ -309,6 +309,10 @@ pub struct Settings {
     pub retention_days: u32,
     /// Cap unstarred articles kept per source; 0 = unlimited.
     pub max_items_per_source: u32,
+    /// Allow favicon lookup via third-party services (Google/DUCKDUCKGO),
+    /// which discloses subscribed domains to them. Off = origin servers only.
+    #[serde(default = "default_favicon_third_party")]
+    pub favicon_third_party: bool,
     /// Cloud sync account; None = pure local mode.
     pub sync_account: Option<SyncAccount>,
 }
@@ -348,6 +352,7 @@ impl Default for Settings {
             close_to_tray: true,
             retention_days: 0,
             max_items_per_source: 0,
+            favicon_third_party: true,
             sync_account: None,
         }
     }
@@ -355,6 +360,12 @@ impl Default for Settings {
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp()
+}
+
+/// Pre-redaction default: third-party favicon fallback stays on for settings
+/// files written before the toggle existed.
+fn default_favicon_third_party() -> bool {
+    true
 }
 
 /// Strip all HTML tags, keeping only text.

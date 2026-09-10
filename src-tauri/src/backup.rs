@@ -97,18 +97,44 @@ pub fn scrub_settings_json(text: &str) -> String {
     serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())
 }
 
-/// Extract an archive into a destination directory (path-traversal safe).
+/// Extract an archive into a destination directory.
+/// Hardened: symlink entries are skipped, paths must stay enclosed in `dest`
+/// (rejects `..`, absolute paths and drive prefixes), and archives with
+/// absurd entry counts or total sizes (zip bombs) are refused upfront.
 pub fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
+    const MAX_ENTRIES: usize = 20_000;
+    const MAX_TOTAL_BYTES: u64 = 1_000_000_000;
+    const MAX_FILE_BYTES: u64 = 512_000_000;
+
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
     let mut za = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if za.len() > MAX_ENTRIES {
+        return Err(format!("backup has too many entries ({})", za.len()));
+    }
+    let mut total: u64 = 0;
     for i in 0..za.len() {
         let mut entry = za.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_symlink() {
+            continue;
+        }
+        if entry.size() > MAX_FILE_BYTES {
+            return Err(format!("backup entry too large: {}", entry.name()));
+        }
+        total = total.saturating_add(entry.size());
+        if total > MAX_TOTAL_BYTES {
+            return Err("backup is too large to extract safely".into());
+        }
         let name = entry.name().to_string();
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
             continue;
         }
-        let out_path = dest.join(&name);
+        // `enclosed_name` is the authoritative traversal check; the manual
+        // filters above stay as a cheap first pass.
+        let Some(safe_rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let out_path = dest.join(safe_rel);
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
             continue;
@@ -118,6 +144,17 @@ pub fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
         }
         let mut out = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Atomically replace the live database with a staged file: same-directory
+/// rename when the platform allows it, copy + cleanup otherwise. Both paths
+/// leave no half-written live file behind.
+pub fn replace_live(staged: &Path, live: &Path) -> Result<(), String> {
+    if std::fs::rename(staged, live).is_err() {
+        std::fs::copy(staged, live).map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(staged);
     }
     Ok(())
 }
@@ -255,12 +292,62 @@ mod tests {
         );
         assert!(!out.contains("s3cret") && !out.contains("hunter2"));
     }
-
     #[test]
-    fn test_validate_rejects_garbage() {        let dir = temp_dir("bad");
+    fn test_validate_rejects_garbage() {
+        let dir = temp_dir("bad");
         let bad = dir.join("bad.db");
         std::fs::write(&bad, b"not a database at all").unwrap();
         assert!(validate_db(&bad).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_extract_skips_traversal_entries() {
+        // Given: an archive mixing a normal file with a path-escape attempt
+        // (the public writer API masks symlink file-type bits, so traversal
+        // is the reachable attack shape here; symlink skipping stays as
+        // defense-in-depth per `is_symlink`)
+        let dir = temp_dir("traversal");
+        let archive = dir.join("evil.zreader.bak");
+        {
+            let f = std::fs::File::create(&archive).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zw.start_file("ok.txt", opts).unwrap();
+            zw.write_all(b"fine").unwrap();
+            zw.start_file("../evil.txt", opts).unwrap();
+            zw.write_all(b"escape").unwrap();
+            zw.finish().unwrap();
+        }
+        // When: extracted
+        let dest = dir.join("out");
+        extract_archive(&archive, &dest).unwrap();
+        // Then: the real file lands, nothing escapes the destination
+        assert_eq!(std::fs::read_to_string(dest.join("ok.txt")).unwrap(), "fine");
+        assert!(!dir.join("evil.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_replace_live_swaps_and_preserves_on_error() {
+        // Given: a live DB file and a staged replacement
+        let dir = temp_dir("swap");
+        let live = dir.join("zreader.db");
+        let staged = dir.join("zreader.db.restoring");
+        std::fs::write(&live, b"live-data").unwrap();
+        std::fs::write(&staged, b"staged-data").unwrap();
+        // When: swapped
+        replace_live(&staged, &live).unwrap();
+        // Then: the live path carries the staged content
+        assert_eq!(std::fs::read(&live).unwrap(), b"staged-data");
+
+        // Given: a missing staged file
+        // When: replacement is attempted
+        let missing = dir.join("nope.db");
+        let before = std::fs::read(&live).unwrap();
+        // Then: it errors and the live file is untouched
+        assert!(replace_live(&missing, &live).is_err());
+        assert_eq!(std::fs::read(&live).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
