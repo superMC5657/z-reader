@@ -165,13 +165,38 @@ watch(item, () => {
   extractError.value = ''
 })
 
+// Auto-fetch full text for articles that arrived without a body; articles
+// that already have content are left untouched. Guarded per item id so a
+// failed fetch does not retry in a loop (manual retry stays available).
+const lastAutoFetchedId = ref<number | null>(null)
+watch(
+  item,
+  (next) => {
+    extractError.value = ''
+    if (
+      next &&
+      !next.content?.trim() &&
+      next.url &&
+      lastAutoFetchedId.value !== next.id &&
+      !fetchingFull.value
+    ) {
+      lastAutoFetchedId.value = next.id
+      onFetchFull()
+    }
+  },
+  { immediate: true },
+)
+
 async function onFetchFull() {
   if (!item.value) return
+  const id = item.value.id
   fetchingFull.value = true
   extractError.value = ''
   try {
-    await fetchFullContent(item.value.id)
-    await data.selectItem(item.value.id)
+    await fetchFullContent(id)
+    // Drop stale results when the user navigated away mid-flight.
+    if (data.selectedId !== id) return
+    await data.selectItem(id)
     data.loadItems().catch(() => {})
   } catch (e) {
     extractError.value = String(e)
@@ -235,15 +260,15 @@ function onIframeLoad(e: Event) {
         </div>
 
         <div class="action-group">
-          <!-- Fetch Full Text -->
+          <!-- Re-fetch Full Text -->
           <button
             class="f-icon-btn reader-action-btn"
-            :title="t('item.fetchFull')"
+            :title="t('item.refetch')"
             :disabled="fetchingFull"
             @click="onFetchFull"
           >
             <Icon
-              :name="fetchingFull ? 'arrow-clockwise' : 'sparkles'"
+              name="arrow-clockwise"
               :size="15"
               :class="{ spin: fetchingFull }"
             />

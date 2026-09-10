@@ -26,6 +26,7 @@
     "unstar": "Unstar",
     "openWeb": "Open in browser",
     "fetchFull": "Fetch full content",
+    "refetch": "Re-fetch content",
     "fetching": "Fetching…",
     "focusMode": "Focus mode (Floating modal)",
     "splitMode": "Split mode (Side-by-side)",
