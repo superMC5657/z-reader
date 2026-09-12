@@ -1,12 +1,13 @@
 {
   "name": "z-reader",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "bump:version": "node scripts/bump-version.mjs --name z-reader",
+    "bump": "node scripts/bump-version.mjs",
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "clean": "rm -rf dist && rm -rf src-tauri/target"
