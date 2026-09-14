@@ -11,6 +11,7 @@ mod rules;
 mod settings;
 mod sync;
 mod tray;
+mod z_log;
 
 use std::sync::RwLock;
 use tokio::sync::Mutex;
@@ -36,7 +37,9 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    z_log::install_panic_hook();
     tauri::Builder::default()
+        .plugin(z_log::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
@@ -46,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             use tauri::Manager;
+            z_log::prune_app_dir(app.handle());
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("zreader.db");
@@ -122,6 +126,8 @@ pub fn run() {
             commands::get_stats,
             commands::vacuum_now,
             commands::cleanup_now,
+            z_log::zlog_get_dir,
+            z_log::zlog_export_bundle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

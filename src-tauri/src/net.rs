@@ -36,7 +36,10 @@ pub fn build_http_client(settings: &Settings) -> reqwest::Client {
                 }
                 builder = builder.proxy(proxy);
             } else {
-                log::warn!("invalid manual proxy URL {url:?}; using a direct connection");
+                // Never log the URL value: manual proxy URLs may embed
+                // `user:password@host`, which must not land in rust.log.
+                // (`redact()` only masks `key = value` pairs, not URL userinfo.)
+                log::warn!("invalid manual proxy URL; using a direct connection");
                 builder = builder.no_proxy();
             }
         }

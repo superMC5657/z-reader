@@ -70,6 +70,10 @@ export const getStats = () => invoke<AppStats>('get_stats')
 export const vacuumNow = () => invoke<void>('vacuum_now')
 export const cleanupNow = () => invoke<number>('cleanup_now')
 
+// ---------- Log Export (opt-in, local files only) ----------
+export const zlogGetDir = () => invoke<string>('zlog_get_dir')
+export const zlogExportBundle = () => invoke<string>('zlog_export_bundle')
+
 // ---------- Cloud Sync (Google Reader API) ----------
 export const syncLogin = (serverUrl: string, username: string, password: string) =>
   invoke<number>('sync_login', { serverUrl, username, password })
