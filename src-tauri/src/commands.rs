@@ -348,7 +348,7 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
     opml_io::export(&conn)
 }
 
-// ---------- Phase 2: proxy ----------
+// ---------- Proxy ----------
 
 /// Probe connectivity with candidate proxy settings (before they are saved).
 /// `target` is the URL actually fetched: the caller passes a failing feed URL
@@ -375,7 +375,7 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     Ok(start.elapsed().as_millis() as u64)
 }
 
-// ---------- Phase 2.3: cloud sync (Google Reader API) ----------
+// ---------- Cloud Sync (Google Reader API) ----------
 
 /// Validate credentials against the server and store the account on success.
 /// Returns the number of subscriptions on the server.
@@ -479,7 +479,7 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
     }))
 }
 
-// ---------- Phase 2: regex rules ----------
+// ---------- Regex Automation Rules ----------
 
 fn validate_rule_input(r: &crate::models::RuleInput) -> Result<(), String> {
     if r.name.trim().is_empty() {
@@ -550,7 +550,7 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
     }))
 }
 
-// ---------- Phase 2: backup & restore ----------
+// ---------- Backup & Restore ----------
 
 #[tauri::command]
 pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
@@ -694,7 +694,7 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
     Ok(Some(archive_path.to_string_lossy().to_string()))
 }
 
-// ---------- Phase 2: stats & storage lifecycle ----------
+// ---------- Storage Lifecycle & Stats ----------
 
 #[tauri::command]
 pub async fn get_stats(_app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {

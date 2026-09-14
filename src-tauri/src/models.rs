@@ -369,8 +369,7 @@ fn default_ui_scale() -> f64 {
     100.0
 }
 
-/// Pre-redaction default: third-party favicon fallback stays on for settings
-/// files written before the toggle existed.
+/// Default value for allowing third-party favicon lookup.
 fn default_favicon_third_party() -> bool {
     true
 }

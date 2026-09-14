@@ -74,8 +74,7 @@ pub fn write_archive(
 ///
 /// `syncAccount.password` and `proxyPassword` are redacted; everything else
 /// (server URL, username, host) is kept so restore still reconnects and the
-/// user only re-enters secrets. Parse failures fall back to the original text
-/// to preserve restore compatibility.
+/// user only re-enters secrets.
 pub fn scrub_settings_json(text: &str) -> String {
     let mut v: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -87,11 +86,8 @@ pub fn scrub_settings_json(text: &str) -> String {
                 acct.insert("password".into(), serde_json::Value::String(String::new()));
             }
         }
-        // camelCase (serde) + snake_case (hand-written files) both redacted.
-        for key in ["proxyPassword", "proxy_password"] {
-            if obj.contains_key(key) {
-                obj.insert(key.into(), serde_json::Value::String(String::new()));
-            }
+        if obj.contains_key("proxyPassword") {
+            obj.insert("proxyPassword".into(), serde_json::Value::String(String::new()));
         }
     }
     serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())

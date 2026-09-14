@@ -283,8 +283,6 @@ function scopeLabel(scope: string): string {
   return `${t('settings.rules.scopeGroupPrefix')}${group?.name ?? id}`
 }
 
-// ---------- End Phase 2 sections ----------
-
 const recordingAction = ref<string | null>(null)
 
 function startRecording(actionKey: string) {

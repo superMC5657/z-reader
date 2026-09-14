@@ -15,10 +15,10 @@ fn secrets_path(settings_path: &Path) -> PathBuf {
     settings_path.with_file_name("secrets.json")
 }
 
-/// On-disk secrets. NEVER packed into backups (see `backup::write_archive`)
-/// and written with owner-only permissions on unix. This is the documented
-/// fallback for the OS keychain: same secrecy shape (separate store, never
-/// backed up), weaker at-rest guarantee on platforms without unix modes.
+/// On-disk secrets stored in a dedicated file (`secrets.json`).
+/// NEVER packed into backups (see `backup::write_archive`) and written
+/// with owner-only permissions on Unix. Keeps credentials physically
+/// isolated from public configuration.
 #[derive(Serialize, Deserialize, Default)]
 struct SecretStore {
     #[serde(default)]
@@ -63,17 +63,11 @@ pub fn load(path: &PathBuf) -> Settings {
         Ok(text) => serde_json::from_str::<Settings>(&text).unwrap_or_default(),
         Err(_) => Settings::default(),
     };
-    // The secrets file wins when populated; otherwise the legacy inline value
-    // is kept so pre-migration configs keep working until the next save.
     let secrets = read_secrets(path);
     if let Some(acct) = s.sync_account.as_mut() {
-        if !secrets.sync_password.is_empty() {
-            acct.password = secrets.sync_password;
-        }
+        acct.password = secrets.sync_password;
     }
-    if !secrets.proxy_password.is_empty() {
-        s.proxy_password = secrets.proxy_password;
-    }
+    s.proxy_password = secrets.proxy_password;
     s.version = env!("CARGO_PKG_VERSION").to_string();
     s
 }
@@ -83,8 +77,6 @@ pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let mut s = settings.clone();
-    // Move secrets aside; redact the JSON copy only when the secrets file
-    // landed, so a write failure can never lose credentials.
     let store = SecretStore {
         sync_password: s
             .sync_account
@@ -93,19 +85,11 @@ pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
             .unwrap_or_default(),
         proxy_password: s.proxy_password.clone(),
     };
-    let persist =
-        !store.sync_password.is_empty() || !store.proxy_password.is_empty() || secrets_path(path).exists();
-    if persist {
-        match write_secrets(path, &store) {
-            Ok(()) => {
-                if let Some(acct) = s.sync_account.as_mut() {
-                    acct.password.clear();
-                }
-                s.proxy_password.clear();
-            }
-            Err(e) => log::warn!("storing secrets failed, keeping inline passwords: {e}"),
-        }
+    write_secrets(path, &store)?;
+    if let Some(acct) = s.sync_account.as_mut() {
+        acct.password.clear();
     }
+    s.proxy_password.clear();
     s.version = env!("CARGO_PKG_VERSION").to_string();
     let text = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
     std::fs::write(path, text).map_err(|e| e.to_string())
@@ -158,19 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_inline_passwords_migrate_on_save() {
-        // Given: a pre-migration file with inline passwords and no sidecar
-        let path = temp_settings("legacy");
-        let s = settings_with_secrets();
-        let text = serde_json::to_string_pretty(&s).unwrap();
-        std::fs::write(&path, text).unwrap();
-        // When/Then: load keeps working off the inline values
+    fn clear_sync_secret_drops_password() {
+        let path = temp_settings("clear");
+        save(&path, &settings_with_secrets()).unwrap();
         assert_eq!(load(&path).sync_account.as_ref().unwrap().password, "hunter2");
-        // When: saved once
-        save(&path, &load(&path)).unwrap();
-        // Then: the JSON is redacted and the sidecar holds the secrets
-        let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(!raw.contains("hunter2"));
-        assert_eq!(load(&path).sync_account.as_ref().unwrap().password, "hunter2");
+        clear_sync_secret(&path).unwrap();
+        assert_eq!(load(&path).sync_account.as_ref().unwrap().password, "");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

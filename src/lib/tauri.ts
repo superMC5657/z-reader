@@ -50,27 +50,27 @@ export const exportOpml = () => invoke<string>('export_opml')
 export const refreshFavicon = (id: number) => invoke<string | null>('refresh_favicon', { id })
 export const setCustomFavicon = (id: number, dataBase64: string) => invoke<string>('set_custom_favicon', { id, dataBase64 })
 
-// ---------- Phase 2: proxy ----------
+// ---------- Proxy ----------
 export const testProxy = (settings: Settings, target?: string | null) =>
   invoke<number>('test_proxy', { settings, target: target ?? null })
 
-// ---------- Phase 2: regex rules ----------
+// ---------- Regex Automation Rules ----------
 export const getRules = () => invoke<Rule[]>('get_rules')
 export const createRule = (input: RuleInput) => invoke<Rule>('create_rule', { input })
 export const updateRule = (id: number, input: RuleInput) => invoke<void>('update_rule', { id, input })
 export const deleteRule = (id: number) => invoke<void>('delete_rule', { id })
 export const applyRulesBackfill = () => invoke<RuleBackfillResult>('apply_rules_backfill')
 
-// ---------- Phase 2: backup & restore ----------
+// ---------- Backup & Restore ----------
 export const exportBackup = () => invoke<string | null>('export_backup')
 export const importBackup = () => invoke<string | null>('import_backup')
 
-// ---------- Phase 2: stats & storage ----------
+// ---------- Storage Lifecycle & Stats ----------
 export const getStats = () => invoke<AppStats>('get_stats')
 export const vacuumNow = () => invoke<void>('vacuum_now')
 export const cleanupNow = () => invoke<number>('cleanup_now')
 
-// ---------- Phase 2.3: cloud sync (Google Reader API) ----------
+// ---------- Cloud Sync (Google Reader API) ----------
 export const syncLogin = (serverUrl: string, username: string, password: string) =>
   invoke<number>('sync_login', { serverUrl, username, password })
 export const syncLogout = () => invoke<void>('sync_logout')

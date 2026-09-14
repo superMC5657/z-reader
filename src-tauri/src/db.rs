@@ -17,15 +17,18 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
-    if version < 1 {
+    if version == 0 {
         conn.execute_batch(
             r#"
             CREATE TABLE groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 expanded INTEGER NOT NULL DEFAULT 1,
-                sort INTEGER NOT NULL DEFAULT 0
+                sort INTEGER NOT NULL DEFAULT 0,
+                remote_id TEXT
             );
+            CREATE INDEX IF NOT EXISTS idx_groups_remote ON groups(remote_id) WHERE remote_id IS NOT NULL;
+
             CREATE TABLE sources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT NOT NULL UNIQUE,
@@ -34,8 +37,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
                 favicon TEXT,
                 group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
                 last_fetched INTEGER,
-                error_count INTEGER NOT NULL DEFAULT 0
+                error_count INTEGER NOT NULL DEFAULT 0,
+                remote_id TEXT,
+                last_error TEXT
             );
+
             CREATE TABLE items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
@@ -50,17 +56,64 @@ fn migrate(conn: &Connection) -> Result<(), String> {
                 image TEXT,
                 has_been_read INTEGER NOT NULL DEFAULT 0,
                 starred INTEGER NOT NULL DEFAULT 0,
+                hidden INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
+                remote_id TEXT,
                 UNIQUE(source_id, guid)
             );
             CREATE INDEX idx_items_source_pub ON items(source_id, published_at DESC);
             CREATE INDEX idx_items_pub ON items(published_at DESC);
             CREATE INDEX idx_items_read ON items(has_been_read);
             CREATE INDEX idx_items_starred ON items(starred);
+            CREATE INDEX idx_items_hidden ON items(hidden);
+            CREATE INDEX idx_items_remote ON items(remote_id) WHERE remote_id IS NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS regex_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                target_field TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                is_case_sensitive INTEGER NOT NULL DEFAULT 0,
+                is_enabled INTEGER NOT NULL DEFAULT 1,
+                source_scope TEXT NOT NULL DEFAULT 'all',
+                created_at INTEGER NOT NULL
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+                title, summary, content,
+                content='items', content_rowid='id', tokenize='unicode61'
+            );
+            CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
+                INSERT INTO items_fts(rowid, title, summary, content)
+                VALUES (new.id, new.title, new.summary, new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS items_fts_ad AFTER DELETE ON items BEGIN
+                INSERT INTO items_fts(items_fts, rowid, title, summary, content)
+                VALUES ('delete', old.id, old.title, old.summary, old.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS items_fts_au AFTER UPDATE OF title, summary, content ON items BEGIN
+                INSERT INTO items_fts(items_fts, rowid, title, summary, content)
+                VALUES ('delete', old.id, old.title, old.summary, old.content);
+                INSERT INTO items_fts(rowid, title, summary, content)
+                VALUES (new.id, new.title, new.summary, new.content);
+            END;
+
+            CREATE TABLE IF NOT EXISTS sync_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                target TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sync_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
             "#,
         )
         .map_err(|e| e.to_string())?;
-        conn.pragma_update(None, "user_version", 1).ok();
+        conn.pragma_update(None, "user_version", CURRENT_VERSION).ok();
+        return Ok(());
     }
     if version < 2 {
         conn.execute_batch(
