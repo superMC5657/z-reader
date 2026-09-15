@@ -1013,11 +1013,9 @@ pub struct QueueEntry {
 }
 
 /// Queue one action per item, skipping items without a remote id.
-/// Returns the queued count; skipped items are logged so silent drops show up
-/// in diagnostics instead of vanishing.
+/// Returns the queued count.
 pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAction) -> Result<usize, String> {
     let mut n = 0usize;
-    let mut skipped = 0usize;
     for id in item_ids {
         let remote: Option<String> = conn
             .query_row("SELECT remote_id FROM items WHERE id=?1", params![id], |row| row.get(0))
@@ -1029,12 +1027,7 @@ pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAct
             )
             .map_err(|e| e.to_string())?;
             n += 1;
-        } else {
-            skipped += 1;
         }
-    }
-    if skipped > 0 {
-        log::warn!("sync queue: skipped {skipped} local-only item(s) without remote id");
     }
     Ok(n)
 }

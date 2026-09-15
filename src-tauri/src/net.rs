@@ -15,7 +15,7 @@ pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
 
 /// Build the shared HTTP client honoring the user's proxy configuration.
 ///
-/// Note: an invalid manual URL falls back to direct here with a warning; the
+/// Note: an invalid manual URL falls back to direct here silently; the
 /// settings and connectivity-test paths reject it upfront via
 /// [`validate_proxy`], so this branch only covers hand-edited config files.
 pub fn build_http_client(settings: &Settings) -> reqwest::Client {
@@ -36,10 +36,6 @@ pub fn build_http_client(settings: &Settings) -> reqwest::Client {
                 }
                 builder = builder.proxy(proxy);
             } else {
-                // Never log the URL value: manual proxy URLs may embed
-                // `user:password@host`, which must not land in rust.log.
-                // (`redact()` only masks `key = value` pairs, not URL userinfo.)
-                log::warn!("invalid manual proxy URL; using a direct connection");
                 builder = builder.no_proxy();
             }
         }

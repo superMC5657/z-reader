@@ -101,21 +101,18 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
                         auth = new_auth;
                         match $expr {
                             Ok(val) => Some(val),
-                            Err(e) => {
-                                log::warn!("{} retry failed: {e}", $op_name);
+                            Err(_) => {
                                 report.failures += 1;
                                 None
                             }
                         }
                     }
-                    Err(e) => {
-                        log::warn!("relogin for {} failed: {e}", $op_name);
+                    Err(_) => {
                         report.failures += 1;
                         None
                     }
                 },
-                Err(e) => {
-                    log::warn!("{} failed: {e}", $op_name);
+                Err(_) => {
                     report.failures += 1;
                     None
                 }

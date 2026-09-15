@@ -63,9 +63,7 @@ pub fn run() {
                 sync_token: RwLock::new(None),
             });
 
-            if let Err(e) = tray::create_tray(app.handle()) {
-                log::warn!("tray init failed: {e}");
-            }
+            let _ = tray::create_tray(app.handle());
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -197,7 +195,6 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 }
                 Err(e) => {
                     out.failed = true;
-                    log::warn!("store source {id} failed: {e}");
                     let conn = state.db.lock().await;
                     let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
                 }
@@ -219,7 +216,6 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
         }
         Err(e) => {
             out.failed = true;
-            log::warn!("refresh source {id} failed: {e}");
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
         }
@@ -323,9 +319,8 @@ pub async fn refresh_all_sources(
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, out),
-                Err(e) => {
+                Err(_) => {
                     failures += 1;
-                    log::warn!("refresh task failed: {e}");
                 }
             }
         }
@@ -340,7 +335,7 @@ pub async fn refresh_all_sources(
                 let _ = db::vacuum(&conn);
             }
             Ok(_) => {}
-            Err(e) => log::warn!("retention cleanup failed: {e}"),
+            Err(_) => {}
         }
     }
 

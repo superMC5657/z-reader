@@ -457,7 +457,7 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
                 let _ = db::vacuum(&conn);
             }
             Ok(_) => {}
-            Err(e) => log::warn!("retention cleanup failed: {e}"),
+            Err(_) => {}
         }
     }
     crate::tray::update_tray(&app).await;
@@ -656,7 +656,7 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
             let _ = std::fs::copy(&rollback, &db_path);
             match crate::db::open(&db_path) {
                 Ok(conn) => *guard = conn,
-                Err(_) => log::warn!("restore rollback reopen failed; running on placeholder"),
+                Err(_) => {}
             }
             let _ = std::fs::remove_file(&staged);
             let _ = std::fs::remove_dir_all(&tmp_dir);

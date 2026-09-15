@@ -62,7 +62,6 @@ export async function checkForUpdates() {
     const msg = err instanceof Error ? err.message : String(err)
     updateState.value.status = 'error'
     updateState.value.error = msg
-    console.error('Check for updates failed:', err)
   }
 }
 
@@ -99,14 +98,12 @@ export async function startDownloadAndInstall() {
     const msg = err instanceof Error ? err.message : String(err)
     updateState.value.status = 'error'
     updateState.value.error = msg
-    console.error('Update download/install failed:', err)
   }
 }
 
 export async function restartApp() {
   try {
     await relaunch()
-  } catch (err) {
-    console.error('Relaunch failed:', err)
+  } catch {
   }
 }

@@ -50,8 +50,7 @@ export async function setAppZoom(scaleFactor: number) {
       ;(document.documentElement.style as any).zoom = ''
       return
     }
-  } catch (err) {
-    console.warn('Tauri webview setZoom failed, fallback to CSS zoom:', err)
+  } catch {
   }
   if (typeof document !== 'undefined') {
     ;(document.documentElement.style as any).zoom = `${scaleFactor}`
