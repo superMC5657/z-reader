@@ -149,6 +149,26 @@ async fn background_refresh(app: tauri::AppHandle) {
 /// Max simultaneous feed fetches during a refresh cycle.
 const REFRESH_CONCURRENCY: usize = 6;
 
+/// First line of an error message, truncated: log reasons never span lines
+/// and never carry bodies/URLs/tokens (those stay in the DB or memory).
+fn short_reason(msg: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let first = msg.lines().next().unwrap_or("").trim();
+    if first.chars().count() > MAX_CHARS {
+        first.chars().take(MAX_CHARS).collect()
+    } else {
+        first.to_string()
+    }
+}
+
+/// Host part of a feed URL for logs; never the full URL (no query/userinfo).
+fn url_host(url_str: &str) -> String {
+    url::Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| "unknown".into())
+}
+
 /// Per-source result of one refresh task.
 struct SourceRefreshOutcome {
     inserted: usize,
@@ -181,6 +201,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     }
     let state = app.state::<AppState>();
     let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false };
+    let host = url_host(&url);
     let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
     match feed::fetch_and_parse(&client, &url).await {
         Ok(parsed) => {
@@ -195,6 +216,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 }
                 Err(e) => {
                     out.failed = true;
+                    log::warn!("source {id} failed host {host} reason {}", short_reason(&e.to_string()));
                     let conn = state.db.lock().await;
                     let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
                 }
@@ -207,15 +229,19 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 {
                     let conn = state.db.lock().await;
                     let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
+                } else {
+                    log::debug!("source {id} favicon miss host {host}");
                 }
             }
             if !out.failed {
                 let conn = state.db.lock().await;
                 let _ = db::mark_source_fetched(&conn, id, true, None);
+                log::debug!("source {id} ok host {host} new {}", out.inserted);
             }
         }
         Err(e) => {
             out.failed = true;
+            log::warn!("source {id} failed host {host} reason {}", short_reason(&e));
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
         }
@@ -259,14 +285,22 @@ pub async fn refresh_all_sources(
     // Cloud sync mode: subscriptions live on the server, so refresh = sync.
     // Rule-engine notify matches from the pull are forwarded so background
     // notifications behave like the local refresh path.
+    let mode = if background { "background" } else { "manual" };
     let (total_new, failures, notified) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+        log::debug!("refresh start mode {mode} sync true");
         let report = sync::run(&app, background).await?;
         (report.new_items, report.failures, report.notified)
     } else {
         let client = state.http_client();
         let engine = std::sync::Arc::new({
             let conn = state.db.lock().await;
-            rules::RuleEngine::load(&conn)?
+            match rules::RuleEngine::load(&conn) {
+                Ok(e) => e,
+                Err(e) => {
+                    log::warn!("refresh rules load failed reason {}", short_reason(&e));
+                    return Err(e);
+                }
+            }
         });
         let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
             let conn = state.db.lock().await;
@@ -283,6 +317,7 @@ pub async fn refresh_all_sources(
             }
         };
         let dir = commands::favicon_dir(&app)?;
+        log::debug!("refresh start mode {mode} sources {} sync false", targets.len());
 
         // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
         // Each task owns its network I/O and takes the DB lock only for short
@@ -321,6 +356,7 @@ pub async fn refresh_all_sources(
                 Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, out),
                 Err(_) => {
                     failures += 1;
+                    log::debug!("refresh task join failed");
                 }
             }
         }
@@ -331,10 +367,12 @@ pub async fn refresh_all_sources(
     {
         let conn = state.db.lock().await;
         match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
-            Ok(n) if n > 200 => {
-                let _ = db::vacuum(&conn);
+            Ok(n) => {
+                if n > 200 {
+                    let _ = db::vacuum(&conn);
+                }
+                log::debug!("store retention done deleted {n}");
             }
-            Ok(_) => {}
             Err(_) => {}
         }
     }
@@ -356,6 +394,7 @@ pub async fn refresh_all_sources(
             serde_json::json!({ "newItems": total_new, "failures": failures, "sync": is_sync }),
         );
     }
+    log::info!("refresh done new {total_new} failures {failures} sync {is_sync}");
     Ok(total_new)
 }
 

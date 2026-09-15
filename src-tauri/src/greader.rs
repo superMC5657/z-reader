@@ -237,12 +237,12 @@ async fn read_authed(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .send()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
     let text = resp
         .text()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(GReaderError::Auth(text));
     }
@@ -265,12 +265,12 @@ pub async fn login(
         .body(login_body(email, passwd))
         .send()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
     let text = resp
         .text()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(GReaderError::Auth(text));
     }
@@ -354,12 +354,12 @@ pub async fn contents(
         .body(body)
         .send()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
     let text = resp
         .text()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(GReaderError::Auth(text));
     }
@@ -434,7 +434,7 @@ async fn post_authed(
         .body(body.to_string())
         .send()
         .await
-        .map_err(|e| GReaderError::Other(e.to_string()))?;
+        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
         let text = resp.text().await.unwrap_or_default();

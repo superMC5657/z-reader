@@ -35,15 +35,22 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     } else {
         log::LevelFilter::Info
     };
+    // First-party modules: Debug in dev (second-layer points visible),
+    // Info in release (first layer only).
+    let inner = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
 
     let builder = tauri_plugin_log::Builder::new()
         .level(level)
         // First-party modules: keep Info in release (feed refresh failures
         // must stay visible).
-        .level_for("zreader_lib", log::LevelFilter::Info)
-        .level_for("zreader_lib::feed", log::LevelFilter::Info)
-        .level_for("zreader_lib::sync", log::LevelFilter::Info)
-        .level_for("zreader_lib::net", log::LevelFilter::Info)
+        .level_for("zreader_lib", inner)
+        .level_for("zreader_lib::feed", inner)
+        .level_for("zreader_lib::sync", inner)
+        .level_for("zreader_lib::net", inner)
         // Noisy third-party crates.
         .level_for("hyper", log::LevelFilter::Warn)
         .level_for("reqwest", log::LevelFilter::Warn)

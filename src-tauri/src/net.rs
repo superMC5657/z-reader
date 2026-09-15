@@ -1,5 +1,22 @@
 use crate::models::Settings;
 
+/// One-line reason for a reqwest failure with the echoed request URL reduced
+/// to its host: reqwest's `Error` Display appends `for url (<full>)`, which
+/// would otherwise leak full URLs (query/userinfo) into logs. Callers still
+/// wrap the result in `short_reason` at the log site.
+pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
+    let mut msg = e.to_string();
+    if let Some(url) = e.url() {
+        let host = url.host_str().unwrap_or("unknown");
+        msg = msg.replace(url.as_str(), host);
+    }
+    if prefix.is_empty() {
+        msg
+    } else {
+        format!("{prefix}: {msg}")
+    }
+}
+
 /// Validate a manual proxy URL before it is saved or tested, so a typo fails
 /// loudly instead of silently falling back to a direct connection.
 pub fn validate_proxy(settings: &Settings) -> Result<(), String> {

@@ -7,12 +7,15 @@ pub async fn extract_from_url(client: &reqwest::Client, link: &str) -> Result<St
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("fetch failed: {e}"))?;
+        .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
     let final_url = resp.url().to_string();
-    let html = resp.text().await.map_err(|e| e.to_string())?;
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| crate::net::http_err_reason("body failed", &e))?;
 
     let mut readability = dom_smoothie::Readability::new(html.as_str(), Some(&final_url), None)
         .map_err(|e| format!("extract failed: {e}"))?;

@@ -17,6 +17,35 @@ pub(crate) fn favicon_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// First line of an error message, truncated: reasons never carry file paths,
+/// URLs, tokens or article text.
+fn short_reason(msg: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let first = msg.lines().next().unwrap_or("").trim();
+    if first.chars().count() > MAX_CHARS {
+        first.chars().take(MAX_CHARS).collect()
+    } else {
+        first.to_string()
+    }
+}
+
+/// Basename only: full file paths never enter logs.
+fn file_base(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("?")
+        .to_string()
+}
+
+/// Host part of a feed URL for logs; never the full URL (no query/userinfo).
+fn url_host(url_str: &str) -> String {
+    url::Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| "unknown".into())
+}
+
 #[tauri::command]
 pub async fn get_sources(state: State<'_, AppState>) -> Result<Vec<crate::models::Source>, String> {
     let conn = state.db.lock().await;
@@ -75,14 +104,23 @@ pub async fn add_source(
     }
 
     // Probe without persisting: parse the remote feed to validate first.
-    let parsed = feed::fetch_and_parse(&client, &url).await?;
+    let parsed = feed::fetch_and_parse(&client, &url).await.map_err(|e| {
+        log::warn!("add source failed host {} reason {}", url_host(&url), short_reason(&e));
+        e
+    })?;
     let title = if parsed.title.is_empty() { url.clone() } else { parsed.title.clone() };
 
     let source = {
         let conn = state.db.lock().await;
-        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id)?;
+        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id).map_err(|e| {
+            log::warn!("add source failed host {} reason {}", url_host(&url), short_reason(&e));
+            e
+        })?;
         let ctx = feed::SourceCtx { id: s.id, group_id: s.group_id, url: url.clone() };
-        feed::store(&conn, &ctx, &parsed, None)?;
+        feed::store(&conn, &ctx, &parsed, None).map_err(|e| {
+            log::warn!("add source failed host {} reason {}", url_host(&url), short_reason(&e));
+            e
+        })?;
         db::mark_source_fetched(&conn, s.id, true, None)?;
         db::get_source(&conn, s.id)?
     };
@@ -288,6 +326,16 @@ pub async fn set_item_hidden(state: State<'_, AppState>, id: i64, hidden: bool) 
 
 #[tauri::command]
 pub async fn fetch_full_content(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    match fetch_full_content_inner(&state, id).await {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            log::warn!("content fetch failed item {id} reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
+}
+
+async fn fetch_full_content_inner(state: &AppState, id: i64) -> Result<(), String> {
     let client = state.http_client();
     let link = {
         let conn = state.db.lock().await;
@@ -333,19 +381,41 @@ pub async fn save_settings(
 #[tauri::command]
 pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<serde_json::Value, String> {
     let conn = state.db.lock().await;
-    let r = opml_io::import(&conn, &text)?;
-    Ok(serde_json::json!({
-        "groupsAdded": r.groups_added,
-        "sourcesAdded": r.sources_added,
-        "sourcesExisting": r.sources_existing,
-    }))
+    match opml_io::import(&conn, &text) {
+        Ok(r) => {
+            log::info!(
+                "opml import ok groups {} sources {} existing {}",
+                r.groups_added,
+                r.sources_added,
+                r.sources_existing
+            );
+            Ok(serde_json::json!({
+                "groupsAdded": r.groups_added,
+                "sourcesAdded": r.sources_added,
+                "sourcesExisting": r.sources_existing,
+            }))
+        }
+        Err(e) => {
+            log::warn!("opml import failed reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
 }
 
 /// Returns the OPML document as XML text for the frontend to download.
 #[tauri::command]
 pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
     let conn = state.db.lock().await;
-    opml_io::export(&conn)
+    match opml_io::export(&conn) {
+        Ok(xml) => {
+            log::info!("opml export ok bytes {}", xml.len());
+            Ok(xml)
+        }
+        Err(e) => {
+            log::warn!("opml export failed reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
 }
 
 // ---------- Proxy ----------
@@ -356,7 +426,10 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
 /// Returns the request latency in milliseconds.
 #[tauri::command]
 pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
-    crate::net::validate_proxy(&settings)?;
+    if let Err(e) = crate::net::validate_proxy(&settings) {
+        log::warn!("proxy test failed reason {}", short_reason(&e));
+        return Err(e);
+    }
     let url = target
         .as_deref()
         .map(str::trim)
@@ -364,15 +437,27 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
         .unwrap_or("https://example.com");
     let client = crate::net::build_http_client(&settings);
     let start = std::time::Instant::now();
-    client
+    let resp = client
         .get(url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
-    Ok(start.elapsed().as_millis() as u64)
+        .await;
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = crate::net::http_err_reason("", &e);
+            log::warn!("proxy test failed reason {}", short_reason(&msg));
+            return Err(msg);
+        }
+    };
+    if let Err(e) = resp.error_for_status() {
+        let msg = crate::net::http_err_reason("", &e);
+        log::warn!("proxy test failed reason {}", short_reason(&msg));
+        return Err(msg);
+    }
+    let ms = start.elapsed().as_millis() as u64;
+    log::info!("proxy test ok latency {ms}ms");
+    Ok(ms)
 }
 
 // ---------- Cloud Sync (Google Reader API) ----------
@@ -402,7 +487,11 @@ pub async fn sync_login(
         .map_err(|e| e.to_string())?;
     let subs = crate::greader::subscriptions(&http, &acct.server_url, &auth)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            log::warn!("sync login subscriptions failed reason {}", short_reason(&msg));
+            msg
+        })?;
 
     let path = settings_io::settings_path(&app)?;
     let mut s = settings_io::load(&path);
@@ -426,6 +515,7 @@ pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(
         let conn = state.db.lock().await;
         db::queue_clear(&conn)?;
     }
+    log::info!("sync logout ok provider greader");
     Ok(())
 }
 
@@ -540,20 +630,45 @@ pub async fn delete_rule(state: State<'_, AppState>, id: i64) -> Result<(), Stri
 #[tauri::command]
 pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = state.db.lock().await;
-    let engine = crate::rules::RuleEngine::load(&conn)?;
-    let stats = crate::rules::backfill(&conn, &engine)?;
-    Ok(serde_json::json!({
-        "markedRead": stats.marked_read,
-        "starred": stats.starred,
-        "hidden": stats.hidden,
-        "notified": stats.notified,
-    }))
+    let engine = match crate::rules::RuleEngine::load(&conn) {
+        Ok(e) => e,
+        Err(e) => {
+            log::warn!("rules backfill failed reason {}", short_reason(&e));
+            return Err(e);
+        }
+    };
+    match crate::rules::backfill(&conn, &engine) {
+        Ok(stats) => Ok(serde_json::json!({
+            "markedRead": stats.marked_read,
+            "starred": stats.starred,
+            "hidden": stats.hidden,
+            "notified": stats.notified,
+        })),
+        Err(e) => {
+            log::warn!("rules backfill failed reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
 }
 
 // ---------- Backup & Restore ----------
 
 #[tauri::command]
 pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    match export_backup_inner(app, &state).await {
+        Ok(Some(path)) => {
+            log::info!("backup export ok file {}", file_base(&path));
+            Ok(Some(path))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::warn!("backup export failed reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
+}
+
+async fn export_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
     let dir = data_dir(&app)?;
@@ -594,6 +709,20 @@ pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result
 
 #[tauri::command]
 pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    match import_backup_inner(app, &state).await {
+        Ok(Some(path)) => {
+            log::info!("backup import ok file {}", file_base(&path));
+            Ok(Some(path))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::warn!("backup import failed reason {}", short_reason(&e));
+            Err(e)
+        }
+    }
+}
+
+async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
     let app_for_dialog = app.clone();
@@ -713,7 +842,9 @@ pub async fn get_stats(_app: AppHandle, state: State<'_, AppState>) -> Result<se
 #[tauri::command]
 pub async fn vacuum_now(state: State<'_, AppState>) -> Result<(), String> {
     let conn = state.db.lock().await;
-    db::vacuum(&conn)
+    db::vacuum(&conn)?;
+    log::info!("store vacuum ok");
+    Ok(())
 }
 
 /// Apply the retention policy immediately, compacting only when something
@@ -730,5 +861,6 @@ pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<u
         db::vacuum(&conn)?;
     }
     crate::tray::update_tray(&app).await;
+    log::debug!("store cleanup done deleted {deleted}");
     Ok(deleted)
 }

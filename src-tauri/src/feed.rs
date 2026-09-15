@@ -44,12 +44,15 @@ pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<Pars
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("fetch failed: {e}"))?;
+        .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
     let final_url = resp.url().as_str().to_string();
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| crate::net::http_err_reason("body failed", &e))?;
     parse_feed_data(&bytes[..], Some(&final_url), url)
 }
 

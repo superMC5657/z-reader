@@ -36,6 +36,18 @@ pub struct Session {
     pub auth: String,
 }
 
+/// First line of an error message, truncated: reasons never carry tokens,
+/// bodies or full URLs (server text stays server-side, tokens stay in memory).
+fn short_reason(msg: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let first = msg.lines().next().unwrap_or("").trim();
+    if first.chars().count() > MAX_CHARS {
+        first.chars().take(MAX_CHARS).collect()
+    } else {
+        first.to_string()
+    }
+}
+
 pub fn clear_session(state: &AppState) {
     *state.sync_token.write().expect("sync token lock") = None;
 }
@@ -66,8 +78,16 @@ pub async fn ensure_session(
     if let Some(auth) = cached {
         return Ok(auth);
     }
-    let auth = greader::login(http, &acct.server_url, &acct.username, &acct.password).await?;
+    let auth = match greader::login(http, &acct.server_url, &acct.username, &acct.password).await
+    {
+        Ok(a) => a,
+        Err(e) => {
+            log::warn!("sync login failed reason {}", short_reason(&e.to_string()));
+            return Err(e);
+        }
+    };
     store_session(state, acct, &auth);
+    log::info!("sync login ok provider greader");
     Ok(auth)
 }
 
@@ -101,19 +121,22 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
                         auth = new_auth;
                         match $expr {
                             Ok(val) => Some(val),
-                            Err(_) => {
+                            Err(e) => {
                                 report.failures += 1;
+                                log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
                                 None
                             }
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
                         report.failures += 1;
+                        log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
                         None
                     }
                 },
-                Err(_) => {
+                Err(e) => {
                     report.failures += 1;
+                    log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
                     None
                 }
             }
@@ -130,12 +153,44 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
         report.subscription_count = n;
     }
 
-    // 3. incremental item pull
-    if let Some((n, notified)) = retry_auth!("sync pull", pull_items(&state, &http, &acct, &auth).await) {
-        report.new_items = n;
-        report.notified = notified;
+    // 3. incremental item pull (auth retry inline so the final failure
+    // reason stays available for the warn log).
+    match pull_items(&state, &http, &acct, &auth).await {
+        Ok((n, notified)) => {
+            report.new_items = n;
+            report.notified = notified;
+        }
+        Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct).await {
+            Ok(new_auth) => {
+                auth = new_auth;
+                match pull_items(&state, &http, &acct, &auth).await {
+                    Ok((n, notified)) => {
+                        report.new_items = n;
+                        report.notified = notified;
+                    }
+                    Err(e) => {
+                        report.failures += 1;
+                        log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+                    }
+                }
+            }
+            Err(e) => {
+                report.failures += 1;
+                log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+            }
+        },
+        Err(e) => {
+            report.failures += 1;
+            log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+        }
     }
 
+    log::info!(
+        "sync pull done new {} failures {} notified {}",
+        report.new_items,
+        report.failures,
+        report.notified.len()
+    );
     Ok(report)
 }
 
