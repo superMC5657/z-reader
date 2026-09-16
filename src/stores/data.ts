@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import * as api from '../lib/tauri'
 import type { Group, Item, Source } from '../types'
 import { useAppStore } from './app'
+import { zlog } from '../lib/z-log'
 
 interface UiState {
   menuVisible: boolean
@@ -32,6 +33,11 @@ interface Scope {
 }
 
 const PAGE_SIZE = 300
+
+function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str
+  return str.slice(0, maxLen) + '...'
+}
 
 function listParams(scope: Scope, filter: number, search: string, offset: number) {
   return {
@@ -135,20 +141,34 @@ export const useDataStore = defineStore('data', {
       }
     },
     async selectScope(type: Scope['type'], id: number | null = null) {
+      if (type === 'all') {
+        zlog.ui('Switch scope to "All Articles"')
+      } else if (type === 'source' && id !== null) {
+        const name = this.sourceById(id)?.title ?? `feed #${id}`
+        zlog.ui(`Switch scope to feed "${name}"`)
+      } else if (type === 'group' && id !== null) {
+        const name = this.groups.find((g) => g.id === id)?.name ?? `folder #${id}`
+        zlog.ui(`Switch scope to folder "${name}"`)
+      }
       this.scope = { type, id }
       this.selectedId = null
       this.selectedItem = null
       await this.loadItems()
     },
     async setFilter(filter: number) {
+      const filterNames = ['All', 'Unread', 'Starred']
+      zlog.ui(`Switch filter to "${filterNames[filter] ?? filter}"`)
       await useAppStore().patch({ filterType: filter })
       await this.loadItems()
     },
     async search_(q: string) {
+      const trimmed = q.trim()
+      zlog.ui(trimmed ? `Search articles: "${truncate(trimmed, 40)}"` : 'Clear article search')
       this.search = q
       await this.loadItems()
     },
     async selectItem(id: number) {
+      const isAlreadySelected = this.selectedItem?.id === id
       this.selectedId = id
       this.itemLoading = true
       try {
@@ -156,12 +176,17 @@ export const useDataStore = defineStore('data', {
         // Drop stale responses when the user navigated away mid-flight.
         if (this.selectedId !== id) return
         this.selectedItem = item
+        if (!isAlreadySelected) {
+          const sourceTitle = this.sourceById(item.sourceId)?.title ?? 'Unknown'
+          zlog.ui(`Select article "${truncate(item.title, 60)}" [Feed: "${sourceTitle}", id=${id}]`)
+        }
         if (!item.hasBeenRead) await this.setItemRead(item, true)
       } finally {
         this.itemLoading = false
       }
     },
     async setItemRead(item: Item, read: boolean) {
+      zlog.ui(`${read ? 'Mark as read' : 'Mark as unread'}: "${truncate(item.title, 60)}"`)
       const prev = item.hasBeenRead
       item.hasBeenRead = read
       if (this.selectedItem?.id === item.id) this.selectedItem.hasBeenRead = read
@@ -179,6 +204,7 @@ export const useDataStore = defineStore('data', {
     },
     async toggleStar(item: Item) {
       const starred = !item.starred
+      zlog.ui(`${starred ? 'Star article' : 'Unstar article'}: "${truncate(item.title, 60)}"`)
       item.starred = starred
       if (this.selectedItem?.id === item.id) this.selectedItem.starred = starred
       const idx = this.items.findIndex((i) => i.id === item.id)
@@ -194,10 +220,18 @@ export const useDataStore = defineStore('data', {
       }
     },
     async markAllReadInScope() {
+      let scopeDesc = 'all articles'
+      if (this.scope.type === 'source' && this.scope.id) {
+        scopeDesc = `feed "${this.sourceById(this.scope.id)?.title ?? this.scope.id}"`
+      } else if (this.scope.type === 'group' && this.scope.id) {
+        scopeDesc = `folder "${this.groups.find((g) => g.id === this.scope.id)?.name ?? this.scope.id}"`
+      }
+      zlog.ui(`Mark all articles as read in ${scopeDesc}`)
       await api.markAllRead(this.scope.type, this.scope.id)
       await Promise.all([this.loadSources(), this.loadItems()])
     },
     async fetchAll() {
+      zlog.ui(`Manual refresh triggered (${this.sources.length} feeds)`)
       this.fetching = true
       try {
         await api.fetchSources()
@@ -206,11 +240,14 @@ export const useDataStore = defineStore('data', {
       }
     },
     async addSource(url: string, groupId: number | null) {
+      zlog.ui(`Subscribe to feed: ${url}`)
       const source = await api.addSource(url, groupId)
       await Promise.all([this.loadSources(), this.loadItems()])
       return source
     },
     async removeSource(id: number) {
+      const name = this.sourceById(id)?.title ?? `#${id}`
+      zlog.ui(`Unsubscribe from feed "${name}" [id=${id}]`)
       await api.removeSource(id)
       if (this.scope.type === 'source' && this.scope.id === id) {
         await this.selectScope('all')
@@ -222,6 +259,8 @@ export const useDataStore = defineStore('data', {
       await Promise.all([this.loadSources(), this.loadItems()])
     },
     async fetchFullContent(id: number) {
+      const title = this.selectedItem?.id === id ? this.selectedItem.title : `item #${id}`
+      zlog.ui(`Request full content for "${truncate(title, 60)}"`)
       await api.fetchFullContent(id)
       await this.selectItem(id)
       this.loadItems().catch(() => {})

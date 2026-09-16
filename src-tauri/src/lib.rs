@@ -161,13 +161,6 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
-/// Host part of a feed URL for logs; never the full URL (no query/userinfo).
-fn url_host(url_str: &str) -> String {
-    url::Url::parse(url_str)
-        .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_string()))
-        .unwrap_or_else(|| "unknown".into())
-}
 
 /// Per-source result of one refresh task.
 struct SourceRefreshOutcome {
@@ -185,6 +178,7 @@ struct RefreshTask {
     background: bool,
     allow_third_party: bool,
     id: i64,
+    title: String,
     group_id: Option<i64>,
     url: String,
     favicon: Option<String>,
@@ -195,13 +189,12 @@ struct RefreshTask {
 /// them on the source row and reports them via the outcome.
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon } = task;
+    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, title, group_id, url, favicon } = task;
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
     let state = app.state::<AppState>();
     let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false };
-    let host = url_host(&url);
     let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
     match feed::fetch_and_parse(&client, &url).await {
         Ok(parsed) => {
@@ -216,7 +209,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 }
                 Err(e) => {
                     out.failed = true;
-                    log::warn!("source {id} failed host {host} reason {}", short_reason(&e.to_string()));
+                    log::warn!("Feed \"{title}\" ({url}) failed: {}", short_reason(&e.to_string()));
                     let conn = state.db.lock().await;
                     let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
                 }
@@ -229,19 +222,21 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 {
                     let conn = state.db.lock().await;
                     let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
-                } else {
-                    log::debug!("source {id} favicon miss host {host}");
                 }
             }
             if !out.failed {
                 let conn = state.db.lock().await;
                 let _ = db::mark_source_fetched(&conn, id, true, None);
-                log::debug!("source {id} ok host {host} new {}", out.inserted);
+                if out.inserted > 0 {
+                    log::info!("Feed \"{title}\" refreshed: {} new article(s)", out.inserted);
+                } else {
+                    log::debug!("Feed \"{title}\" up to date");
+                }
             }
         }
         Err(e) => {
             out.failed = true;
-            log::warn!("source {id} failed host {host} reason {}", short_reason(&e));
+            log::warn!("Feed \"{title}\" ({url}) failed: {}", short_reason(&e));
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
         }
@@ -302,29 +297,30 @@ pub async fn refresh_all_sources(
                 }
             }
         });
-        let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
+        let targets: Vec<(i64, String, Option<i64>, String, Option<String>)> = {
             let conn = state.db.lock().await;
             match ids {
                 Some(v) => db::get_sources(&conn)?
                     .into_iter()
                     .filter(|s| v.contains(&s.id))
-                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
+                    .map(|s| (s.id, s.title, s.group_id, s.url, s.favicon))
                     .collect(),
                 None => db::get_sources(&conn)?
                     .into_iter()
-                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
+                    .map(|s| (s.id, s.title, s.group_id, s.url, s.favicon))
                     .collect(),
             }
         };
         let dir = commands::favicon_dir(&app)?;
-        log::debug!("refresh start mode {mode} sources {} sync false", targets.len());
+        let start_time = std::time::Instant::now();
+        log::info!("Refreshing {} feed(s)...", targets.len());
 
         // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
         // Each task owns its network I/O and takes the DB lock only for short
         // store/mark critical sections.
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
         let mut set = tokio::task::JoinSet::new();
-        for (id, group_id, url, favicon) in targets {
+        for (id, title, group_id, url, favicon) in targets {
             let permit = sem
                 .clone()
                 .acquire_owned()
@@ -338,6 +334,7 @@ pub async fn refresh_all_sources(
                 background,
                 allow_third_party: settings.favicon_third_party,
                 id,
+                title,
                 group_id,
                 url,
                 favicon,
@@ -360,6 +357,8 @@ pub async fn refresh_all_sources(
                 }
             }
         }
+        let elapsed = start_time.elapsed().as_millis();
+        log::info!("Feed refresh completed: {total_new} new article(s), {failures} failed ({elapsed}ms)");
         (total_new, failures, notified)
     };
 

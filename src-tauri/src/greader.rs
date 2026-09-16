@@ -232,10 +232,10 @@ async fn read_authed(
     auth: &str,
     url: &str,
 ) -> Result<String, GReaderError> {
-    let resp = client
+    let req = client
         .get(url)
-        .header("Authorization", format!("GoogleLogin auth={auth}"))
-        .send()
+        .header("Authorization", format!("GoogleLogin auth={auth}"));
+    let resp = crate::net::send_logged("sync", "GET", url, req)
         .await
         .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
@@ -259,11 +259,11 @@ pub async fn login(
     passwd: &str,
 ) -> Result<String, GReaderError> {
     let url = format!("{}/accounts/ClientLogin", base_url(base));
-    let resp = client
-        .post(url)
+    let req = client
+        .post(&url)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(login_body(email, passwd))
-        .send()
+        .body(login_body(email, passwd));
+    let resp = crate::net::send_logged("sync", "POST", &url, req)
         .await
         .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
@@ -347,12 +347,12 @@ pub async fn contents(
         }
         form.finish()
     };
-    let resp = client
-        .post(url)
+    let req = client
+        .post(&url)
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
+        .body(body);
+    let resp = crate::net::send_logged("sync", "POST", &url, req)
         .await
         .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();
@@ -427,12 +427,12 @@ async fn post_authed(
     url: &str,
     body: &str,
 ) -> Result<(), GReaderError> {
-    let resp = client
+    let req = client
         .post(url)
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.to_string())
-        .send()
+        .body(body.to_string());
+    let resp = crate::net::send_logged("sync", "POST", url, req)
         .await
         .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
     let status = resp.status();

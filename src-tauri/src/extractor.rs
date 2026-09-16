@@ -2,10 +2,10 @@ use crate::models::html_to_text;
 
 /// Network-only stage: fetch the page and extract main article HTML (sanitized).
 pub async fn extract_from_url(client: &reqwest::Client, link: &str) -> Result<String, String> {
-    let resp = client
+    let req = client
         .get(link)
-        .timeout(std::time::Duration::from_secs(30))
-        .send()
+        .timeout(std::time::Duration::from_secs(30));
+    let resp = crate::net::send_logged("extractor", "GET", link, req)
         .await
         .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
     if !resp.status().is_success() {

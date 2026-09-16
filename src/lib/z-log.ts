@@ -2,8 +2,8 @@
 //
 // The reader fires high-volume events during subscription refreshes, so
 // records are coalesced and forwarded at most every FLUSH_MS or BATCH_SIZE
-// entries instead of one IPC call per log line. Backend splits files by
-// target: `webview:*` records land in webview.log, Rust records in rust.log.
+// entries instead of one IPC call per log line. Both frontend and backend
+// records land in a single unified log file named after the application (z-reader.log).
 
 import { attachConsole, debug, error, info, trace, warn } from '@tauri-apps/plugin-log'
 
@@ -15,7 +15,7 @@ interface Entry {
 }
 
 const BATCH_SIZE = 200
-const FLUSH_MS = 3000
+const FLUSH_MS = 200
 
 const senders: Record<Level, (message: string) => Promise<void>> = {
   trace,
@@ -32,6 +32,10 @@ let consoleAttached = false
 let pagehideHooked = false
 
 function flush(): void {
+  if (timer !== undefined) {
+    clearInterval(timer)
+    timer = undefined
+  }
   if (queue.length === 0) return
   const batch = queue.splice(0, queue.length)
   for (const entry of batch) {
@@ -45,9 +49,9 @@ function schedule(): void {
   timer = window.setInterval(flush, FLUSH_MS)
 }
 
-function enqueue(level: Level, message: string): void {
+function enqueue(level: Level, message: string, immediate = false): void {
   queue.push({ level, message })
-  if (queue.length >= BATCH_SIZE) {
+  if (immediate || queue.length >= BATCH_SIZE) {
     flush()
   } else {
     schedule()
@@ -59,6 +63,17 @@ function enqueue(level: Level, message: string): void {
     pagehideHooked = true
     window.addEventListener('pagehide', flush)
   }
+}
+
+function formatAction(action: string, meta?: Record<string, unknown>): string {
+  if (!meta || Object.keys(meta).length === 0) {
+    return action
+  }
+  const pairs = Object.entries(meta)
+    .filter(([_, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${k}=${typeof v === 'string' && v.includes(' ') ? `"${v}"` : v}`)
+    .join(' ')
+  return `${action} (${pairs})`
 }
 
 /**
@@ -73,13 +88,25 @@ export function initZLog(): void {
     consoleAttached = true
     attachConsole().catch(() => undefined)
   }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('error', (event) => {
+      zlog.error(`uncaught error: ${event.message} at ${event.filename}:${event.lineno}`)
+    })
+    window.addEventListener('unhandledrejection', (event) => {
+      zlog.error(`unhandled rejection: ${event.reason}`)
+    })
+  }
 }
 
 export const zlog = {
   trace: (message: string): void => enqueue('trace', message),
   debug: (message: string): void => enqueue('debug', message),
   info: (message: string): void => enqueue('info', message),
-  warn: (message: string): void => enqueue('warn', message),
-  error: (message: string): void => enqueue('error', message),
+  warn: (message: string): void => enqueue('warn', message, true),
+  error: (message: string): void => enqueue('error', message, true),
+  ui: (action: string, meta?: Record<string, unknown>): void =>
+    enqueue('info', formatAction(action, meta), true),
+  uiDebug: (action: string, meta?: Record<string, unknown>): void =>
+    enqueue('debug', formatAction(action, meta)),
   flush,
 }

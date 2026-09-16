@@ -1,8 +1,7 @@
 //! Unified logging backend for z-reader (tauri-plugin-log v2).
 //!
-//! - Backend `log::*!` records land in `rust.log`; frontend records sent via
-//!   `@tauri-apps/plugin-log` arrive with target `webview:*` and land in
-//!   `webview.log`.
+//! - Backend `log::*!` and frontend records sent via `@tauri-apps/plugin-log`
+//!   land in a single unified log file named after the application (`z-reader.log`).
 //! - Log files live in the OS log dir ([`log_dir`]); business data stays in
 //!   sqlite (`zreader.db`). Logs never enter the database.
 //! - Retention is best-effort file hygiene: files older than 14 days are
@@ -28,7 +27,7 @@ const KEEP_ROTATED: usize = 6;
 /// Feed / sync / net targets stay at `Info` in release so refresh failures
 /// remain diagnosable; noisy transport crates are capped at `Warn`.
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_log::{Target, TargetKind, WEBVIEW_TARGET};
+    use tauri_plugin_log::{Target, TargetKind};
 
     let level = if cfg!(debug_assertions) {
         log::LevelFilter::Debug
@@ -58,19 +57,51 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         .level_for("tao", log::LevelFilter::Warn)
         .level_for("tungstenite", log::LevelFilter::Warn)
         .level_for("rustls", log::LevelFilter::Warn)
+        .level_for("html5ever", log::LevelFilter::Error)
+        .level_for("selectors", log::LevelFilter::Error)
+        .level_for("markup5ever", log::LevelFilter::Error)
         .max_file_size(MAX_FILE_BYTES)
         .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(KEEP_ROTATED))
         .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
-        .targets([
-            Target::new(TargetKind::LogDir {
-                file_name: Some("rust".into()),
-            })
-            .filter(move |md| !md.target().starts_with(WEBVIEW_TARGET)),
-            Target::new(TargetKind::LogDir {
-                file_name: Some("webview".into()),
-            })
-            .filter(move |md| md.target().starts_with(WEBVIEW_TARGET)),
-        ]);
+        .format(|out, message, record| {
+            let target = record.target();
+            let tag = if target.starts_with("webview") {
+                "UI"
+            } else if let Some(sub) = target.strip_prefix("zreader_lib::") {
+                match sub {
+                    "commands" => "CMD",
+                    "net" => "NET",
+                    "sync" => "SYNC",
+                    "feed" => "FEED",
+                    "db" => "DB",
+                    "z_log" => "LOG",
+                    "extractor" => "EXTRACT",
+                    "rules" => "RULES",
+                    "opml_io" => "OPML",
+                    other => other,
+                }
+            } else if target == "zreader_lib" {
+                "APP"
+            } else {
+                target.split("::").next().unwrap_or(target)
+            };
+
+            let msg_str = message.to_string();
+            let msg = if let Some(stripped) = msg_str
+                .strip_prefix("[UI] ")
+                .or_else(|| msg_str.strip_prefix("[CMD] "))
+                .or_else(|| msg_str.strip_prefix("[NET] "))
+                .or_else(|| msg_str.strip_prefix("[BE] "))
+            {
+                stripped
+            } else {
+                &msg_str
+            };
+
+            let time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            out.finish(format_args!("[{time}] [{:5}] [{tag}] {msg}", record.level()));
+        })
+        .targets([Target::new(TargetKind::LogDir { file_name: None })]);
 
     #[cfg(debug_assertions)]
     let builder = builder.target(Target::new(TargetKind::Stdout));

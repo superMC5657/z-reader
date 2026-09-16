@@ -1,8 +1,6 @@
-# 统一日志 (logging)
+# 统一日志架构 (logging)
 
-后端 `log::*` 与前端 `zlog` 经 `tauri-plugin-log v2` (Cargo.lock 2.9.0，JS `^2.9.1`)
-双文件分流落盘。业务代码用 `log::info!/warn!/debug!` 直接打点，
-插件在 `run()` 最早注册。
+后端 `log::*` 与前端 `zlog` 经 `tauri-plugin-log v2` (Cargo.lock 2.9.0，JS `^2.9.1`) 统一写入以应用名称命名的单一日志文件（`z-reader.log`）。
 
 ## 文件位置（OS 路径）
 
@@ -14,126 +12,74 @@
 
 前端通过 `zlog_get_dir` 命令查询该目录。
 
-## 双文件分流
+## 单一应用日志文件 (`z-reader.log`)
 
-`z_log::init()` 注册两个 `LogDir` target，按 `target` 是否以
-`webview:`（`WEBVIEW_TARGET`）开头过滤：
+所有日志汇流至同一文件，彻底消除多文件时标对齐与因果错位成本：
 
-| 文件 | 来源 |
-| --- | --- |
-| `rust.log` | 后端 `log::*`（target 非 `webview:` 开头） |
-| `webview.log` | 前端 `@tauri-apps/plugin-log`（target 为 `webview:*`） |
-
-轮转：单文件 5 MiB、上限保留 6 个历史分片、本地时区。
-保留：启动时 `prune_app_dir` 清理——14 天以上删除，仅处理 `*.log`，
-之后按 mtime 从旧到新删除直到目录 ≤ 25 MiB（最佳努力，失败吞掉不影响启动）。
-
-## dev / release 级别矩阵
-
-| target | dev (`Debug`) | release (`Info`) |
+| 文件 | 来源 | 记录内容 |
 | --- | --- | --- |
-| 全局默认 | `Debug` + `Stdout` | `Info`（无 stdout） |
-| `zreader_lib` / `::feed` / `::sync` / `::net` | Debug（含下表第二层） | `Info`：只见下表第一层 |
-| `hyper` / `reqwest` / `wry` / `tao` / `tungstenite` / `rustls` | Warn | `Warn`：压住传输层噪声 |
+| `z-reader.log` | 前端 `zlog` + 后端 `log::*` | 用户行为 `[UI]`、命令审计 `[CMD]`、网络请求 `[NET]`、订阅更新 `[FEED]`、云同步 `[SYNC]`、系统 `[APP]` |
 
-## 第一层：release 可见（info / warn）
+轮转与保留：
+- 轮转：单文件 5 MiB、上限保留 6 个历史分片、本地时区。
+- 保留：启动时 `prune_app_dir` 清理——14 天以上删除，仅处理 `*.log`，之后按 mtime 从旧到新删除直到目录 ≤ 25 MiB（最佳努力，失败吞掉不影响启动）。
 
-一轮刷新只一行 `info`（本地模式仅 R1；同步模式 R1 + R6 共两行）；失败走 `warn`。消息英文小写前缀模块词。
+---
 
-| # | 文件行号 | 级别 | 消息样例 |
-| --- | --- | --- | --- |
-| R1 | `lib.rs:397` | info | `refresh done new 12 failures 1 sync false`（复用 `total_new`/`failures`/`is_sync`） |
-| R2 | `lib.rs:219` | warn | `source 7 failed host example.com reason fetch failed: …`（store 失败分支） |
-| R3 | `lib.rs:244` | warn | `source 7 failed host example.com reason HTTP 500`（fetch 失败分支） |
-| R4 | `sync.rs:90` | info | `sync login ok provider greader`（只记 provider 名；仅新登录，缓存命中不重复） |
-| R4b | `sync.rs:85` | warn | `sync login failed reason …`（登录失败唯一出口，调用方直接透传） |
-| R5 | `commands.rs:518` | info | `sync logout ok provider greader`（logout 只记此处，与 R4 无双记） |
-| R6 | `sync.rs:188` | info | `sync pull done new 5 failures 0 notified 1`（整轮结束计数） |
-| R6b | `sync.rs:126,133,139` | warn | `sync push / sync subscriptions failed reason …`（`retry_auth!` 宏三失败分支，op 名在调用处展开） |
-| R7 | `sync.rs:173,179,184` | warn | `sync pull failed reason …`（三处收敛：重试耗尽/重登失败/直失败；内联展开与宏语义等价：三分支+计数各一次） |
-| R8 | `commands.rs:459` | info | `proxy test ok latency 320ms`（不记 URL 值） |
-| R9 | `commands.rs:430,449,455` | warn | `proxy test failed reason …`（校验/连接/状态三处，不记 URL 值） |
-| R10 | `commands.rs:386` | info | `opml import ok groups 2 sources 9 existing 1`（只记数量） |
-| R11 | `commands.rs:399` | warn | `opml import failed reason …`（原因首行） |
-| R12 | `commands.rs:411` | info | `opml export ok bytes 4821`（只记字节数） |
-| R13 | `commands.rs:415` | warn | `opml export failed reason …` |
-| R14 | `commands.rs:660` | info | `backup export ok file zreader-backup-20260101-120000.zreader.bak`（basename） |
-| R15 | `commands.rs:665` | warn | `backup export failed reason …` |
-| R16 | `commands.rs:714` | info | `backup import ok file zreader-backup-20260101-120000.zreader.bak`（basename） |
-| R17 | `commands.rs:719` | warn | `backup import failed reason …` |
-| R18 | `commands.rs:636,648` | warn | `rules backfill failed reason …`（引擎加载/回填两处） |
-| R19 | `commands.rs:332` | warn | `content fetch failed item 42 reason …`（item id + 原因首行，不记 URL/正文） |
-| R20 | `commands.rs:846` | info | `store vacuum ok` |
-| R21 | `commands.rs:108,116,121` | warn | `add source failed host example.com reason …`（fetch/insert/store 三处，只记 host + 原因首行，不记完整 URL） |
-| R22 | `commands.rs:492` | warn | `sync login subscriptions failed reason …`（订阅拉取失败，原因首行，不记正文/token） |
-| R23 | `lib.rs:300` | warn | `refresh rules load failed reason …`（规则引擎加载失败，仍 `?` 透传整轮中止） |
-| Z1 | `z_log.rs:91` | warn | `zlog: cannot resolve log dir: …`（启动期 prune 拿不到日志目录，吞掉不影响启动） |
+## 日志格式规范与清晰可读性
 
-## 第二层：debug（release 不可见）
+所有日志统一经由 `z_log::Builder::format` 定制输出：
+`[YYYY-MM-DD HH:MM:SS] [LEVEL] [TAG] <可读语义内容>`
 
-单源成功只许 `debug`，禁止 info 化；轮开始/挂起/清理细节同理。
+### 模块标签 (TAG)
+- `[UI]`: 前端用户真实交互（点击文章、切换订阅源/文件夹、标记已读、搜索、更改设置等）。
+  - **因果一致性**：用户操作通过 `immediate: true` 立即刷盘，不再因 3000ms 批量延迟而落后于后端命令。
+  - **高频防刷与去重**：重复点击或文章重载时去重，避免重复记录；提供文章标题与订阅源名称，告别无语义的裸 ID (`id=24 sourceId=2`)。
+- `[CMD]`: 后端 Tauri 命令入口与审计，展示清晰业务意图与执行结果（如文章标题、链接、解析字符数）。
+- `[NET]`: 网络请求与响应生命周期，采用标准 HTTP 格式：
+  - `GET https://sspai.com/post/114638 -> 200 OK (1265ms, 44.5 KB) [extractor]`
+  - `GET https://example.com/feed -> ERR: connection timed out (10000ms) [feed]`
+- `[FEED]`: 订阅源刷新生命周期，标明源名称与失败原因：
+  - `Refreshing 2 feed(s)...`
+  - `Feed "少数派" refreshed: 5 new article(s)`
+  - `Feed "某博客" (https://...) failed: 404 Not Found`
+  - `Feed refresh completed: 5 new article(s), 1 failed (1054ms)`
+- `[SYNC]`: 云端同步引擎步骤（登录、拉取、推送队列、对账）。
+- `[APP]`: 应用核心生命周期与系统级事件。
 
-| # | 文件行号 | 级别 | 消息样例 |
-| --- | --- | --- | --- |
-| D1 | `lib.rs:290` | debug | `refresh start mode background sync true`（同步轮，无源数量） |
-| D2 | `lib.rs:320` | debug | `refresh start mode manual sources 18 sync false`（本地轮，手动/后台+源数量） |
-| D3 | `lib.rs:239` | debug | `source 7 ok host example.com new 3`（单源成功唯一出口，含 new 计数） |
-| D4 | `lib.rs:233` | debug | `source 7 favicon miss host example.com` |
-| D5 | `lib.rs:374` | debug | `store retention done deleted 12` |
-| D6 | `lib.rs:359` | debug | `refresh task join failed`（任务挂起/崩溃收敛计数处） |
-| D7 | `commands.rs:864` | debug | `store cleanup done deleted 12` |
+---
 
-## 第三层：禁止记（红线）
+## 示例日志流对照
 
-- 60s tick / 心跳：`background_refresh` 的 sleep/跳过分支零打点。
-- 标题/正文/摘要/服务端原文：永不进日志（`notified` 标题只进通知体，不进日志）。
-- 完整 URL / query / userinfo：只许 `host`（`url` crate 取 `host_str`，失败记 `unknown`；reqwest 错误回显由 `http_err_reason` 降为 host，见下）。
-- token / 密码 / Auth：只活内存（`sync::Session` 不落盘、不记日志）；`GReaderError` 本就不含密码原文。
-- 原因一律首行（`.lines().next()`），超长截断 160 字符（`chars` 计数，字符边界安全）；路径只许 `basename`。
-- 禁止 `println!/eprint!/dbg!`（`z_log` panic hook 的 `eprintln!` 是 stderr 兜底，
-  唯一例外）；禁止改 `z_log.rs` / 分级 / profile / identifier / DB 结构。
+```log
+[2026-09-16 22:02:32] [ INFO] [UI] Select article "少数派年度征文：从效率工具到生活方式" [Feed: "少数派", id=24]
+[2026-09-16 22:02:35] [ INFO] [CMD] Fetch full content for "少数派年度征文：从效率工具到生活方式" (https://sspai.com/post/114638)
+[2026-09-16 22:02:35] [DEBUG] [NET] GET https://sspai.com/post/114638 [extractor]
+[2026-09-16 22:02:37] [ INFO] [NET] GET https://sspai.com/post/114638 -> 200 OK (1265ms, 44.5 KB) [extractor]
+[2026-09-16 22:02:37] [ INFO] [CMD] Extracted full content for "少数派年度征文：从效率工具到生活方式" (4520 chars)
+[2026-09-16 22:02:37] [ INFO] [CMD] Mark article "少数派年度征文：从效率工具到生活方式" as read
+[2026-09-16 22:02:59] [ INFO] [UI] Manual refresh triggered (2 feeds)
+[2026-09-16 22:02:59] [ INFO] [FEED] Refreshing 2 feed(s)...
+[2026-09-16 22:02:59] [DEBUG] [NET] GET https://feeds.appinn.com/appinns/ [feed]
+[2026-09-16 22:02:59] [DEBUG] [NET] GET https://sspai.com/feed [feed]
+[2026-09-16 22:03:00] [ INFO] [NET] GET https://feeds.appinn.com/appinns/ -> 200 OK (960ms, 110.4 KB) [feed]
+[2026-09-16 22:03:00] [ INFO] [NET] GET https://sspai.com/feed -> 200 OK (1018ms, 132.3 KB) [feed]
+[2026-09-16 22:03:00] [ INFO] [FEED] Feed refresh completed: 0 new article(s), 0 failed (1054ms)
+```
 
-## 前端 batch（`src/lib/z-log.ts`）
+---
 
-- 队列合并：`BATCH_SIZE = 200` 条或 `FLUSH_MS = 3000` ms 触发一次转发，
-  `initZLog()` 在 `src/main.ts` 调用一次。
-- `pagehide` 补刷：监听器只注册一次（持久监听，非 `once`），
-  reload/close 不丢刷新突发日志。
-- `attachConsole` 仅 DEV（`import.meta.env.DEV`）。
-- 发送 fire-and-forget：日志永远不阻塞 UI。
+## 噪音抑制与三方库过滤
 
-## 脱敏（`z_log::redact` + `net::http_err_reason`）
+- `html5ever` / `selectors` / `markup5ever`：过滤级别设为 `Error`，彻底消除 HTML 解析时对 XML 命名空间警告的刷屏（如 `node with weird namespace Atom('')`）。
+- `hyper` / `reqwest` / `wry` / `tao` / `tungstenite` / `rustls`：过滤级别设为 `Warn`，消除底层传输噪音。
 
-- `redact`：掩盖 `password/passwd/pwd/token/secret/api_key/apikey/api-key` 的
-  `key = value` / `key: value` 对（大小写不敏感），值延至空白/`"'`,/`;`/`&`
-  或配对引号结束；`Bearer <token>` 同理。必须有 `=`/`:` 分隔符才算一对，
-  纯文本原样通过，`mytoken=x` 这类前后粘连词不误杀。接线位置：panic hook。
-- `redact` 不覆盖 URL userinfo，因此业务日志一律只记 `host`。
-- `http_err_reason`（`net.rs`）：reqwest `Error` 的 Display 会追加
-  `for url (<完整>)`，所有网络错误（feed / extractor / greader / 代理测试）
-  先经此函数把回显 URL 降为 host 再返回；调用方仍按惯例包 `short_reason`。
+---
 
-## panic hook + stderr 兜底
+## 隐私脱敏底线（红线）
 
-`install_panic_hook()` 在 `run()` 第一行安装：panic 文本先 `redact` 再
-`log::error!("[BE] panic: …")`，同时 `eprintln!` 一份（`panic = "abort"` 的
-release 下 hook 仍会执行，stderr 是最终兜底），最后调用前一个 hook。
-
-## 导出（用户显式触发，无自动上报）
-
-- `zlog_get_dir`：返回日志目录绝对路径。
-- `zlog_export_bundle`：把 `*.log`（排除此前生成的
-  `zreader-log-bundle-*`，防止重复导出层层嵌套）拼成
-  `zreader-log-bundle-<epoch>.log` 并返回路径。
-- 前端封装：`src/lib/tauri.ts` 的 `zlogGetDir` / `zlogExportBundle`。
-- 权限：`src-tauri/capabilities/default.json` 含 `log:default`。
-- 本应用**永不自动上传日志**，上报只能是用户显式的"导出并发送"（TODO）。
-
-## 禁止事项
-
-- 日志**禁止**写入业务库：业务数据只在 `zreader.db`（sqlite），
-  日志只在 OS 日志目录。`prune`/`export` 只碰 `*.log`，不动其他文件。
-  源表 DB 已持久化每次抓取结果（`fetched_at`/`error` 是单源真相源），
-  日志不复制 DB 状态。
-- 禁止引入 `tracing` / sentry / 任何自动上报；禁止改 release profile、
-  应用 identifier 与业务 DB。
+- 绝不记录密码、凭据与 Token：Auth token、GoogleLogin 密码、代理密码等只留存内存，日志中绝对脱敏（由 `z_log::redact` 与 `net::sanitize_url` 双重保护）。
+- 绝不记录长文章全文正文：文章内容仅在提取时记录字数，HTML 正文不进入日志。
+- 完整 URL 敏感 Query 剔除：网络请求日志中的 `token`, `auth`, `key`, `secret`, `password` 等均替换为 `***`。
+- 异常信息首行截断：最多 160 字符，不跨行，不泄漏本地敏感文件路径。
+- 禁止 `println!/eprint!/dbg!`（`z_log` panic hook 的 `eprintln!` 是 stderr 兜底唯一例外）。

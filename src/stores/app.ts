@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { getSettings, saveSettings } from '../lib/tauri'
 import type { Settings } from '../types'
 import { i18n } from '../i18n'
+import { zlog } from '../lib/z-log'
 
 export const DEFAULT_SHORTCUTS: Record<string, string> = {
   nextArticle: 'ArrowRight',
@@ -146,6 +147,7 @@ export const useAppStore = defineStore('app', {
     },
     async toggleFocusMode() {
       const next = this.s.readerMode === 'focus' ? 'split' : 'focus'
+      zlog.ui(`Switch reader mode to "${next}"`)
       await this.patch({ readerMode: next })
     },
     async setShortcut(actionKey: string, key: string) {
@@ -156,6 +158,7 @@ export const useAppStore = defineStore('app', {
       await this.patch({ shortcuts: { ...DEFAULT_SHORTCUTS } })
     },
     async patch(p: Partial<Settings>) {
+      zlog.ui(`Update settings: ${Object.keys(p).join(', ')}`)
       this.settings = { ...this.s, ...p }
       apply(this.s)
       await saveSettings(this.settings)

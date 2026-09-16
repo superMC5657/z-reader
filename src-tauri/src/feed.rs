@@ -39,10 +39,10 @@ pub struct ParsedFeed {
 
 /// Network-only stage: download and parse a feed. Holds no DB references.
 pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<ParsedFeed, String> {
-    let resp = client
+    let req = client
         .get(url)
-        .timeout(std::time::Duration::from_secs(30))
-        .send()
+        .timeout(std::time::Duration::from_secs(30));
+    let resp = crate::net::send_logged("feed", "GET", url, req)
         .await
         .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
     if !resp.status().is_success() {
@@ -265,7 +265,7 @@ pub async fn fetch_favicon(
 
     for candidate in &candidates {
         let req = client.get(candidate).timeout(std::time::Duration::from_secs(8));
-        if let Ok(resp) = req.send().await {
+        if let Ok(resp) = crate::net::send_logged("favicon", "GET", candidate, req).await {
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if bytes.len() > 80 && bytes.len() < 2_000_000 {
@@ -274,6 +274,8 @@ pub async fn fetch_favicon(
                         if let Some(ext) = sniff_image_ext(&bytes) {
                             let path = favicon_dir.join(format!("{source_id}.{ext}"));
                             if tokio::fs::write(&path, &bytes).await.is_ok() {
+                                let (host, _) = crate::net::sanitize_url(candidate);
+                                log::info!("[NET] kind=favicon host={host} saved ext={ext}");
                                 return Some(path);
                             }
                         }
