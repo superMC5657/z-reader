@@ -20,12 +20,40 @@ const MAX_DIR_BYTES: u64 = 25 * 1024 * 1024;
 /// Per-file rotation threshold (5 MiB).
 const MAX_FILE_BYTES: u128 = 5 * 1024 * 1024;
 /// Rotated siblings kept per log file.
-const KEEP_ROTATED: usize = 6;
+const KEEP_ROTATED: usize = 5;
+
+/// Env knob override with a compiled default fallback; unknown values fall
+/// back silently (a typo must never break startup logging).
+fn parse_level(s: &str) -> Option<log::LevelFilter> {
+    // Accept `target=level` pairs (e.g. `RUST_LOG="zreader_lib=debug"`);
+    // the last segment wins.
+    let v = s.rsplit([',', '=', ';']).next().unwrap_or(s);
+    match v.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(log::LevelFilter::Off),
+        "error" => Some(log::LevelFilter::Error),
+        "warn" | "warning" => Some(log::LevelFilter::Warn),
+        "info" => Some(log::LevelFilter::Info),
+        "debug" => Some(log::LevelFilter::Debug),
+        "trace" => Some(log::LevelFilter::Trace),
+        _ => None,
+    }
+}
+
+fn level_from_env(var: &str, default: log::LevelFilter) -> log::LevelFilter {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| parse_level(&v))
+        .unwrap_or(default)
+}
 
 /// Build the log plugin.
 ///
 /// Feed / sync / net targets stay at `Info` in release so refresh failures
 /// remain diagnosable; noisy transport crates are capped at `Warn`.
+///
+/// Two env knobs override the compiled defaults without touching business
+/// logic: `RUST_LOG` drives the root level, `ZREADER_LOG` drives the
+/// first-party (`zreader_lib*`) level and falls back to `RUST_LOG`.
 pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     use tauri_plugin_log::{Target, TargetKind};
 
@@ -41,6 +69,9 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     } else {
         log::LevelFilter::Info
     };
+
+    let level = level_from_env("RUST_LOG", level);
+    let inner = level_from_env("ZREADER_LOG", level_from_env("RUST_LOG", inner));
 
     let builder = tauri_plugin_log::Builder::new()
         .level(level)
@@ -99,7 +130,10 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
             };
 
             let time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-            out.finish(format_args!("[{time}] [{:5}] [{tag}] {msg}", record.level()));
+            // Final-value scrub: secrets (password/token/Bearer) never reach
+            // the log file even when a call site forgets to redact.
+            let line = format!("[{time}] [{:5}] [{tag}] {msg}", record.level());
+            out.finish(format_args!("{}", redact(&line)));
         })
         .targets([Target::new(TargetKind::LogDir { file_name: None })]);
 
@@ -338,6 +372,40 @@ pub async fn zlog_export_bundle(app: AppHandle) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn converged_waterline_locked() {
+        // Retention waterline: 5 rotated siblings, 5 MiB per file,
+        // 25 MiB dir cap, 14-day max age. Any change re-tunes log volume.
+        assert_eq!(KEEP_ROTATED, 5);
+        assert_eq!(MAX_FILE_BYTES, 5 * 1024 * 1024);
+        assert_eq!(MAX_DIR_BYTES, 25 * 1024 * 1024);
+        assert_eq!(MAX_AGE_SECS, 14 * 24 * 60 * 60);
+    }
+
+    #[test]
+    fn redact_combined_bearer_and_password() {
+        // Given: one line carrying both a key=value secret and a Bearer token
+        let msg = r#"sync failed password="hunter2" with Bearer s3cr3t-value retry"#;
+        // When: scrubbed (as the format closure does for every final line)
+        let got = redact(msg);
+        // Then: both secrets masked, structure preserved
+        assert!(got.contains(r#"password="***""#), "{got}");
+        assert!(got.contains("Bearer ***"), "{got}");
+        assert!(!got.contains("hunter2"), "{got}");
+        assert!(!got.contains("s3cr3t-value"), "{got}");
+    }
+
+    #[test]
+    fn env_level_parse_locked() {
+        assert_eq!(parse_level("debug"), Some(log::LevelFilter::Debug));
+        assert_eq!(parse_level("INFO"), Some(log::LevelFilter::Info));
+        assert_eq!(parse_level("warn"), Some(log::LevelFilter::Warn));
+        assert_eq!(parse_level("error"), Some(log::LevelFilter::Error));
+        assert_eq!(parse_level("off"), Some(log::LevelFilter::Off));
+        assert_eq!(parse_level("zreader_lib=debug"), Some(log::LevelFilter::Debug));
+        assert_eq!(parse_level("nope"), None);
+        assert_eq!(level_from_env("ZREADER_LOG_DEFINITELY_UNSET", log::LevelFilter::Info), log::LevelFilter::Info);
+    }
     #[test]
     fn redact_masks_password_and_token_pairs() {
         let msg = r#"login failed password="hunter2" user=alice token: abc123 ok=1"#;
