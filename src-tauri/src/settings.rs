@@ -28,10 +28,22 @@ struct SecretStore {
 }
 
 fn read_secrets(settings_path: &Path) -> SecretStore {
-    std::fs::read_to_string(secrets_path(settings_path))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+    let path = secrets_path(settings_path);
+    match std::fs::read_to_string(&path) {
+        // Missing file is the normal first-run state: stay silent.
+        Err(_) => SecretStore::default(),
+        Ok(t) => match serde_json::from_str(&t) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!(
+                    "secrets corrupt file={} reason={}",
+                    file_base(&path.to_string_lossy()),
+                    short_reason(&e.to_string())
+                );
+                SecretStore::default()
+            }
+        },
+    }
 }
 
 fn write_secrets(settings_path: &Path, store: &SecretStore) -> Result<(), String> {
@@ -60,8 +72,19 @@ pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
 
 pub fn load(path: &PathBuf) -> Settings {
     let mut s = match std::fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str::<Settings>(&text).unwrap_or_default(),
+        // Missing file is the normal first-run state: stay silent.
         Err(_) => Settings::default(),
+        Ok(text) => match serde_json::from_str::<Settings>(&text) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!(
+                    "settings corrupt file={} reason={}",
+                    file_base(&path.to_string_lossy()),
+                    short_reason(&e.to_string())
+                );
+                Settings::default()
+            }
+        },
     };
     let secrets = read_secrets(path);
     if let Some(acct) = s.sync_account.as_mut() {
@@ -93,6 +116,27 @@ pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
     s.version = env!("CARGO_PKG_VERSION").to_string();
     let text = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
     std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+/// First line of an error message, truncated: reasons never carry file
+/// paths, tokens or article text.
+fn short_reason(msg: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let first = msg.lines().next().unwrap_or("").trim();
+    if first.chars().count() > MAX_CHARS {
+        first.chars().take(MAX_CHARS).collect()
+    } else {
+        first.to_string()
+    }
+}
+
+/// Basename only: full file paths never enter logs.
+fn file_base(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("?")
+        .to_string()
 }
 
 #[cfg(test)]

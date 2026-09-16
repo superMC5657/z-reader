@@ -242,8 +242,8 @@ pub fn redact(msg: &str) -> String {
                 }
             }
             i = j;
-        } else if msg[i..].len() >= 7
-            && (msg[i..].starts_with("Bearer ") || msg[i..].starts_with("bearer "))
+        } else if bytes[i..].len() >= 7
+            && (bytes[i..].starts_with(b"Bearer ") || bytes[i..].starts_with(b"bearer "))
         {
             out.push_str(&msg[i..i + 7]);
             i += 7;
@@ -253,9 +253,15 @@ pub fn redact(msg: &str) -> String {
             out.push_str("***");
         } else {
             // Advance by one char (keep UTF-8 boundaries).
-            let ch = msg[i..].chars().next().unwrap_or('\0');
-            out.push(ch);
-            i += ch.len_utf8().max(1);
+            if let Some(ch) = msg.get(i..).and_then(|s| s.chars().next()) {
+                out.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+                while i < bytes.len() && !msg.is_char_boundary(i) {
+                    i += 1;
+                }
+            }
         }
     }
     out
@@ -269,7 +275,9 @@ fn is_value_delim(c: u8) -> bool {
 /// returns the value start. A bare word without `=`/`:` is NOT a pair, so
 /// plain prose like "nothing secret here" passes through untouched.
 fn match_pair_at(msg: &str, at: usize, keys: &[&str]) -> Option<usize> {
-    let rest = &msg[at..];
+    if !msg.is_char_boundary(at) {
+        return None;
+    }
     // Require a word boundary before the key.
     if at > 0 {
         let prev = msg[..at].chars().next_back().unwrap_or(' ');
@@ -277,10 +285,14 @@ fn match_pair_at(msg: &str, at: usize, keys: &[&str]) -> Option<usize> {
             return None;
         }
     }
+    let bytes = msg.as_bytes();
+    let rest_bytes = &bytes[at..];
     for key in keys {
-        if rest.len() >= key.len() && rest[..key.len()].eq_ignore_ascii_case(key) {
-            let mut j = at + key.len();
-            let bytes = msg.as_bytes();
+        let kbytes = key.as_bytes();
+        if rest_bytes.len() >= kbytes.len()
+            && rest_bytes[..kbytes.len()].eq_ignore_ascii_case(kbytes)
+        {
+            let mut j = at + kbytes.len();
             while j < bytes.len() && bytes[j] == b' ' {
                 j += 1;
             }
@@ -307,7 +319,8 @@ pub fn install_panic_hook() {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             // Panic payloads can echo request URLs / credentials; scrub first.
-            let msg = redact(&info.to_string());
+            let raw = info.to_string();
+            let msg = std::panic::catch_unwind(|| redact(&raw)).unwrap_or(raw);
             log::error!("[BE] panic: {msg}");
             eprintln!("[BE] panic: {msg}");
             prev(info);
@@ -455,5 +468,28 @@ mod tests {
     #[test]
     fn prune_missing_dir_is_noop() {
         prune_with(Path::new("/definitely/not/here/zreader-logs"), 0, 0);
+    }
+
+    #[test]
+    fn redact_multibyte_utf8_does_not_panic() {
+        // Exact user interaction log with Chinese characters and quotes
+        let msg1 = r#"Select article "少数派年度征文：从效率工具到生活方式" [Feed: "少数派", id=24]"#;
+        let got1 = redact(msg1);
+        assert_eq!(got1, msg1);
+
+        // Chinese text mixed with password/token pairs
+        let msg2 = r#"用户数据同步失败 password="我的密码123" token: abc789 状态正常"#;
+        let got2 = redact(msg2);
+        assert!(got2.contains(r#"password="***""#), "{got2}");
+        assert!(got2.contains("token: ***"), "{got2}");
+        assert!(!got2.contains("我的密码123"), "{got2}");
+        assert!(!got2.contains("abc789"), "{got2}");
+        assert!(got2.contains("用户数据同步失败"), "{got2}");
+        assert!(got2.contains("状态正常"), "{got2}");
+
+        // Emojis and CJK texts
+        let msg3 = "🎉 欢迎阅读 【极客公园】 科技早报 🚀 token=sec-ret-999 end";
+        let got3 = redact(msg3);
+        assert_eq!(got3, "🎉 欢迎阅读 【极客公园】 科技早报 🚀 token=*** end");
     }
 }

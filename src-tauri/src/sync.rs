@@ -185,8 +185,12 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
         }
     }
 
+    // Single aggregated sync summary: push + subscription + pull counts in
+    // one line (no per-stage info).
     log::info!(
-        "sync pull done new {} failures {} notified {}",
+        "sync done pushed={} subs={} new={} failures={} notified={}",
+        report.pushed,
+        report.subscription_count,
         report.new_items,
         report.failures,
         report.notified.len()

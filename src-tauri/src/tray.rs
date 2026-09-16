@@ -109,6 +109,18 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// First line of an error message, truncated: reasons never carry file
+/// paths, tokens or article text.
+fn short_reason(msg: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let first = msg.lines().next().unwrap_or("").trim();
+    if first.chars().count() > MAX_CHARS {
+        first.chars().take(MAX_CHARS).collect()
+    } else {
+        first.to_string()
+    }
+}
+
 /// Recompute the unread count and refresh the tray label + badge dot.
 pub async fn update_tray(app: &AppHandle) {
     let Some(guard) = app.try_state::<TrayState>() else {
@@ -117,24 +129,40 @@ pub async fn update_tray(app: &AppHandle) {
     let state = app.state::<crate::AppState>();
     let unread = {
         let conn = state.db.lock().await;
-        crate::db::total_unread(&conn).unwrap_or(0)
+        match crate::db::total_unread(&conn) {
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("tray unread query failed reason {}", short_reason(&e));
+                0
+            }
+        }
     };
     let mut handles = guard.0.lock().expect("tray state lock");
     let Some(handles) = handles.as_mut() else { return };
     let zh = locale_is_zh(app);
-    let _ = handles.unread_item.set_text(label(
+    if let Err(e) = handles.unread_item.set_text(label(
         zh,
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),
-    ));
+    )) {
+        log::error!("tray label update failed reason {}", short_reason(&e.to_string()));
+    }
     // Menu labels are baked at creation; re-apply them so a language switch
     // (which triggers this via save_settings) propagates to the tray.
-    let _ = handles.refresh_item.set_text(label(zh, "立即刷新所有订阅", "Refresh All"));
-    let _ = handles.mark_all_item.set_text(label(zh, "全部标记已读", "Mark All as Read"));
-    let _ = handles.show_item.set_text(label(zh, "显示主窗口", "Show ZReader"));
-    let _ = handles.quit_item.set_text(label(zh, "退出", "Quit"));
+    for (item, text) in [
+        (&handles.refresh_item, label(zh, "立即刷新所有订阅", "Refresh All")),
+        (&handles.mark_all_item, label(zh, "全部标记已读", "Mark All as Read")),
+        (&handles.show_item, label(zh, "显示主窗口", "Show ZReader")),
+        (&handles.quit_item, label(zh, "退出", "Quit")),
+    ] {
+        if let Err(e) = item.set_text(text) {
+            log::error!("tray label update failed reason {}", short_reason(&e.to_string()));
+        }
+    }
     if let Some(base) = &handles.base_icon {
-        let _ = handles.icon.set_icon(Some(with_badge(base, unread > 0)));
+        if let Err(e) = handles.icon.set_icon(Some(with_badge(base, unread > 0))) {
+            log::error!("tray icon update failed reason {}", short_reason(&e.to_string()));
+        }
     }
 }
 

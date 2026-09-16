@@ -513,7 +513,12 @@ pub fn get_items(conn: &Connection, p: &crate::models::GetItemsParams) -> Result
     // FTS5 MATCH syntax from user input can be rejected; fall back to LIKE on any error.
     match get_items_impl(conn, p, true) {
         Ok(items) => Ok(items),
-        Err(_) => get_items_impl(conn, p, false),
+        Err(_) => {
+            // Static message only: the rejected MATCH text is user input and
+            // never enters logs.
+            log::warn!("items fts match rejected, like fallback");
+            get_items_impl(conn, p, false)
+        }
     }
 }
 
