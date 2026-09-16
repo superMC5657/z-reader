@@ -91,7 +91,9 @@ impl RequestLog {
         };
 
         if status.is_success() {
-            log::info!(
+            // Success converges to debug; per-refresh counts live in the
+            // cycle summary. Contract unchanged: still logged, same fields.
+            log::debug!(
                 "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]",
                 self.method,
                 url,

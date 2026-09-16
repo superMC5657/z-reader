@@ -53,21 +53,21 @@ pub async fn get_groups(state: State<'_, AppState>) -> Result<Vec<crate::models:
 
 #[tauri::command]
 pub async fn create_group(state: State<'_, AppState>, name: String) -> Result<crate::models::Group, String> {
-    log::info!("Create folder \"{name}\"");
+    log::debug!("[CMD] action=create_group");
     let conn = state.db.lock().await;
     db::create_group(&conn, &name)
 }
 
 #[tauri::command]
 pub async fn rename_group(state: State<'_, AppState>, id: i64, name: String) -> Result<(), String> {
-    log::info!("Rename folder #{id} to \"{name}\"");
+    log::debug!("[CMD] action=rename_group id={id}");
     let conn = state.db.lock().await;
     db::rename_group(&conn, id, &name)
 }
 
 #[tauri::command]
 pub async fn delete_group(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    log::info!("Delete folder #{id}");
+    log::debug!("[CMD] action=delete_group id={id}");
     let conn = state.db.lock().await;
     db::delete_group(&conn, id)
 }
@@ -90,7 +90,9 @@ pub async fn add_source(
     if !url.contains("://") {
         url = format!("https://{url}");
     }
-    log::info!("Subscribing to feed: {url}");
+    // Log host only: full URLs can carry tokens/query secrets.
+    let (host, _) = crate::net::sanitize_url(&url);
+    log::info!("[CMD] action=add_source host={host}");
     let client = state.http_client();
 
     {
@@ -101,22 +103,19 @@ pub async fn add_source(
     }
 
     // Probe without persisting: parse the remote feed to validate first.
-    let parsed = feed::fetch_and_parse(&client, &url).await.map_err(|e| {
-        log::warn!("Failed to subscribe feed {url}: {}", short_reason(&e));
-        e
+    let parsed = feed::fetch_and_parse(&client, &url).await.inspect_err(|e| {
+        log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
     })?;
     let title = if parsed.title.is_empty() { url.clone() } else { parsed.title.clone() };
 
     let source = {
         let conn = state.db.lock().await;
-        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id).map_err(|e| {
-            log::warn!("Failed to subscribe feed {url}: {}", short_reason(&e));
-            e
+        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id).inspect_err(|e| {
+            log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
         })?;
         let ctx = feed::SourceCtx { id: s.id, group_id: s.group_id, url: url.clone() };
-        feed::store(&conn, &ctx, &parsed, None).map_err(|e| {
-            log::warn!("Failed to subscribe feed {url}: {}", short_reason(&e));
-            e
+        feed::store(&conn, &ctx, &parsed, None).inspect_err(|e| {
+            log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
         })?;
         db::mark_source_fetched(&conn, s.id, true, None)?;
         db::get_source(&conn, s.id)?
@@ -134,31 +133,27 @@ pub async fn add_source(
             db::set_source_favicon(&conn, source.id, fav.to_string_lossy().as_ref())?;
         }
     }
-    log::info!("Subscribed to feed \"{title}\" (id={})", source.id);
+    log::info!("[CMD] action=add_source ok id={} host={host}", source.id);
     Ok(source)
 }
 
 #[tauri::command]
 pub async fn remove_source(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let title = {
-        let conn = state.db.lock().await;
-        db::get_source(&conn, id).map(|s| s.title).unwrap_or_else(|_| format!("#{id}"))
-    };
-    log::info!("Unsubscribing from feed \"{title}\" (id={id})");
+    log::debug!("[CMD] action=remove_source id={id}");
     let conn = state.db.lock().await;
     db::remove_source(&conn, id)
 }
 
 #[tauri::command]
 pub async fn rename_source(state: State<'_, AppState>, id: i64, title: String) -> Result<(), String> {
-    log::info!("Rename feed #{id} to \"{title}\"");
+    log::debug!("[CMD] action=rename_source id={id}");
     let conn = state.db.lock().await;
     db::rename_source(&conn, id, &title)
 }
 
 #[tauri::command]
 pub async fn set_source_group(state: State<'_, AppState>, id: i64, group_id: Option<i64>) -> Result<(), String> {
-    log::info!("Move feed #{id} to folder {:?}", group_id);
+    log::debug!("[CMD] action=set_source_group id={id}");
     let conn = state.db.lock().await;
     db::set_source_group(&conn, id, group_id)
 }
@@ -264,16 +259,8 @@ pub async fn mark_read(
     ids: Vec<i64>,
     read: bool,
 ) -> Result<(), String> {
-    let status = if read { "read" } else { "unread" };
-    if ids.len() == 1 {
-        let title = {
-            let conn = state.db.lock().await;
-            db::get_item(&conn, ids[0]).map(|i| i.title).unwrap_or_else(|_| format!("item #{}", ids[0]))
-        };
-        log::info!("Mark article \"{title}\" as {status}");
-    } else {
-        log::info!("Mark {} articles as {status}", ids.len());
-    }
+    // Count only, no titles: article titles never enter logs.
+    log::debug!("[CMD] action=mark_read count={} read={read}", ids.len());
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_items_read(&conn, &ids, read)?;
@@ -293,20 +280,12 @@ pub async fn mark_all_read(
     scope: Option<String>,
     scope_id: Option<i64>,
 ) -> Result<(), String> {
-    let scope_desc = match (scope.as_deref(), scope_id) {
-        (Some("source"), Some(id)) => {
-            let conn = state.db.lock().await;
-            let name = db::get_source(&conn, id).map(|s| s.title).unwrap_or_else(|_| format!("#{id}"));
-            format!("feed \"{name}\"")
-        }
-        (Some("group"), Some(id)) => {
-            let conn = state.db.lock().await;
-            let name = db::get_group(&conn, id).map(|g| g.map(|x| x.name).unwrap_or_else(|| format!("#{id}"))).unwrap_or_else(|_| format!("#{id}"));
-            format!("folder \"{name}\"")
-        }
-        _ => "all feeds".to_string(),
-    };
-    log::info!("Mark all articles as read in {scope_desc}");
+    // Scope ids only: feed/folder names never enter logs.
+    log::debug!(
+        "[CMD] action=mark_all_read scope={} scope_id={:?}",
+        scope.as_deref().unwrap_or("all"),
+        scope_id
+    );
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::mark_all_read(&conn, scope.as_deref(), scope_id)?;
@@ -337,11 +316,7 @@ pub async fn star(
     id: i64,
     starred: bool,
 ) -> Result<(), String> {
-    let title = {
-        let conn = state.db.lock().await;
-        db::get_item(&conn, id).map(|i| i.title).unwrap_or_else(|_| format!("item #{id}"))
-    };
-    log::info!("{} article \"{title}\"", if starred { "Star" } else { "Unstar" });
+    log::debug!("[CMD] action=star id={id} starred={starred}");
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_item_starred(&conn, id, starred)?;
@@ -360,19 +335,19 @@ pub async fn set_item_hidden(state: State<'_, AppState>, id: i64, hidden: bool) 
 
 #[tauri::command]
 pub async fn fetch_full_content(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    let (title, link) = {
+    let link = {
         let conn = state.db.lock().await;
         let item = db::get_item(&conn, id)?;
-        (item.title, item.url.ok_or("item has no link")?)
+        item.url.ok_or("item has no link")?
     };
-    log::info!("Fetch full content for \"{title}\" ({link})");
+    log::debug!("[CMD] action=fetch_full_content id={id}");
     match fetch_full_content_inner(&state, id, &link).await {
         Ok(chars) => {
-            log::info!("Extracted full content for \"{title}\" ({chars} chars)");
+            log::debug!("[CMD] action=fetch_full_content ok id={id} chars={chars}");
             Ok(())
         }
         Err(e) => {
-            log::warn!("Failed to extract full content for \"{title}\": {}", short_reason(&e));
+            log::warn!("[CMD] action=fetch_full_content failed id={id} reason={}", short_reason(&e));
             Err(e)
         }
     }
@@ -399,7 +374,8 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: Settings,
 ) -> Result<(), String> {
-    log::info!("[CMD] action=save_settings proxy_mode={} theme={} locale={}", settings.proxy_mode, settings.theme, settings.locale);
+    // No field details: proxy credentials/URLs never enter logs.
+    log::debug!("[CMD] action=save_settings");
     crate::net::validate_proxy(&settings)?;
     let path = settings_io::settings_path(&app)?;
     let old = settings_io::load(&path);
@@ -422,11 +398,11 @@ pub async fn save_settings(
 
 #[tauri::command]
 pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<serde_json::Value, String> {
-    log::info!("[CMD] action=import_opml text_len={}", text.len());
+    log::debug!("[CMD] action=import_opml");
     let conn = state.db.lock().await;
     match opml_io::import(&conn, &text) {
         Ok(r) => {
-            log::info!(
+            log::debug!(
                 "[CMD] action=import_opml ok groups={} sources={} existing={}",
                 r.groups_added,
                 r.sources_added,
@@ -451,11 +427,11 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
     let conn = state.db.lock().await;
     match opml_io::export(&conn) {
         Ok(xml) => {
-            log::info!("[CMD] action=export_opml ok bytes={}", xml.len());
+            log::debug!("[CMD] action=export_opml ok");
             Ok(xml)
         }
         Err(e) => {
-            log::warn!("[CMD] action=export_opml failed reason={}", short_reason(&e));
+            log::error!("[CMD] action=export_opml failed reason={}", short_reason(&e));
             Err(e)
         }
     }
@@ -469,7 +445,7 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
 /// Returns the request latency in milliseconds.
 #[tauri::command]
 pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
-    log::info!("[CMD] action=test_proxy proxy_mode={}", settings.proxy_mode);
+    log::debug!("[CMD] action=test_proxy");
     if let Err(e) = crate::net::validate_proxy(&settings) {
         log::warn!("[CMD] action=test_proxy failed reason={}", short_reason(&e));
         return Err(e);
@@ -497,7 +473,7 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
         return Err(msg);
     }
     let ms = start.elapsed().as_millis() as u64;
-    log::info!("[CMD] action=test_proxy ok latency={ms}ms");
+    log::debug!("[CMD] action=test_proxy ok latency={ms}ms");
     Ok(ms)
 }
 
@@ -585,11 +561,17 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
     {
         let conn = state.db.lock().await;
         match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
-            Ok(n) if n > 200 => {
-                let _ = db::vacuum(&conn);
+            Ok(n) => {
+                if n > 200 {
+                    let _ = db::vacuum(&conn);
+                }
+                if n > 0 {
+                    log::info!("[CMD] action=sync_now retention deleted={n}");
+                }
             }
-            Ok(_) => {}
-            Err(_) => {}
+            Err(e) => {
+                log::warn!("[CMD] action=sync_now retention failed reason={}", short_reason(&e));
+            }
         }
     }
     crate::tray::update_tray(&app).await;
@@ -646,7 +628,7 @@ pub async fn create_rule(
     state: State<'_, AppState>,
     input: crate::models::RuleInput,
 ) -> Result<crate::models::Rule, String> {
-    log::info!("[CMD] action=create_rule name=\"{}\"", input.name);
+    log::debug!("[CMD] action=create_rule");
     validate_rule_input(&input)?;
     let conn = state.db.lock().await;
     db::create_rule(&conn, &input)
@@ -658,7 +640,7 @@ pub async fn update_rule(
     id: i64,
     input: crate::models::RuleInput,
 ) -> Result<(), String> {
-    log::info!("[CMD] action=update_rule id={id} name=\"{}\"", input.name);
+    log::debug!("[CMD] action=update_rule id={id}");
     validate_rule_input(&input)?;
     let conn = state.db.lock().await;
     db::update_rule(&conn, id, &input)
@@ -666,7 +648,7 @@ pub async fn update_rule(
 
 #[tauri::command]
 pub async fn delete_rule(state: State<'_, AppState>, id: i64) -> Result<(), String> {
-    log::info!("[CMD] action=delete_rule id={id}");
+    log::debug!("[CMD] action=delete_rule id={id}");
     let conn = state.db.lock().await;
     db::delete_rule(&conn, id)
 }
@@ -674,7 +656,7 @@ pub async fn delete_rule(state: State<'_, AppState>, id: i64) -> Result<(), Stri
 /// Re-run all enabled rules over the whole article archive.
 #[tauri::command]
 pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    log::info!("[CMD] action=apply_rules_backfill");
+    log::debug!("[CMD] action=apply_rules_backfill");
     let conn = state.db.lock().await;
     let engine = match crate::rules::RuleEngine::load(&conn) {
         Ok(e) => e,
@@ -684,12 +666,21 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
         }
     };
     match crate::rules::backfill(&conn, &engine) {
-        Ok(stats) => Ok(serde_json::json!({
-            "markedRead": stats.marked_read,
-            "starred": stats.starred,
-            "hidden": stats.hidden,
-            "notified": stats.notified,
-        })),
+        Ok(stats) => {
+            log::info!(
+                "[CMD] action=apply_rules_backfill ok read={} star={} hide={} notify={}",
+                stats.marked_read,
+                stats.starred,
+                stats.hidden,
+                stats.notified
+            );
+            Ok(serde_json::json!({
+                "markedRead": stats.marked_read,
+                "starred": stats.starred,
+                "hidden": stats.hidden,
+                "notified": stats.notified,
+            }))
+        }
         Err(e) => {
             log::warn!("[CMD] action=apply_rules_backfill failed reason {}", short_reason(&e));
             Err(e)
@@ -709,7 +700,7 @@ pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result
         }
         Ok(None) => Ok(None),
         Err(e) => {
-            log::warn!("[CMD] action=export_backup failed reason={}", short_reason(&e));
+            log::error!("[CMD] action=export_backup failed reason={}", short_reason(&e));
             Err(e)
         }
     }
@@ -833,10 +824,20 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
             let _ = std::fs::copy(&rollback, &db_path);
             match crate::db::open(&db_path) {
                 Ok(conn) => *guard = conn,
-                Err(_) => {}
+                Err(reopen) => {
+                    log::error!(
+                        "[CMD] action=import_backup rollback reopen failed reason={}",
+                        short_reason(&reopen)
+                    );
+                }
             }
             let _ = std::fs::remove_file(&staged);
             let _ = std::fs::remove_dir_all(&tmp_dir);
+            log::warn!(
+                "[CMD] action=import_backup rollback file={} reason={}",
+                file_base(&rollback.to_string_lossy()),
+                short_reason(&e)
+            );
             return Err(e);
         }
     }

@@ -275,7 +275,7 @@ pub async fn fetch_favicon(
                             let path = favicon_dir.join(format!("{source_id}.{ext}"));
                             if tokio::fs::write(&path, &bytes).await.is_ok() {
                                 let (host, _) = crate::net::sanitize_url(candidate);
-                                log::info!("[NET] kind=favicon host={host} saved ext={ext}");
+                                log::debug!("[NET] kind=favicon host={host} saved ext={ext}");
                                 return Some(path);
                             }
                         }

@@ -63,7 +63,9 @@ pub fn run() {
                 sync_token: RwLock::new(None),
             });
 
-            let _ = tray::create_tray(app.handle());
+            if let Err(e) = tray::create_tray(app.handle()) {
+                log::error!("tray create failed reason {}", short_reason(&e.to_string()));
+            }
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -170,6 +172,7 @@ struct SourceRefreshOutcome {
 }
 
 /// Everything one refresh task needs; owned so tasks are `'static`.
+/// Note: no title/URL here — log lines carry ids + first-line reasons only.
 struct RefreshTask {
     app: tauri::AppHandle,
     client: reqwest::Client,
@@ -178,7 +181,6 @@ struct RefreshTask {
     background: bool,
     allow_third_party: bool,
     id: i64,
-    title: String,
     group_id: Option<i64>,
     url: String,
     favicon: Option<String>,
@@ -189,7 +191,7 @@ struct RefreshTask {
 /// them on the source row and reports them via the outcome.
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, title, group_id, url, favicon } = task;
+    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon } = task;
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
@@ -209,7 +211,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 }
                 Err(e) => {
                     out.failed = true;
-                    log::warn!("Feed \"{title}\" ({url}) failed: {}", short_reason(&e.to_string()));
+                    log::warn!("feed store failed id={id} reason {}", short_reason(&e.to_string()));
                     let conn = state.db.lock().await;
                     let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
                 }
@@ -227,16 +229,19 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
             if !out.failed {
                 let conn = state.db.lock().await;
                 let _ = db::mark_source_fetched(&conn, id, true, None);
+                // Per-feed success converges to debug; the cycle summary
+                // carries the counts.
                 if out.inserted > 0 {
-                    log::info!("Feed \"{title}\" refreshed: {} new article(s)", out.inserted);
+                    log::debug!("feed refreshed id={id} new={}", out.inserted);
                 } else {
-                    log::debug!("Feed \"{title}\" up to date");
+                    log::debug!("feed up to date id={id}");
                 }
             }
         }
         Err(e) => {
             out.failed = true;
-            log::warn!("Feed \"{title}\" ({url}) failed: {}", short_reason(&e));
+            // Failures stay warn (diagnosable) with id + first-line reason only.
+            log::warn!("feed fetch failed id={id} reason {}", short_reason(&e));
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
         }
@@ -281,10 +286,11 @@ pub async fn refresh_all_sources(
     // Rule-engine notify matches from the pull are forwarded so background
     // notifications behave like the local refresh path.
     let mode = if background { "background" } else { "manual" };
-    let (total_new, failures, notified) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
-        log::debug!("refresh start mode {mode} sync true");
+    let cycle_start = std::time::Instant::now();
+    let (total_new, failures, notified, feed_count) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+        log::debug!("refresh start mode={mode} sync=true");
         let report = sync::run(&app, background).await?;
-        (report.new_items, report.failures, report.notified)
+        (report.new_items, report.failures, report.notified, report.subscription_count)
     } else {
         let client = state.http_client();
         let engine = std::sync::Arc::new({
@@ -297,30 +303,30 @@ pub async fn refresh_all_sources(
                 }
             }
         });
-        let targets: Vec<(i64, String, Option<i64>, String, Option<String>)> = {
+        let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
             let conn = state.db.lock().await;
             match ids {
                 Some(v) => db::get_sources(&conn)?
                     .into_iter()
                     .filter(|s| v.contains(&s.id))
-                    .map(|s| (s.id, s.title, s.group_id, s.url, s.favicon))
+                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
                     .collect(),
                 None => db::get_sources(&conn)?
                     .into_iter()
-                    .map(|s| (s.id, s.title, s.group_id, s.url, s.favicon))
+                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
                     .collect(),
             }
         };
         let dir = commands::favicon_dir(&app)?;
-        let start_time = std::time::Instant::now();
-        log::info!("Refreshing {} feed(s)...", targets.len());
+        let feed_count = targets.len();
+        log::debug!("refresh start mode={mode} sync=false feeds={feed_count}");
 
         // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
         // Each task owns its network I/O and takes the DB lock only for short
         // store/mark critical sections.
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
         let mut set = tokio::task::JoinSet::new();
-        for (id, title, group_id, url, favicon) in targets {
+        for (id, group_id, url, favicon) in targets {
             let permit = sem
                 .clone()
                 .acquire_owned()
@@ -334,7 +340,6 @@ pub async fn refresh_all_sources(
                 background,
                 allow_third_party: settings.favicon_third_party,
                 id,
-                title,
                 group_id,
                 url,
                 favicon,
@@ -351,18 +356,17 @@ pub async fn refresh_all_sources(
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, out),
-                Err(_) => {
+                Err(e) => {
                     failures += 1;
-                    log::debug!("refresh task join failed");
+                    log::debug!("refresh task join failed reason {}", short_reason(&e.to_string()));
                 }
             }
         }
-        let elapsed = start_time.elapsed().as_millis();
-        log::info!("Feed refresh completed: {total_new} new article(s), {failures} failed ({elapsed}ms)");
-        (total_new, failures, notified)
+        (total_new, failures, notified, feed_count)
     };
 
     // Retention policy; VACUUM only after large deletions to avoid churn.
+    // Count converges to one line: info only when rows actually moved.
     {
         let conn = state.db.lock().await;
         match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
@@ -370,9 +374,15 @@ pub async fn refresh_all_sources(
                 if n > 200 {
                     let _ = db::vacuum(&conn);
                 }
-                log::debug!("store retention done deleted {n}");
+                if n > 0 {
+                    log::info!("retention done deleted={n}");
+                } else {
+                    log::debug!("retention done deleted=0");
+                }
             }
-            Err(_) => {}
+            Err(e) => {
+                log::warn!("retention failed reason {}", short_reason(&e));
+            }
         }
     }
 
@@ -393,7 +403,12 @@ pub async fn refresh_all_sources(
             serde_json::json!({ "newItems": total_new, "failures": failures, "sync": is_sync }),
         );
     }
-    log::info!("refresh done new {total_new} failures {failures} sync {is_sync}");
+    // Single aggregated cycle summary: the only info per refresh (background
+    // 30min cycles stay within 2 infos including a non-empty retention line).
+    log::info!(
+        "refresh done mode={mode} sync={is_sync} feeds={feed_count} new={total_new} failures={failures} elapsed={}ms",
+        cycle_start.elapsed().as_millis()
+    );
     Ok(total_new)
 }
 
