@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
+import { isFullContentCached } from '../../lib/content'
 import { formatFullTime } from '../../lib/time'
 import { decodeHtmlEntities } from '../../lib/highlight'
 import Icon from '../ui/Icon.vue'
@@ -22,6 +23,14 @@ const extractError = ref('')
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
 const displayTitle = computed(() => decodeHtmlEntities(item.value?.title || ''))
+const isCached = computed(() => isFullContentCached(item.value))
+
+const displayBody = computed(() => {
+  if (!item.value) return ''
+  if (item.value.content && item.value.content.trim()) return item.value.content
+  if (item.value.summary && item.value.summary.trim()) return item.value.summary
+  return ''
+})
 
 // Match the reader iframe's palette to the app theme
 const isDark = computed(() => app.isDark)
@@ -36,7 +45,7 @@ function escapeHtmlAttr(str: string): string {
 }
 
 const docHtml = computed(() => {
-  if (!item.value?.content) return ''
+  if (!displayBody.value) return ''
   const fg = isDark.value ? '#f5f5f7' : '#1d1d1f'
   const bg = isDark.value ? '#2c2c2e' : '#ffffff'
   const muted = isDark.value ? '#a1a1a6' : '#6e6e73'
@@ -164,38 +173,42 @@ const docHtml = computed(() => {
     li { margin: 0.35rem 0; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: rgba(120, 120, 128, 0.3); border-radius: 10px; }
-  </style></head><body>${item.value.content}</body></html>`
+  </style></head><body>${displayBody.value}</body></html>`
 })
 
-watch(item, () => {
-  extractError.value = ''
-})
+// Auto-fetch full text when not found in local cache.
+// If already cached, it renders immediately from cache with zero delay.
+// Guarded per item ID so failed fetches don't loop indefinitely (manual retry stays available).
+const failedFetchIds = ref(new Set<number>())
 
-// Auto-fetch full text for articles that arrived without a body; articles
-// that already have content are left untouched. Guarded per item id so a
-// failed fetch does not retry in a loop (manual retry stays available).
-const lastAutoFetchedId = ref<number | null>(null)
 watch(
   item,
   (next) => {
     extractError.value = ''
-    if (
-      next &&
-      !next.content?.trim() &&
-      next.url &&
-      lastAutoFetchedId.value !== next.id &&
-      !fetchingFull.value
-    ) {
-      lastAutoFetchedId.value = next.id
-      onFetchFull()
+    if (!next || !next.url) return
+
+    // 1. Cache hit: article already has full content cached in local SQLite!
+    if (isFullContentCached(next)) {
+      return
+    }
+
+    // 2. Cache miss: not in cache, automatically fetch full text in the background!
+    if (!failedFetchIds.value.has(next.id) && !fetchingFull.value) {
+      executeFetch(next.id, false)
     }
   },
   { immediate: true },
 )
 
-async function onFetchFull() {
+async function onManualFetchFull() {
   if (!item.value) return
-  const id = item.value.id
+  await executeFetch(item.value.id, true)
+}
+
+async function executeFetch(id: number, isManual: boolean) {
+  if (isManual) {
+    failedFetchIds.value.delete(id)
+  }
   fetchingFull.value = true
   extractError.value = ''
   try {
@@ -205,9 +218,14 @@ async function onFetchFull() {
     await data.selectItem(id)
     data.loadItems().catch(() => {})
   } catch (e) {
-    extractError.value = String(e)
+    if (data.selectedId === id) {
+      extractError.value = String(e)
+      failedFetchIds.value.add(id)
+    }
   } finally {
-    fetchingFull.value = false
+    if (data.selectedId === id) {
+      fetchingFull.value = false
+    }
   }
 }
 
@@ -280,7 +298,7 @@ function onIframeLoad(e: Event) {
             class="f-icon-btn reader-action-btn"
             :title="t('item.refetch')"
             :disabled="fetchingFull"
-            @click="onFetchFull"
+            @click="onManualFetchFull"
           >
             <Icon
               name="arrow-clockwise"
@@ -346,12 +364,27 @@ function onIframeLoad(e: Event) {
 
     <div v-if="extractError" class="error-banner">
       <Icon name="info" :size="15" />
-      <span>{{ t('common.error') }}: {{ extractError }}</span>
+      <span class="error-message">
+        {{ displayBody ? t('item.fetchFailedSummaryShown') : `${t('common.error')}: ${extractError}` }}
+      </span>
+      <button class="error-retry-btn" :disabled="fetchingFull" @click="onManualFetchFull">
+        <Icon name="arrow-clockwise" :size="12" :class="{ spin: fetchingFull }" />
+        {{ t('item.retry') }}
+      </button>
+    </div>
+
+    <!-- Auto-fetching Full Text Loading State (cache miss) -->
+    <div v-if="fetchingFull && !isCached" class="loading-reader">
+      <div class="loading-icon-circle">
+        <Icon name="arrow-clockwise" :size="26" class="spin" />
+      </div>
+      <p class="loading-title">{{ t('item.autoFetchingTitle') }}</p>
+      <p class="loading-sub">{{ t('item.autoFetchingHint') }}</p>
     </div>
 
     <!-- Reader Iframe -->
     <iframe
-      v-if="item.content"
+      v-else-if="displayBody"
       class="reader-frame"
       sandbox="allow-same-origin"
       :srcdoc="docHtml"
@@ -365,7 +398,7 @@ function onIframeLoad(e: Event) {
       </div>
       <p class="empty-title">{{ t('item.noContent') }}</p>
       <p class="empty-sub">{{ t('item.noContentHint') }}</p>
-      <button class="f-btn primary" :disabled="fetchingFull" @click="onFetchFull">
+      <button class="f-btn primary" :disabled="fetchingFull" @click="onManualFetchFull">
         <Icon name="arrow-clockwise" :size="14" :class="{ spin: fetchingFull }" />
         {{ fetchingFull ? t('item.fetching') : t('item.fetchFull') }}
       </button>
@@ -492,6 +525,72 @@ function onIframeLoad(e: Event) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.error-message {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.error-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.error-retry-btn:hover:not(:disabled) {
+  opacity: 0.75;
+}
+
+.error-retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading-reader {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: var(--text-secondary);
+  padding: 2rem;
+}
+
+.loading-icon-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 4.2rem;
+  height: 4.2rem;
+  border-radius: 50%;
+  background: var(--bg-track);
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
+.loading-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.loading-sub {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 320px;
 }
 
 .empty-reader {

@@ -32,7 +32,11 @@
     "splitMode": "Split mode (Side-by-side)",
     "close": "Close article",
     "noContent": "This article has no content",
-    "noContentHint": "Try fetching full content or opening the web page"
+    "noContentHint": "Try fetching full content or opening the web page",
+    "autoFetchingTitle": "Fetching full content…",
+    "autoFetchingHint": "Extracting article from webpage, will be cached locally",
+    "fetchFailedSummaryShown": "Failed to fetch full article, showing summary",
+    "retry": "Retry"
   },
   "addSource": {
     "title": "Add Subscription",

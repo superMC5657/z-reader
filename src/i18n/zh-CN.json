@@ -32,7 +32,11 @@
     "splitMode": "分栏模式 (右侧双栏)",
     "close": "关闭文章",
     "noContent": "此文章没有内容",
-    "noContentHint": "可尝试抓取全文或打开原网页"
+    "noContentHint": "可尝试抓取全文或打开原网页",
+    "autoFetchingTitle": "正在获取全文…",
+    "autoFetchingHint": "正在从原网页提取正文，提取后将自动缓存到本地",
+    "fetchFailedSummaryShown": "未能获取全文，已显示摘要",
+    "retry": "重试"
   },
   "addSource": {
     "title": "添加订阅",
