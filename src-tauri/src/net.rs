@@ -42,16 +42,116 @@ pub fn sanitize_url(raw_url: &str) -> (String, String) {
     }
 }
 
+/// Generate an 8-char hex cycle id (no new deps: nanos + pid mix).
+/// Used to correlate all log lines of one refresh/sync cycle.
+pub fn new_cycle() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let mixed = nanos.wrapping_add(std::process::id().wrapping_mul(0x9E37_79B1));
+    format!("{mixed:08x}")
+}
+
+/// Classify a one-line error into a stable `error_kind` for log aggregation.
+/// Never includes URLs/titles/bodies — input is already a short reason.
+pub fn classify_error(msg: &str) -> &'static str {
+    let s = msg.to_ascii_lowercase();
+    if s.contains("timed out") || s.contains("timeout") || s.contains("deadline exceeded") {
+        return "timeout";
+    }
+    if s.contains("dns")
+        || s.contains("failed to resolve")
+        || s.contains("name resolution")
+        || s.contains("getaddrinfo")
+        || s.contains("nodename nor servname")
+    {
+        return "dns";
+    }
+    if s.contains("auth")
+        || s.contains("unauthorized")
+        || s.contains("forbidden")
+        || s.contains("401")
+        || s.contains("403")
+    {
+        return "auth";
+    }
+    if s.contains("connect")
+        || s.contains("connection refused")
+        || s.contains("connection reset")
+        || s.contains("broken pipe")
+        || s.contains("network unreachable")
+    {
+        return "connect";
+    }
+    if s.contains("http 5") {
+        return "http_5xx";
+    }
+    if s.contains("http 4") {
+        return "http_4xx";
+    }
+    if s.contains("parse") {
+        return "parse";
+    }
+    if s.contains("body") {
+        return "body";
+    }
+    if s.contains("store") {
+        return "store";
+    }
+    if s.contains("sqlite") || s.contains("rusqlite") || s.contains("database") {
+        return "db";
+    }
+    "other"
+}
+
+/// Classify a reqwest transport error (timeout/dns/connect/body first,
+///
+/// fallback to string classification).
+#[allow(dead_code)]
+pub fn reqwest_err_kind(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        return "timeout";
+    }
+    if e.is_connect() {
+        let s = e.to_string().to_ascii_lowercase();
+        if s.contains("dns") || s.contains("resolve") {
+            return "dns";
+        }
+        return "connect";
+    }
+    if e.is_body() || e.is_decode() {
+        return "body";
+    }
+    classify_error(&e.to_string())
+}
+
 pub struct RequestLog {
     pub kind: &'static str,
     pub method: &'static str,
     pub host: String,
     pub path: String,
     pub start: std::time::Instant,
+    /// 8-char cycle id; empty = omit from log line (backward compat).
+    pub cycle: String,
+    /// Per-source id; None = omit.
+    pub source_id: Option<i64>,
 }
 
 impl RequestLog {
+    #[allow(dead_code)]
     pub fn start(kind: &'static str, method: &'static str, url: &str) -> Self {
+        Self::start_with(kind, method, url, "", None)
+    }
+
+    pub fn start_with(
+        kind: &'static str,
+        method: &'static str,
+        url: &str,
+        cycle: &str,
+        source_id: Option<i64>,
+    ) -> Self {
         let (host, path) = sanitize_url(url);
         let url_disp = if host == "unknown" {
             path.clone()
@@ -60,14 +160,33 @@ impl RequestLog {
         } else {
             format!("https://{host}{path}")
         };
-        log::debug!("{method} {url_disp} [{kind}]");
+        let suffix = Self::suffix(cycle, source_id);
+        log::debug!("{method} {url_disp} [{kind}]{suffix}");
         Self {
             kind,
             method,
             host,
             path,
             start: std::time::Instant::now(),
+            cycle: cycle.to_string(),
+            source_id,
         }
+    }
+
+    /// ` cycle=abcd1234 id=7` — empty when no cycle/id (old callers).
+    fn suffix(cycle: &str, source_id: Option<i64>) -> String {
+        let mut s = String::new();
+        if !cycle.is_empty() {
+            s.push_str(&format!(" cycle={cycle}"));
+        }
+        if let Some(id) = source_id {
+            s.push_str(&format!(" id={id}"));
+        }
+        s
+    }
+
+    fn suffix_self(&self) -> String {
+        Self::suffix(&self.cycle, self.source_id)
     }
 
     fn url_display(&self) -> String {
@@ -89,12 +208,14 @@ impl RequestLog {
             Some(b) => format!(", {b} B"),
             None => String::new(),
         };
+        let suffix = self.suffix_self();
 
         if status.is_success() {
-            // Success converges to debug; per-refresh counts live in the
-            // cycle summary. Contract unchanged: still logged, same fields.
+            // Feed success back to debug (log-volume cut); per-feed INFO
+            // in lib.rs already carries destination + timing.
+            // favicon/other kinds stay debug.
             log::debug!(
-                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]",
+                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]{suffix}",
                 self.method,
                 url,
                 status,
@@ -102,15 +223,23 @@ impl RequestLog {
             );
         } else if self.kind == "favicon" {
             log::debug!(
-                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]",
+                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]{suffix}",
                 self.method,
                 url,
                 status,
                 self.kind
             );
         } else {
+            let code = status.as_u16();
+            let error_kind: &'static str = if (500..600).contains(&code) {
+                "http_5xx"
+            } else if (400..500).contains(&code) {
+                "http_4xx"
+            } else {
+                "other"
+            };
             log::warn!(
-                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]",
+                "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]{suffix} error_kind={error_kind}",
                 self.method,
                 url,
                 status,
@@ -122,16 +251,18 @@ impl RequestLog {
     pub fn finish_err(&self, reason: &str) {
         let elapsed_ms = self.start.elapsed().as_millis();
         let url = self.url_display();
+        let suffix = self.suffix_self();
         if self.kind == "favicon" {
             log::debug!(
-                "{} {} -> ERR: {reason} ({elapsed_ms}ms) [{}]",
+                "{} {} -> ERR: {reason} ({elapsed_ms}ms) [{}]{suffix}",
                 self.method,
                 url,
                 self.kind
             );
         } else {
+            let error_kind = classify_error(reason);
             log::warn!(
-                "{} {} -> ERR: {reason} ({elapsed_ms}ms) [{}]",
+                "{} {} -> ERR: {reason} ({elapsed_ms}ms) [{}]{suffix} error_kind={error_kind}",
                 self.method,
                 url,
                 self.kind
@@ -146,7 +277,18 @@ pub async fn send_logged(
     url: &str,
     builder: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let req_log = RequestLog::start(kind, method, url);
+    send_logged_with(kind, method, url, builder, "", None).await
+}
+
+pub async fn send_logged_with(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let req_log = RequestLog::start_with(kind, method, url, cycle, source_id);
     match builder.send().await {
         Ok(resp) => {
             let status = resp.status();

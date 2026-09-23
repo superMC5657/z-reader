@@ -169,6 +169,8 @@ struct SourceRefreshOutcome {
     inserted: usize,
     notified: Vec<String>,
     failed: bool,
+    /// Stable failure class for `fail_kinds` aggregation (None on success).
+    error_kind: Option<String>,
 }
 
 /// Everything one refresh task needs; owned so tasks are `'static`.
@@ -184,6 +186,7 @@ struct RefreshTask {
     group_id: Option<i64>,
     url: String,
     favicon: Option<String>,
+    cycle: String,
 }
 
 /// Refresh a single source: fetch + parse (network), store + marks (short DB
@@ -191,19 +194,27 @@ struct RefreshTask {
 /// them on the source row and reports them via the outcome.
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon } = task;
+    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon, cycle } = task;
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
     let state = app.state::<AppState>();
-    let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false };
+    let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false, error_kind: None };
     let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
-    match feed::fetch_and_parse(&client, &url).await {
+    // Release-visible per-feed timing: host only (no raw URL/query tokens),
+    // split into fetch / store / favicon segments + total.
+    let total_start = std::time::Instant::now();
+    let (host, _) = crate::net::sanitize_url(&url);
+    let fetch_start = std::time::Instant::now();
+    match feed::fetch_and_parse_with(&client, &url, &cycle, Some(id)).await {
         Ok(parsed) => {
+            let fetch_ms = fetch_start.elapsed().as_millis();
+            let store_start = std::time::Instant::now();
             let stored = {
                 let conn = state.db.lock().await;
                 feed::store(&conn, &ctx, &parsed, Some(&engine))
             };
+            let store_ms = store_start.elapsed().as_millis();
             match stored {
                 Ok(stored) => {
                     out.inserted = stored.inserted;
@@ -211,37 +222,46 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
                 }
                 Err(e) => {
                     out.failed = true;
-                    log::warn!("feed store failed id={id} reason {}", short_reason(&e.to_string()));
+                    let error_kind = crate::net::classify_error(&e);
+                    out.error_kind = Some(error_kind.to_string());
+                    log::warn!("feed store failed cycle={cycle} id={id} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
                     let conn = state.db.lock().await;
                     let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
                 }
             }
+            let favicon_start = std::time::Instant::now();
             if favicon.is_none() {
                 let icon_url = parsed.icon_url.as_deref();
                 let site_url = parsed.site_url.as_deref();
                 if let Some(fav) =
-                    feed::fetch_favicon(&client, &url, icon_url, site_url, &favicon_dir, id, allow_third_party).await
+                    feed::fetch_favicon_with(&client, &url, icon_url, site_url, &favicon_dir, id, allow_third_party, &cycle).await
                 {
                     let conn = state.db.lock().await;
                     let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
                 }
             }
+            let favicon_ms = favicon_start.elapsed().as_millis();
             if !out.failed {
                 let conn = state.db.lock().await;
                 let _ = db::mark_source_fetched(&conn, id, true, None);
-                // Per-feed success converges to debug; the cycle summary
-                // carries the counts.
+                // Per-feed success stays INFO (full volume): host + new count
+                // + segmented timing + cycle. Keys lowercase, `_ms` bare numbers.
+                let elapsed_ms = total_start.elapsed().as_millis();
                 if out.inserted > 0 {
-                    log::debug!("feed refreshed id={id} new={}", out.inserted);
+                    log::info!("feed refreshed cycle={cycle} id={id} host={host} new={} fetch_ms={fetch_ms} store_ms={store_ms} favicon_ms={favicon_ms} elapsed_ms={elapsed_ms}", out.inserted);
                 } else {
-                    log::debug!("feed up to date id={id}");
+                    log::info!("feed up to date cycle={cycle} id={id} host={host} fetch_ms={fetch_ms} store_ms={store_ms} favicon_ms={favicon_ms} elapsed_ms={elapsed_ms}");
                 }
             }
         }
         Err(e) => {
             out.failed = true;
-            // Failures stay warn (diagnosable) with id + first-line reason only.
-            log::warn!("feed fetch failed id={id} reason {}", short_reason(&e));
+            let fetch_ms = fetch_start.elapsed().as_millis();
+            let error_kind = crate::net::classify_error(&e);
+            out.error_kind = Some(error_kind.to_string());
+            // Failures stay warn (diagnosable) with cycle + id + host +
+            // error_kind + fetch timing + first-line reason only.
+            log::warn!("feed fetch failed cycle={cycle} id={id} host={host} error_kind={error_kind} fetch_ms={fetch_ms} reason {}", short_reason(&e));
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
         }
@@ -257,13 +277,27 @@ fn merge_outcome(
     total_new: &mut usize,
     failures: &mut usize,
     notified: &mut Vec<String>,
+    fail_kinds: &mut std::collections::HashMap<String, usize>,
     out: SourceRefreshOutcome,
 ) {
     *total_new += out.inserted;
     if out.failed {
         *failures += 1;
+        let kind = out.error_kind.unwrap_or_else(|| "other".to_string());
+        *fail_kinds.entry(kind).or_insert(0) += 1;
     }
     notified.extend(out.notified);
+}
+
+/// Render `fail_kinds={timeout:2,http_5xx:1}` sorted by key; empty when none.
+fn format_fail_kinds(fail_kinds: &std::collections::HashMap<String, usize>) -> String {
+    if fail_kinds.is_empty() {
+        return String::new();
+    }
+    let mut pairs: Vec<(&String, &usize)> = fail_kinds.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let inner: Vec<String> = pairs.into_iter().map(|(k, v)| format!("{k}:{v}")).collect();
+    format!(" fail_kinds={{{}}}", inner.join(","))
 }
 
 /// Fetch all (or selected) sources, run new entries through the rule engine,
@@ -286,11 +320,13 @@ pub async fn refresh_all_sources(
     // Rule-engine notify matches from the pull are forwarded so background
     // notifications behave like the local refresh path.
     let mode = if background { "background" } else { "manual" };
+    let cycle = crate::net::new_cycle();
     let cycle_start = std::time::Instant::now();
-    let (total_new, failures, notified, feed_count) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
-        log::debug!("refresh start mode={mode} sync=true");
-        let report = sync::run(&app, background).await?;
-        (report.new_items, report.failures, report.notified, report.subscription_count)
+    let (total_new, failures, notified, feed_count, fail_kinds) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+        log::info!("refresh start cycle={cycle} mode={mode} sync=true");
+        let report = sync::run_with_cycle(&app, background, &cycle).await?;
+        let kinds = report.fail_kinds.clone();
+        (report.new_items, report.failures, report.notified, report.subscription_count, kinds)
     } else {
         let client = state.http_client();
         let engine = std::sync::Arc::new({
@@ -298,7 +334,8 @@ pub async fn refresh_all_sources(
             match rules::RuleEngine::load(&conn) {
                 Ok(e) => e,
                 Err(e) => {
-                    log::warn!("refresh rules load failed reason {}", short_reason(&e));
+                    let error_kind = crate::net::classify_error(&e);
+                    log::warn!("refresh rules load failed cycle={cycle} error_kind={error_kind} reason {}", short_reason(&e));
                     return Err(e);
                 }
             }
@@ -319,7 +356,7 @@ pub async fn refresh_all_sources(
         };
         let dir = commands::favicon_dir(&app)?;
         let feed_count = targets.len();
-        log::debug!("refresh start mode={mode} sync=false feeds={feed_count}");
+        log::info!("refresh start cycle={cycle} mode={mode} sync=false feeds={feed_count}");
 
         // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
         // Each task owns its network I/O and takes the DB lock only for short
@@ -343,6 +380,7 @@ pub async fn refresh_all_sources(
                 group_id,
                 url,
                 favicon,
+                cycle: cycle.clone(),
             };
             set.spawn(async move {
                 let _permit = permit;
@@ -353,16 +391,18 @@ pub async fn refresh_all_sources(
         let mut total_new = 0usize;
         let mut failures = 0usize;
         let mut notified: Vec<String> = Vec::new();
+        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         while let Some(res) = set.join_next().await {
             match res {
-                Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, out),
+                Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, &mut fail_kinds, out),
                 Err(e) => {
                     failures += 1;
-                    log::debug!("refresh task join failed reason {}", short_reason(&e.to_string()));
+                    *fail_kinds.entry("other".to_string()).or_insert(0) += 1;
+                    log::debug!("refresh task join failed cycle={cycle} reason {}", short_reason(&e.to_string()));
                 }
             }
         }
-        (total_new, failures, notified, feed_count)
+        (total_new, failures, notified, feed_count, fail_kinds)
     };
 
     // Retention policy; VACUUM only after large deletions to avoid churn.
@@ -403,10 +443,12 @@ pub async fn refresh_all_sources(
             serde_json::json!({ "newItems": total_new, "failures": failures, "sync": is_sync }),
         );
     }
-    // Single aggregated cycle summary: the only info per refresh (background
-    // 30min cycles stay within 2 infos including a non-empty retention line).
+    // Single aggregated cycle summary with fail_kinds breakdown (only when
+    // failures exist; notified only as count, never titles).
+    let fail_suffix = format_fail_kinds(&fail_kinds);
     log::info!(
-        "refresh done mode={mode} sync={is_sync} feeds={feed_count} new={total_new} failures={failures} elapsed={}ms",
+        "refresh done cycle={cycle} mode={mode} sync={is_sync} feeds={feed_count} new={total_new} failures={failures}{fail_suffix} notified={} elapsed_ms={}",
+        notified.len(),
         cycle_start.elapsed().as_millis()
     );
     Ok(total_new)
@@ -453,18 +495,20 @@ mod tests {
     fn merge_outcome_folds_totals() {
         // Given: a mix of successful, notifying and failed per-source outcomes
         let outcomes = vec![
-            SourceRefreshOutcome { inserted: 3, notified: vec!["a".into()], failed: false },
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true },
-            SourceRefreshOutcome { inserted: 2, notified: vec!["b".into(), "c".into()], failed: false },
+            SourceRefreshOutcome { inserted: 3, notified: vec!["a".into()], failed: false, error_kind: None },
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
+            SourceRefreshOutcome { inserted: 2, notified: vec!["b".into(), "c".into()], failed: false, error_kind: None },
         ];
         // When: folded
         let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
+        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for out in outcomes {
-            merge_outcome(&mut total, &mut failures, &mut notified, out);
+            merge_outcome(&mut total, &mut failures, &mut notified, &mut fail_kinds, out);
         }
         // Then: inserts sum, failures count, titles concatenate in order
         assert_eq!(total, 5);
         assert_eq!(failures, 1);
         assert_eq!(notified, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(fail_kinds.get("timeout"), Some(&1));
     }
 }

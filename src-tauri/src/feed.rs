@@ -39,10 +39,21 @@ pub struct ParsedFeed {
 
 /// Network-only stage: download and parse a feed. Holds no DB references.
 pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<ParsedFeed, String> {
+    fetch_and_parse_with(client, url, "", None).await
+}
+
+/// Same as [`fetch_and_parse`] but tags NET lines with `cycle=`/`id=`.
+/// Empty cycle + None id keep old callers (commands) unchanged.
+pub async fn fetch_and_parse_with(
+    client: &reqwest::Client,
+    url: &str,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<ParsedFeed, String> {
     let req = client
         .get(url)
         .timeout(std::time::Duration::from_secs(30));
-    let resp = crate::net::send_logged("feed", "GET", url, req)
+    let resp = crate::net::send_logged_with("feed", "GET", url, req, cycle, source_id)
         .await
         .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
     if !resp.status().is_success() {
@@ -226,6 +237,21 @@ pub async fn fetch_favicon(
     source_id: i64,
     allow_third_party: bool,
 ) -> Option<std::path::PathBuf> {
+    fetch_favicon_with(client, feed_url, icon_url, site_url, favicon_dir, source_id, allow_third_party, "").await
+}
+
+/// Same as [`fetch_favicon`] but tags NET lines with `cycle=` (favicon
+/// candidates stay debug, never INFO).
+pub async fn fetch_favicon_with(
+    client: &reqwest::Client,
+    feed_url: &str,
+    icon_url: Option<&str>,
+    site_url: Option<&str>,
+    favicon_dir: &std::path::Path,
+    source_id: i64,
+    allow_third_party: bool,
+    cycle: &str,
+) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
 
     // 1. Explicit feed icon URL from RSS/Atom
@@ -265,7 +291,7 @@ pub async fn fetch_favicon(
 
     for candidate in &candidates {
         let req = client.get(candidate).timeout(std::time::Duration::from_secs(8));
-        if let Ok(resp) = crate::net::send_logged("favicon", "GET", candidate, req).await {
+        if let Ok(resp) = crate::net::send_logged_with("favicon", "GET", candidate, req, cycle, Some(source_id)).await {
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if bytes.len() > 80 && bytes.len() < 2_000_000 {

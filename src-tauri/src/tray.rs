@@ -132,7 +132,7 @@ pub async fn update_tray(app: &AppHandle) {
         match crate::db::total_unread(&conn) {
             Ok(n) => n,
             Err(e) => {
-                log::error!("tray unread query failed reason {}", short_reason(&e));
+                log::warn!("tray unread query failed reason {}", short_reason(&e));
                 0
             }
         }
@@ -145,7 +145,7 @@ pub async fn update_tray(app: &AppHandle) {
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),
     )) {
-        log::error!("tray label update failed reason {}", short_reason(&e.to_string()));
+        log::warn!("tray label update failed reason {}", short_reason(&e.to_string()));
     }
     // Menu labels are baked at creation; re-apply them so a language switch
     // (which triggers this via save_settings) propagates to the tray.
@@ -156,12 +156,12 @@ pub async fn update_tray(app: &AppHandle) {
         (&handles.quit_item, label(zh, "退出", "Quit")),
     ] {
         if let Err(e) = item.set_text(text) {
-            log::error!("tray label update failed reason {}", short_reason(&e.to_string()));
+            log::warn!("tray label update failed reason {}", short_reason(&e.to_string()));
         }
     }
     if let Some(base) = &handles.base_icon {
         if let Err(e) = handles.icon.set_icon(Some(with_badge(base, unread > 0))) {
-            log::error!("tray icon update failed reason {}", short_reason(&e.to_string()));
+            log::warn!("tray icon update failed reason {}", short_reason(&e.to_string()));
         }
     }
 }

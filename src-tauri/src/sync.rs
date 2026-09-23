@@ -26,6 +26,8 @@ pub struct SyncReport {
     pub subscription_count: usize,
     /// Titles of pulled articles matched by a "notify" rule.
     pub notified: Vec<String>,
+    /// Aggregated failure classes for `fail_kinds={...}` summary.
+    pub fail_kinds: std::collections::HashMap<String, usize>,
 }
 
 /// Cached login session; never persisted to disk.
@@ -48,6 +50,36 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
+/// Map a greader error to a stable `error_kind` (auth special-cased,
+///
+/// other messages via shared net classifier).
+fn greader_err_kind(e: &GReaderError) -> &'static str {
+    match e {
+        GReaderError::Auth(_) => "auth",
+        GReaderError::Other(m) => crate::net::classify_error(m),
+    }
+}
+
+/// Sanitized host for sync logs (never raw URL/query).
+fn sync_host(acct: &SyncAccount) -> String {
+    crate::net::sanitize_url(&acct.server_url).0
+}
+
+fn record_fail(report: &mut SyncReport, kind: &str) {
+    *report.fail_kinds.entry(kind.to_string()).or_insert(0) += 1;
+}
+
+/// Render ` fail_kinds={timeout:2,auth:1}` sorted; empty when no failures.
+fn format_fail_kinds(report: &SyncReport) -> String {
+    if report.fail_kinds.is_empty() {
+        return String::new();
+    }
+    let mut pairs: Vec<(&String, &usize)> = report.fail_kinds.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let inner: Vec<String> = pairs.into_iter().map(|(k, v)| format!("{k}:{v}")).collect();
+    format!(" fail_kinds={{{}}}", inner.join(","))
+}
+
 pub fn clear_session(state: &AppState) {
     *state.sync_token.write().expect("sync token lock") = None;
 }
@@ -66,6 +98,16 @@ pub async fn ensure_session(
     http: &reqwest::Client,
     acct: &SyncAccount,
 ) -> Result<String, GReaderError> {
+    ensure_session_with(state, http, acct, "").await
+}
+
+/// Same as [`ensure_session`] but tags logs with `cycle=` (empty = omit).
+pub async fn ensure_session_with(
+    state: &AppState,
+    http: &reqwest::Client,
+    acct: &SyncAccount,
+    cycle: &str,
+) -> Result<String, GReaderError> {
     // Scope the guard: std RwLockReadGuard is not Send and must not be held
     // across the login await below.
     let cached = {
@@ -78,22 +120,25 @@ pub async fn ensure_session(
     if let Some(auth) = cached {
         return Ok(auth);
     }
+    let host = sync_host(acct);
+    let cycle_disp = if cycle.is_empty() { String::new() } else { format!(" cycle={cycle}") };
     let auth = match greader::login(http, &acct.server_url, &acct.username, &acct.password).await
     {
         Ok(a) => a,
         Err(e) => {
-            log::warn!("sync login failed reason {}", short_reason(&e.to_string()));
+            let error_kind = greader_err_kind(&e);
+            log::warn!("sync login failed{cycle_disp} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
             return Err(e);
         }
     };
     store_session(state, acct, &auth);
-    log::info!("sync login ok provider greader");
+    log::debug!("sync login ok{cycle_disp} provider=greader host={host}");
     Ok(auth)
 }
 
-async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount) -> Result<String, GReaderError> {
+async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount, cycle: &str) -> Result<String, GReaderError> {
     clear_session(state);
-    ensure_session(state, http, acct).await
+    ensure_session_with(state, http, acct, cycle).await
 }
 
 /// Run one full sync cycle:
@@ -101,6 +146,13 @@ async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount) -
 /// 2. sync subscriptions list (creates/updates sources & groups)
 /// 3. incremental pull of new/updated items
 pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, String> {
+    let cycle = crate::net::new_cycle();
+    run_with_cycle(app, _background, &cycle).await
+}
+
+/// Same as [`run`] but with an explicit cycle id from the refresh caller
+/// (lib.rs generates it so refresh start/done share one `cycle=`).
+pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
         .sync_account
@@ -108,7 +160,8 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
         .ok_or("no Google Reader account configured")?;
     let state = app.state::<AppState>();
     let http = state.http_client();
-    let mut auth = ensure_session(&state, &http, &acct).await.map_err(|e| e.to_string())?;
+    let host = sync_host(&acct);
+    let mut auth = ensure_session_with(&state, &http, &acct, cycle).await.map_err(|e| e.to_string())?;
 
     let mut report = SyncReport::default();
 
@@ -116,27 +169,33 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
         ($op_name:expr, $expr:expr) => {
             match $expr {
                 Ok(val) => Some(val),
-                Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct).await {
+                Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct, cycle).await {
                     Ok(new_auth) => {
                         auth = new_auth;
                         match $expr {
                             Ok(val) => Some(val),
                             Err(e) => {
+                                let error_kind = greader_err_kind(&e);
                                 report.failures += 1;
-                                log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
+                                record_fail(&mut report, error_kind);
+                                log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
                                 None
                             }
                         }
                     }
                     Err(e) => {
+                        let error_kind = greader_err_kind(&e);
                         report.failures += 1;
-                        log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
+                        record_fail(&mut report, error_kind);
+                        log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
                         None
                     }
                 },
                 Err(e) => {
+                    let error_kind = greader_err_kind(&e);
                     report.failures += 1;
-                    log::warn!("{} failed reason {}", $op_name, short_reason(&e.to_string()));
+                    record_fail(&mut report, error_kind);
+                    log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
                     None
                 }
             }
@@ -155,44 +214,53 @@ pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, Strin
 
     // 3. incremental item pull (auth retry inline so the final failure
     // reason stays available for the warn log).
-    match pull_items(&state, &http, &acct, &auth).await {
+    match pull_items(&state, &http, &acct, &auth, cycle).await {
         Ok((n, notified)) => {
             report.new_items = n;
             report.notified = notified;
         }
-        Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct).await {
+        Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct, cycle).await {
             Ok(new_auth) => {
                 auth = new_auth;
-                match pull_items(&state, &http, &acct, &auth).await {
+                match pull_items(&state, &http, &acct, &auth, cycle).await {
                     Ok((n, notified)) => {
                         report.new_items = n;
                         report.notified = notified;
                     }
                     Err(e) => {
+                        let error_kind = greader_err_kind(&e);
                         report.failures += 1;
-                        log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+                        record_fail(&mut report, error_kind);
+                        log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
                     }
                 }
             }
             Err(e) => {
+                let error_kind = greader_err_kind(&e);
                 report.failures += 1;
-                log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+                record_fail(&mut report, error_kind);
+                log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
             }
         },
         Err(e) => {
+            let error_kind = greader_err_kind(&e);
             report.failures += 1;
-            log::warn!("sync pull failed reason {}", short_reason(&e.to_string()));
+            record_fail(&mut report, error_kind);
+            log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
         }
     }
 
     // Single aggregated sync summary: push + subscription + pull counts in
-    // one line (no per-stage info).
+    // one line (no per-stage info, notified only as count, fail breakdown
+    // only when failures exist).
+    let fail_suffix = format_fail_kinds(&report);
     log::info!(
-        "sync done pushed={} subs={} new={} failures={} notified={}",
+        "sync done cycle={cycle} host={host} pushed={} subs={} new={} failures={}{} notified={}",
         report.pushed,
         report.subscription_count,
         report.new_items,
         report.failures,
+        fail_suffix,
         report.notified.len()
     );
     Ok(report)
@@ -339,6 +407,7 @@ async fn pull_items(
     http: &reqwest::Client,
     acct: &SyncAccount,
     auth: &str,
+    cycle: &str,
 ) -> Result<(usize, Vec<String>), GReaderError> {
     let (ot, stream_map): (i64, std::collections::HashMap<String, SourceIdentity>) = {
         let conn = state.db.lock().await;
@@ -368,6 +437,7 @@ async fn pull_items(
     // already-known items must be observed too).
     let mut ids: Vec<String> = Vec::new();
     let mut continuation: Option<String> = None;
+    let mut pages = 0usize;
     for _ in 0..MAX_PAGES {
         let (page, cont) = greader::stream_ids(
             http,
@@ -382,9 +452,16 @@ async fn pull_items(
         let page_len = page.len();
         ids.extend(page);
         continuation = cont;
+        pages += 1;
         if continuation.is_none() || page_len == 0 {
             break;
         }
+    }
+    // MAX_PAGES guard hit with more pages pending: IDs beyond the window are
+    // skipped this cycle (cursor still advances below).
+    if continuation.is_some() && pages >= MAX_PAGES {
+        let host = sync_host(acct);
+        log::warn!("sync truncated cycle={cycle} host={host} pages={MAX_PAGES} ids={} continuation=pending", ids.len());
     }
 
     let mut new_count = 0usize;
