@@ -98,12 +98,12 @@ export const useDataStore = defineStore('data', {
         this.loadSources()
         this.loadItems()
       })
-      // Tray "mark all as read" and similar Rust-side mutations.
+      // 托盘菜单“全部标记为已读”等 Rust 后端状态变更。
       await listen<unknown>('unread-changed', () => {
         this.loadSources().catch(() => {})
         this.loadItems().catch(() => {})
       })
-      // A backup restore swapped the database underneath us.
+      // 备份恢复操作在底层替换了数据库文件。
       await listen<unknown>('data-restored', () => {
         this.loadSources().catch(() => {})
         this.loadGroups().catch(() => {})
@@ -173,7 +173,7 @@ export const useDataStore = defineStore('data', {
       this.itemLoading = true
       try {
         const item = await api.getItem(id)
-        // Drop stale responses when the user navigated away mid-flight.
+        // 如果用户在网络请求未完成时已切换到其它文章，丢弃陈旧的响应。
         if (this.selectedId !== id) return
         this.selectedItem = item
         if (!isAlreadySelected) {

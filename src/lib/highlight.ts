@@ -12,7 +12,7 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Decode HTML entities such as &apos;, &quot;, &amp;, &#39;, &hellip; etc.
+ * 解码 HTML 实体字符，如 &apos;、&quot;、&amp;、&#39;、&hellip; 等。
  */
 export function decodeHtmlEntities(text: string | null | undefined): string {
   if (!text) return ''
@@ -32,9 +32,8 @@ export function decodeHtmlEntities(text: string | null | undefined): string {
 }
 
 /**
- * HTML-escape the text, then wrap case-insensitive occurrences of each query
- * token in <mark>. Safe for v-html: the input is escaped first and the only
- * tags ever added are our own <mark> wrappers.
+ * 对文本进行 HTML 转义，然后将查询词中的各分词在文本中（忽略大小写）包裹在 <mark> 标签中。
+ * 可安全用于 v-html：输入已预先转义，额外插入的仅有受控的 <mark> 标签。
  */
 export function highlightText(text: string | null | undefined, query: string): string {
   const decoded = decodeHtmlEntities(text)

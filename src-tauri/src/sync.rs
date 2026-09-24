@@ -1,8 +1,8 @@
-//! Cloud sync engine for Google Reader compatible servers.
+//! 面向兼容 Google Reader 服务器的云同步引擎。
 //!
-//! Per run: push the local action queue first (so later pulls observe our own
-//! changes), reconcile subscriptions, then incrementally pull changed items
-//! with the server's read/starred state winning (last-write-wins).
+//! 每次运行流程：优先推送本地操作队列（以便后续拉取能感知到自身变更），
+//! 对齐订阅源列表，然后增量拉取变更条目，
+//! 服务端的已读/加星状态优先生效（以最后写入为准，LWW）。
 
 use crate::db;
 use crate::greader::{self, GReaderError};
@@ -12,10 +12,10 @@ use tauri::{AppHandle, Manager};
 
 const MAX_PAGES: usize = 20;
 const IDS_PAGE_SIZE: u32 = 1000;
-/// First-sync lookback window when no cursor exists (180 days).
+/// 不存在游标时的首次同步回溯窗口（180 天）。
 const FIRST_SYNC_WINDOW_SECS: i64 = 180 * 86_400;
 const CONTENTS_BATCH: usize = 100;
-/// edit-tag batch size (bounded to keep POST bodies reasonable).
+/// edit-tag 批次大小（设限以保证 POST 请求体大小合理）。
 const PUSH_BATCH: usize = 100;
 
 #[derive(Default, Debug)]
@@ -24,13 +24,13 @@ pub struct SyncReport {
     pub pushed: usize,
     pub failures: usize,
     pub subscription_count: usize,
-    /// Titles of pulled articles matched by a "notify" rule.
+    /// 匹配到“通知”规则的拉取文章标题列表。
     pub notified: Vec<String>,
-    /// Aggregated failure classes for `fail_kinds={...}` summary.
+    /// 汇总的失败类别，用于 `fail_kinds={...}` 摘要输出。
     pub fail_kinds: std::collections::HashMap<String, usize>,
 }
 
-/// Cached login session; never persisted to disk.
+/// 缓存的登录会话；绝不持久化到磁盘。
 #[derive(Clone)]
 pub struct Session {
     pub base: String,
@@ -38,8 +38,7 @@ pub struct Session {
     pub auth: String,
 }
 
-/// First line of an error message, truncated: reasons never carry tokens,
-/// bodies or full URLs (server text stays server-side, tokens stay in memory).
+/// 错误消息的首行（截断后）：错误原因绝不包含令牌、请求体或完整 URL（服务端文本留在服务端，令牌仅保留在内存中）。
 fn short_reason(msg: &str) -> String {
     const MAX_CHARS: usize = 160;
     let first = msg.lines().next().unwrap_or("").trim();
@@ -50,9 +49,7 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
-/// Map a greader error to a stable `error_kind` (auth special-cased,
-///
-/// other messages via shared net classifier).
+/// 将 greader 错误映射到稳定的 `error_kind`（认证错误特殊处理，其他消息通过通用的网络分类器处理）。
 fn greader_err_kind(e: &GReaderError) -> &'static str {
     match e {
         GReaderError::Auth(_) => "auth",
@@ -60,7 +57,7 @@ fn greader_err_kind(e: &GReaderError) -> &'static str {
     }
 }
 
-/// Sanitized host for sync logs (never raw URL/query).
+/// 用于同步日志的净化主机名（绝不输出原始 URL/查询参数）。
 fn sync_host(acct: &SyncAccount) -> String {
     crate::net::sanitize_url(&acct.server_url).0
 }
@@ -69,7 +66,7 @@ fn record_fail(report: &mut SyncReport, kind: &str) {
     *report.fail_kinds.entry(kind.to_string()).or_insert(0) += 1;
 }
 
-/// Render ` fail_kinds={timeout:2,auth:1}` sorted; empty when no failures.
+/// 渲染排序后的 ` fail_kinds={timeout:2,auth:1}`；无失败时为空字符串。
 fn format_fail_kinds(report: &SyncReport) -> String {
     if report.fail_kinds.is_empty() {
         return String::new();
@@ -92,7 +89,7 @@ fn store_session(state: &AppState, acct: &SyncAccount, auth: &str) {
     });
 }
 
-/// Return the cached Auth token when it matches the account, else log in.
+/// 当缓存的 Auth 令牌与当前账户匹配时返回该令牌，否则执行登录。
 pub async fn ensure_session(
     state: &AppState,
     http: &reqwest::Client,
@@ -101,15 +98,14 @@ pub async fn ensure_session(
     ensure_session_with(state, http, acct, "").await
 }
 
-/// Same as [`ensure_session`] but tags logs with `cycle=` (empty = omit).
+/// 与 [`ensure_session`] 相同，但在日志中标记 `cycle=`（为空时省略）。
 pub async fn ensure_session_with(
     state: &AppState,
     http: &reqwest::Client,
     acct: &SyncAccount,
     cycle: &str,
 ) -> Result<String, GReaderError> {
-    // Scope the guard: std RwLockReadGuard is not Send and must not be held
-    // across the login await below.
+    // 限制守卫的作用域：标准库的 RwLockReadGuard 不是 Send，绝不能跨越下方的登录 await 持有。
     let cached = {
         let guard = state.sync_token.read().expect("sync token lock");
         guard
@@ -141,17 +137,16 @@ async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount, c
     ensure_session_with(state, http, acct, cycle).await
 }
 
-/// Run one full sync cycle:
-/// 1. push local queued actions to server (push-queue-first)
-/// 2. sync subscriptions list (creates/updates sources & groups)
-/// 3. incremental pull of new/updated items
+/// 运行一次完整的同步周期：
+/// 1. 将本地队列中的操作推送到服务端（优先推送队列）
+/// 2. 同步订阅列表（创建/更新订阅源与分组）
+/// 3. 增量拉取新增/更新条目
 pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, String> {
     let cycle = crate::net::new_cycle();
     run_with_cycle(app, _background, &cycle).await
 }
 
-/// Same as [`run`] but with an explicit cycle id from the refresh caller
-/// (lib.rs generates it so refresh start/done share one `cycle=`).
+/// 与 [`run`] 相同，但接收来自刷新调用方的显式周期 ID（由 lib.rs 生成，使刷新开始与完成共享同一个 `cycle=`）。
 pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
@@ -202,18 +197,17 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
         };
     }
 
-    // 1. push queued local actions
+    // 1. 推送队列中的本地操作
     if let Some(n) = retry_auth!("sync push", push_queue(&state, &http, &acct, &auth).await) {
         report.pushed = n;
     }
 
-    // 2. sync subscriptions
+    // 2. 同步订阅源列表
     if let Some(n) = retry_auth!("sync subscriptions", sync_subscriptions(&state, &http, &acct, &auth).await) {
         report.subscription_count = n;
     }
 
-    // 3. incremental item pull (auth retry inline so the final failure
-    // reason stays available for the warn log).
+    // 3. 增量拉取条目（内联重试认证，使最终失败原因可记录在警告日志中）。
     match pull_items(&state, &http, &acct, &auth, cycle).await {
         Ok((n, notified)) => {
             report.new_items = n;
@@ -250,9 +244,7 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
         }
     }
 
-    // Single aggregated sync summary: push + subscription + pull counts in
-    // one line (no per-stage info, notified only as count, fail breakdown
-    // only when failures exist).
+    // 单行汇总同步摘要：在单行中输出推送 + 订阅 + 拉取数量（不输出分阶段详情，通知仅输出数量，仅在存在失败时细分失败类型）。
     let fail_suffix = format_fail_kinds(&report);
     log::info!(
         "sync done cycle={cycle} host={host} pushed={} subs={} new={} failures={}{} notified={}",
@@ -266,9 +258,7 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
     Ok(report)
 }
 
-/// Drain the local action queue to the server. Pushed entries are deleted;
-/// on a mid-way failure the remainder stays queued (re-pushing already
-/// applied edits is idempotent).
+/// 将本地操作队列消耗并推送到服务端。推送成功的条目将被删除；途中发生失败时剩余条目保留在队列中（重复推送已应用的修改是幂等的）。
 async fn push_queue(
     state: &AppState,
     http: &reqwest::Client,
@@ -323,8 +313,7 @@ async fn push_queue(
     Ok(pushed_ids.len())
 }
 
-/// Upsert server subscriptions into local groups/sources. Sources present
-/// locally but not on the server are left untouched.
+/// 将服务端的订阅源更新或插入到本地分组/订阅源中。本地存在但服务端不存在的订阅源保持不变。
 async fn sync_subscriptions(
     state: &AppState,
     http: &reqwest::Client,
@@ -381,11 +370,10 @@ async fn sync_subscriptions(
     Ok(count)
 }
 
-/// Local identity of a synced feed: (source_id, group_id, source_url).
+/// 同步订阅源的本地标识：(source_id, group_id, source_url)。
 type SourceIdentity = (i64, Option<i64>, String);
 
-/// Merge server state with local rule outcome: server read/starred state wins
-/// (LWW), rule flags apply on top. Returns (has_been_read, starred, hidden).
+/// 将服务端状态与本地规则执行结果合并：服务端已读/加星状态优先（LWW），规则标记在其基础上叠加。返回 (has_been_read, starred, hidden)。
 fn apply_rules_to_remote(
     server_read: bool,
     server_starred: bool,
@@ -398,10 +386,8 @@ fn apply_rules_to_remote(
     )
 }
 
-/// Pull items changed since the last sync cursor and upsert them with the
-/// server's read/starred state, running new entries through the rule engine
-/// (mark read / star / hide / notify) like the local refresh path.
-/// Returns (new row count, notify-matched titles).
+/// 拉取自上次同步游标以来发生变更的条目，以服务端的已读/加星状态进行更新或插入，并像本地刷新路径一样通过规则引擎处理新条目（标记已读 / 加星 / 隐藏 / 通知）。
+/// 返回（新增行数，匹配通知规则的文章标题列表）。
 async fn pull_items(
     state: &AppState,
     http: &reqwest::Client,
@@ -433,8 +419,7 @@ async fn pull_items(
         crate::rules::RuleEngine::load(&conn).map_err(GReaderError::Other)?
     };
 
-    // Page through the reading-list stream (no read filter: state changes for
-    // already-known items must be observed too).
+    // 分页遍历 reading-list 流（不过滤未读：已知条目的状态变更也必须被感知到）。
     let mut ids: Vec<String> = Vec::new();
     let mut continuation: Option<String> = None;
     let mut pages = 0usize;
@@ -457,8 +442,7 @@ async fn pull_items(
             break;
         }
     }
-    // MAX_PAGES guard hit with more pages pending: IDs beyond the window are
-    // skipped this cycle (cursor still advances below).
+    // 触发 MAX_PAGES 限制且仍有未拉取的分页：超出窗口的 ID 将在当前周期中跳过（游标在下方仍会推进）。
     if continuation.is_some() && pages >= MAX_PAGES {
         let host = sync_host(acct);
         log::warn!("sync truncated cycle={cycle} host={host} pages={MAX_PAGES} ids={} continuation=pending", ids.len());
@@ -471,7 +455,7 @@ async fn pull_items(
         let conn = state.db.lock().await;
         for item in items {
             let Some((source_id, group_id, source_url)) = stream_map.get(&item.stream_id) else {
-                continue; // feed not linked locally yet
+                continue; // 订阅源尚未在本地关联
             };
             let content = ammonia::clean(&item.content);
             let snippet: String = html_to_text(&content).trim().chars().take(200).collect();
@@ -533,25 +517,25 @@ mod tests {
 
     #[test]
     fn rule_flags_apply_on_top_of_server_state() {
-        // Given: server says unread/unstarred, rules say mark-read + star + hide + notify
+        // 设定：服务端表示未读/未加星，规则指定 标记已读 + 加星 + 隐藏 + 通知
         let outcome = crate::rules::Outcome { mark_read: true, star: true, hide: true, notify: true };
-        // When: merged
+        // 操作：合并
         let flags = apply_rules_to_remote(false, false, &outcome);
-        // Then: every rule flag is honored
+        // 验证：每项规则标记均生效
         assert_eq!(flags, (true, true, true));
 
-        // Given: server already read/starred, no rules match
+        // 设定：服务端已为已读/已加星，无规则匹配
         let quiet = crate::rules::Outcome::default();
-        // When: merged
+        // 操作：合并
         let flags = apply_rules_to_remote(true, true, &quiet);
-        // Then: server state survives untouched
+        // 验证：服务端状态原样保留
         assert_eq!(flags, (true, true, false));
 
-        // Given: server unread, only notify matches (no state change)
+        // 设定：服务端为未读，仅匹配通知规则（无状态修改）
         let notify_only = crate::rules::Outcome { notify: true, ..Default::default() };
-        // When: merged
+        // 操作：合并
         let flags = apply_rules_to_remote(false, false, &notify_only);
-        // Then: row state unchanged
+        // 验证：行状态保持不变
         assert_eq!(flags, (false, false, false));
     }
 }

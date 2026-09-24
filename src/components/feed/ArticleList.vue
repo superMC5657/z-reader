@@ -64,7 +64,7 @@ function clearSearch() {
   data.search_('')
 }
 
-// Debounced search: the backend query runs 250ms after typing settles.
+// 防抖搜索：输入停顿 250ms 后才触发后端查询。
 const searchInput = ref(data.search)
 let searchTimer: number | undefined
 watch(searchInput, (q) => {
@@ -72,8 +72,8 @@ watch(searchInput, (q) => {
   searchTimer = window.setTimeout(() => data.search_(q), 250)
 })
 
-// Infinite scroll: when the sentinel enters the list viewport, append the
-// next page. The button remains as a fallback if the observer never fires.
+// 无限滚动：当哨兵元素进入列表可视区域时追加下一页。
+// 同时保留按钮作为兜底（若交叉观察器未触发）。
 const listBody = ref<HTMLElement | null>(null)
 const moreSentinel = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
@@ -120,7 +120,7 @@ function openViewMenu(e: MouseEvent) {
 
 <template>
   <section class="article-list">
-    <!-- Apple macOS Unified Toolbar -->
+    <!-- Apple macOS 统一工具栏 -->
     <header class="toolbar" data-tauri-drag-region>
       <div class="scope" data-tauri-drag-region>
         <h2 data-tauri-drag-region>{{ scopeTitle }}</h2>
@@ -129,7 +129,7 @@ function openViewMenu(e: MouseEvent) {
         </span>
       </div>
 
-      <!-- Segmented Filter Control -->
+      <!-- 分段过滤器控件 -->
       <div class="segmented filter-seg">
         <button
           v-for="tab in filterTabs"
@@ -144,9 +144,9 @@ function openViewMenu(e: MouseEvent) {
 
       <div class="spacer" data-tauri-drag-region></div>
 
-      <!-- Right Actions Group -->
+      <!-- 右侧操作按钮组 -->
       <div class="toolbar-actions">
-        <!-- Apple Spotlight Capsule Search Box -->
+        <!-- Apple Spotlight 胶囊搜索框 -->
         <div class="search-wrapper" :class="{ 'has-search': !!data.search }">
           <Icon name="search" :size="13" color="var(--text-tertiary)" class="search-icon" />
           <input
@@ -160,7 +160,7 @@ function openViewMenu(e: MouseEvent) {
           </button>
         </div>
 
-        <!-- Mark All Read -->
+        <!-- 全部标为已读 -->
         <button
           class="f-icon-btn toolbar-btn"
           :title="t('toolbar.markAllRead')"
@@ -169,7 +169,7 @@ function openViewMenu(e: MouseEvent) {
           <Icon name="checkmark-circle" :size="17" />
         </button>
 
-        <!-- View Switcher: Segmented Control (Wide mode >= 640px) -->
+        <!-- 视图切换器：分段控制器（宽屏模式 >= 640px） -->
         <div class="segmented view-switch wide-view-switch">
           <button
             v-for="v in views"
@@ -183,7 +183,7 @@ function openViewMenu(e: MouseEvent) {
           </button>
         </div>
 
-        <!-- View Switcher: Single Dropdown Button (Compact mode < 640px) -->
+        <!-- 视图切换器：单下拉按钮（紧凑模式 < 640px） -->
         <button
           class="f-icon-btn toolbar-btn compact-view-btn"
           :title="t(`toolbar.views.${activeView}`)"
@@ -194,15 +194,15 @@ function openViewMenu(e: MouseEvent) {
       </div>
     </header>
 
-    <!-- Main List Body -->
+    <!-- 列表主体容器 -->
     <div ref="listBody" class="list-body">
-      <!-- Loading State -->
+      <!-- 加载中状态 -->
       <div v-if="data.loading && !data.items.length" class="state">
         <Icon name="arrow-clockwise" :size="28" color="var(--accent)" class="spin" />
         <p>{{ t('common.loading') }}</p>
       </div>
 
-      <!-- Empty State -->
+      <!-- 空内容状态 -->
       <div v-else-if="!data.items.length" class="state">
         <div class="empty-icon-circle">
           <Icon name="tray-stack" :size="32" color="var(--text-quaternary)" />
@@ -211,7 +211,7 @@ function openViewMenu(e: MouseEvent) {
         <p class="sub">{{ t('common.emptyHint') }}</p>
       </div>
 
-      <!-- Feed Views -->
+      <!-- 信息流各视图呈现 -->
       <component
         :is="{ cards: CardsView, magazine: MagazineView, list: ListView }[activeView]"
         v-else
@@ -220,7 +220,7 @@ function openViewMenu(e: MouseEvent) {
         @context="onContext"
       />
 
-      <!-- Pagination sentinel: infinite scroll with a clickable fallback -->
+      <!-- 分页哨兵元素：带点击兜底的无限滚动 -->
       <div v-if="data.items.length" ref="moreSentinel" class="more-sentinel">
         <button v-if="data.hasMore && !data.loadingMore" class="more-btn" @click="data.loadMore()">
           {{ t('common.loadMore') }}
@@ -309,7 +309,7 @@ function openViewMenu(e: MouseEvent) {
   min-width: 0;
 }
 
-/* Apple Capsule Search */
+/* Apple 胶囊搜索框样式 */
 .search-wrapper {
   position: relative;
   display: flex;
@@ -372,7 +372,7 @@ function openViewMenu(e: MouseEvent) {
   background: var(--bg-hover-strong);
 }
 
-/* Default to compact single view button */
+/* 默认采用紧凑型单视图切换按钮 */
 .wide-view-switch {
   display: none;
 }
@@ -385,8 +385,8 @@ function openViewMenu(e: MouseEvent) {
   padding: 0.25rem 0.55rem;
 }
 
-/* Responsive Container Queries for ArticleList */
-/* Wide container (>= 780px): show full 4-button segmented control */
+/* 针对 ArticleList 的响应式容器查询 */
+/* 宽容器（>= 780px）：显示完整的分段控制器 */
 @container article-list (min-width: 780px) {
   .wide-view-switch {
     display: inline-flex;

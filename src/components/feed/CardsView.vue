@@ -28,13 +28,13 @@ const app = useAppStore()
       @click="emit('select', item)"
       @contextmenu.prevent="emit('context', $event, item)"
     >
-      <!-- Cover Image -->
+      <!-- 封面图片 -->
       <div v-if="app.showCover && item.image" class="cover">
         <img :src="item.image" loading="lazy" alt="" />
         <span v-if="!item.hasBeenRead" class="unread-dot floating-dot" :title="t('filter.unread')"></span>
       </div>
 
-      <!-- Card Body -->
+      <!-- 卡片主体 -->
       <div class="card-body">
         <div class="meta">
           <span class="source-name">{{ data.sourceById(item.sourceId)?.title }}</span>

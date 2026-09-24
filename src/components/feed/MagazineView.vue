@@ -26,12 +26,12 @@ const app = useAppStore()
       @click="emit('select', item)"
       @contextmenu.prevent="emit('context', $event, item)"
     >
-      <!-- Thumbnail -->
+      <!-- 缩略图 -->
       <div v-if="app.showCover && item.image" class="thumb">
         <img :src="item.image" loading="lazy" alt="" />
       </div>
 
-      <!-- Content Area -->
+      <!-- 内容区域 -->
       <div class="card-content">
         <div class="meta">
           <span class="source">{{ data.sourceById(item.sourceId)?.title }}</span>

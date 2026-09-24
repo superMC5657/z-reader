@@ -19,9 +19,9 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub db_path: std::path::PathBuf,
-    /// Swappable HTTP client: rebuilt when proxy settings change.
+    /// 可替换的 HTTP 客户端：在代理设置变更时重新构建。
     pub http: RwLock<reqwest::Client>,
-    /// In-memory cloud-sync login session (never persisted).
+    /// 内存中的云同步登录会话（绝不持久化）。
     pub sync_token: RwLock<Option<sync::Session>>,
 }
 
@@ -133,7 +133,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// Background loop: refresh all sources every `fetchInterval` minutes.
+/// 后台轮询循环：每隔 `fetchInterval` 分钟刷新所有订阅源。
 async fn background_refresh(app: tauri::AppHandle) {
     let mut last_fetch = std::time::Instant::now();
     loop {
@@ -148,11 +148,10 @@ async fn background_refresh(app: tauri::AppHandle) {
     }
 }
 
-/// Max simultaneous feed fetches during a refresh cycle.
+/// 刷新周期中允许的最大并发订阅源抓取数。
 const REFRESH_CONCURRENCY: usize = 6;
 
-/// First line of an error message, truncated: log reasons never span lines
-/// and never carry bodies/URLs/tokens (those stay in the DB or memory).
+/// 错误消息的首行（截断后）：日志中的错误原因绝不跨行，且绝不包含请求体/URL/令牌（这些仅保留在数据库或内存中）。
 fn short_reason(msg: &str) -> String {
     const MAX_CHARS: usize = 160;
     let first = msg.lines().next().unwrap_or("").trim();
@@ -164,17 +163,17 @@ fn short_reason(msg: &str) -> String {
 }
 
 
-/// Per-source result of one refresh task.
+/// 单个订阅源刷新任务的执行结果。
 struct SourceRefreshOutcome {
     inserted: usize,
     notified: Vec<String>,
     failed: bool,
-    /// Stable failure class for `fail_kinds` aggregation (None on success).
+    /// 用于 `fail_kinds` 汇总的稳定失败类别（成功时为 None）。
     error_kind: Option<String>,
 }
 
-/// Everything one refresh task needs; owned so tasks are `'static`.
-/// Note: no title/URL here — log lines carry ids + first-line reasons only.
+/// 单个刷新任务所需的所有数据；具有所有权以保证任务为 `'static`。
+/// 注意：此处不包含标题/URL —— 日志仅输出 ID 和首行错误原因。
 struct RefreshTask {
     app: tauri::AppHandle,
     client: reqwest::Client,
@@ -189,9 +188,7 @@ struct RefreshTask {
     cycle: String,
 }
 
-/// Refresh a single source: fetch + parse (network), store + marks (short DB
-/// critical sections), lazy favicon fill. Never propagates errors; records
-/// them on the source row and reports them via the outcome.
+/// 刷新单个订阅源：抓取 + 解析（网络）、存储 + 标记（短暂的数据库临界区）、延迟获取站点图标。绝不向上抛出错误；错误会记录在该源的数据行并通过结果返回。
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
     let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon, cycle } = task;
@@ -201,8 +198,8 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     let state = app.state::<AppState>();
     let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false, error_kind: None };
     let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
-    // Release-visible per-feed timing: host only (no raw URL/query tokens),
-    // split into fetch / store / favicon segments + total.
+    // release 模式可见的单源耗时统计：仅主机名（不含原始 URL/查询令牌），
+    // 拆分为 fetch / store / favicon 分段及总耗时。
     let total_start = std::time::Instant::now();
     let (host, _) = crate::net::sanitize_url(&url);
     let fetch_start = std::time::Instant::now();
@@ -244,8 +241,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
             if !out.failed {
                 let conn = state.db.lock().await;
                 let _ = db::mark_source_fetched(&conn, id, true, None);
-                // Per-feed success stays INFO (full volume): host + new count
-                // + segmented timing + cycle. Keys lowercase, `_ms` bare numbers.
+                // 单源成功日志保持为 INFO（全量）：主机名 + 新增数量 + 分段耗时 + 周期 ID。键名小写，`_ms` 为纯数字。
                 let elapsed_ms = total_start.elapsed().as_millis();
                 if out.inserted > 0 {
                     log::info!("feed refreshed cycle={cycle} id={id} host={host} new={} fetch_ms={fetch_ms} store_ms={store_ms} favicon_ms={favicon_ms} elapsed_ms={elapsed_ms}", out.inserted);
@@ -259,8 +255,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
             let fetch_ms = fetch_start.elapsed().as_millis();
             let error_kind = crate::net::classify_error(&e);
             out.error_kind = Some(error_kind.to_string());
-            // Failures stay warn (diagnosable) with cycle + id + host +
-            // error_kind + fetch timing + first-line reason only.
+            // 失败保持为 warn（便于诊断），仅包含 cycle + id + host + error_kind + fetch 耗时 + 首行原因。
             log::warn!("feed fetch failed cycle={cycle} id={id} host={host} error_kind={error_kind} fetch_ms={fetch_ms} reason {}", short_reason(&e));
             let conn = state.db.lock().await;
             let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
@@ -272,7 +267,7 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     out
 }
 
-/// Fold one per-source outcome into the refresh-cycle totals.
+/// 将单个订阅源的刷新结果累加到刷新周期总计中。
 fn merge_outcome(
     total_new: &mut usize,
     failures: &mut usize,
@@ -289,7 +284,7 @@ fn merge_outcome(
     notified.extend(out.notified);
 }
 
-/// Render `fail_kinds={timeout:2,http_5xx:1}` sorted by key; empty when none.
+/// 按键名排序渲染 `fail_kinds={timeout:2,http_5xx:1}`；为空时不输出。
 fn format_fail_kinds(fail_kinds: &std::collections::HashMap<String, usize>) -> String {
     if fail_kinds.is_empty() {
         return String::new();
@@ -300,13 +295,10 @@ fn format_fail_kinds(fail_kinds: &std::collections::HashMap<String, usize>) -> S
     format!(" fail_kinds={{{}}}", inner.join(","))
 }
 
-/// Fetch all (or selected) sources, run new entries through the rule engine,
-/// store them, refresh missing favicons, apply the retention policy and sync
-/// the tray badge. Emits fetch-progress / fetch-done for the frontend.
+/// 抓取所有（或选定的）订阅源，将新条目送入规则引擎处理、
+/// 存储条目、刷新缺失的站点图标、应用保留策略并同步托盘红点徽标。向前端发送 fetch-progress / fetch-done 事件。
 ///
-/// `background` = timer-triggered: no per-source progress events, and an
-/// aggregated desktop notification when new articles (or rule "notify"
-/// matches) arrive.
+/// `background` = 定时器触发：不发送单源进度事件，并在有新文章（或规则命中“通知”）到达时发出聚合的桌面通知。
 pub async fn refresh_all_sources(
     app: tauri::AppHandle,
     ids: Option<Vec<i64>>,
@@ -316,9 +308,8 @@ pub async fn refresh_all_sources(
     let state = app.state::<AppState>();
     let settings = settings::load(&settings::settings_path(&app)?);
 
-    // Cloud sync mode: subscriptions live on the server, so refresh = sync.
-    // Rule-engine notify matches from the pull are forwarded so background
-    // notifications behave like the local refresh path.
+    // 云同步模式：订阅源保存在服务端，因此刷新即等于同步。
+    // 拉取过程中由规则引擎命中的通知将被转发，使后台通知行为与本地刷新路径保持一致。
     let mode = if background { "background" } else { "manual" };
     let cycle = crate::net::new_cycle();
     let cycle_start = std::time::Instant::now();
@@ -358,9 +349,8 @@ pub async fn refresh_all_sources(
         let feed_count = targets.len();
         log::info!("refresh start cycle={cycle} mode={mode} sync=false feeds={feed_count}");
 
-        // Bounded-concurrency refresh: one slow feed no longer blocks the rest.
-        // Each task owns its network I/O and takes the DB lock only for short
-        // store/mark critical sections.
+        // 有界并发刷新：慢速订阅源不再阻塞其余源。
+        // 每个任务独占其网络 I/O，仅在存储/标记条目的极短临界区内获取数据库锁。
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
         let mut set = tokio::task::JoinSet::new();
         for (id, group_id, url, favicon) in targets {
@@ -405,8 +395,8 @@ pub async fn refresh_all_sources(
         (total_new, failures, notified, feed_count, fail_kinds)
     };
 
-    // Retention policy; VACUUM only after large deletions to avoid churn.
-    // Count converges to one line: info only when rows actually moved.
+    // 保留策略清理；仅在大量删除后执行 VACUUM 以避免不必要的开销。
+    // 计数收敛为单行输出：仅在确实有行被删除时输出 info 级别日志。
     {
         let conn = state.db.lock().await;
         match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
@@ -443,8 +433,7 @@ pub async fn refresh_all_sources(
             serde_json::json!({ "newItems": total_new, "failures": failures, "sync": is_sync }),
         );
     }
-    // Single aggregated cycle summary with fail_kinds breakdown (only when
-    // failures exist; notified only as count, never titles).
+    // 单行汇总周期摘要，附带 fail_kinds 失败分类明细（仅在存在失败时输出；通知仅输出数量，不输出文章标题）。
     let fail_suffix = format_fail_kinds(&fail_kinds);
     log::info!(
         "refresh done cycle={cycle} mode={mode} sync={is_sync} feeds={feed_count} new={total_new} failures={failures}{fail_suffix} notified={} elapsed_ms={}",
@@ -493,19 +482,19 @@ mod tests {
 
     #[test]
     fn merge_outcome_folds_totals() {
-        // Given: a mix of successful, notifying and failed per-source outcomes
+        // 设定：混合包含成功、触发通知以及失败的单源刷新结果
         let outcomes = vec![
             SourceRefreshOutcome { inserted: 3, notified: vec!["a".into()], failed: false, error_kind: None },
             SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
             SourceRefreshOutcome { inserted: 2, notified: vec!["b".into(), "c".into()], failed: false, error_kind: None },
         ];
-        // When: folded
+        // 操作：汇总折叠
         let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
         let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for out in outcomes {
             merge_outcome(&mut total, &mut failures, &mut notified, &mut fail_kinds, out);
         }
-        // Then: inserts sum, failures count, titles concatenate in order
+        // 验证：新增数求和，失败数统计，文章标题按顺序拼接
         assert_eq!(total, 5);
         assert_eq!(failures, 1);
         assert_eq!(notified, vec!["a".to_string(), "b".to_string(), "c".to_string()]);

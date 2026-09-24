@@ -50,31 +50,31 @@ export const exportOpml = () => invoke<string>('export_opml')
 export const refreshFavicon = (id: number) => invoke<string | null>('refresh_favicon', { id })
 export const setCustomFavicon = (id: number, dataBase64: string) => invoke<string>('set_custom_favicon', { id, dataBase64 })
 
-// ---------- Proxy ----------
+// ---------- 代理设置 ----------
 export const testProxy = (settings: Settings, target?: string | null) =>
   invoke<number>('test_proxy', { settings, target: target ?? null })
 
-// ---------- Regex Automation Rules ----------
+// ---------- 正则自动化规则 ----------
 export const getRules = () => invoke<Rule[]>('get_rules')
 export const createRule = (input: RuleInput) => invoke<Rule>('create_rule', { input })
 export const updateRule = (id: number, input: RuleInput) => invoke<void>('update_rule', { id, input })
 export const deleteRule = (id: number) => invoke<void>('delete_rule', { id })
 export const applyRulesBackfill = () => invoke<RuleBackfillResult>('apply_rules_backfill')
 
-// ---------- Backup & Restore ----------
+// ---------- 备份与恢复 ----------
 export const exportBackup = () => invoke<string | null>('export_backup')
 export const importBackup = () => invoke<string | null>('import_backup')
 
-// ---------- Storage Lifecycle & Stats ----------
+// ---------- 存储生命周期与统计 ----------
 export const getStats = () => invoke<AppStats>('get_stats')
 export const vacuumNow = () => invoke<void>('vacuum_now')
 export const cleanupNow = () => invoke<number>('cleanup_now')
 
-// ---------- Log Export (opt-in, local files only) ----------
+// ---------- 日志导出（用户自选，仅限本地文件） ----------
 export const zlogGetDir = () => invoke<string>('zlog_get_dir')
 export const zlogExportBundle = () => invoke<string>('zlog_export_bundle')
 
-// ---------- Cloud Sync (Google Reader API) ----------
+// ---------- 云同步（Google Reader API） ----------
 export const syncLogin = (serverUrl: string, username: string, password: string) =>
   invoke<number>('sync_login', { serverUrl, username, password })
 export const syncLogout = () => invoke<void>('sync_logout')

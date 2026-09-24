@@ -13,7 +13,7 @@ const props = withDefaults(
   }
 )
 
-// 0 = local file, 1 = Google Favicon, 2 = DuckDuckGo Favicon, 3 = Initial Badge
+// 0 = 本地文件，1 = Google Favicon，2 = DuckDuckGo Favicon，3 = 首字母徽标
 const stage = ref(props.source.favicon ? 0 : 1)
 
 watch(

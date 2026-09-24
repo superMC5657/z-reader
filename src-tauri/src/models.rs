@@ -12,9 +12,9 @@ pub struct Source {
     pub last_fetched: Option<i64>,
     pub error_count: i64,
     pub unread: i64,
-    /// Remote stream id when the source is synced (e.g. "feed/…"), None for local-only.
+    /// 同步订阅源时的远程流 ID（例如 "feed/…"），纯本地源为 None。
     pub remote_id: Option<String>,
-    /// Last fetch/store failure message; cleared on the next success.
+    /// 最近一次抓取/存储失败的错误信息；下次成功时清空。
     pub last_error: Option<String>,
 }
 
@@ -44,19 +44,19 @@ pub struct Item {
     pub image: Option<String>,
     pub has_been_read: bool,
     pub starred: bool,
-    /// Set by the rule engine's "hide" action; excluded from normal lists.
+    /// 由规则引擎的“隐藏”动作设置；在普通列表中排除。
     pub hidden: bool,
-    /// Remote item id (normalized hex form) when the article came from a sync server.
+    /// 文章来自同步服务器时的远程条目 ID（标准十六进制格式）。
     pub remote_id: Option<String>,
 }
 
-/// Item query scope: everything, one source, or one group.
+/// 文章查询作用域：全部、单个订阅源或单个分组。
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GetItemsParams {
     pub scope: Option<String>, // "all" | "source" | "group"
     pub scope_id: Option<i64>,
-    /// 0 = all, 1 = unread, 2 = starred, 3 = hidden (rules review)
+    /// 0 = 全部，1 = 未读，2 = 星标，3 = 隐藏（规则审查）
     pub filter: Option<u8>,
     pub search: Option<String>,
     pub limit: Option<u32>,
@@ -237,7 +237,7 @@ impl std::str::FromStr for SyncAction {
     }
 }
 
-/// A user-defined regex automation rule.
+/// 用户自定义的正则自动化规则。
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
@@ -252,19 +252,19 @@ pub struct Rule {
     pub created_at: i64,
 }
 
-/// Cloud sync account credentials. Only "greader" is supported for now.
+/// 云同步账户凭据。目前仅支持 "greader"。
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncAccount {
-    /// "greader" (Google Reader compatible API)
+    /// "greader"（兼容 Google Reader API）
     pub provider: String,
-    /// API base URL, e.g. "https://host/api/greader.php" for FreshRSS
+    /// API 基地址，例如 FreshRSS 的 "https://host/api/greader.php"
     pub server_url: String,
     pub username: String,
     pub password: String,
 }
 
-/// Editable subset of a rule sent from the frontend on create/update.
+/// 前端在创建/更新规则时提交的可编辑子集。
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleInput {
@@ -289,33 +289,33 @@ pub struct Settings {
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f64,
     pub font_size: f64,
-    /// background refresh interval in minutes
+    /// 后台刷新间隔（单位：分钟）
     pub fetch_interval: u64,
-    /// 0 = all, 1 = unread, 2 = starred
+    /// 0 = 全部, 1 = 未读, 2 = 已加星标
     pub filter_type: u8,
-    /// bit0 = showCover, bit1 = showSnippet, bit2 = fadeRead
+    /// bit0 = 显示封面, bit1 = 显示摘要, bit2 = 已读虚化
     pub view_configs: u32,
     pub menu_on: bool,
     pub reader_mode: String,
     pub shortcuts: std::collections::HashMap<String, String>,
-    /// "system" (env vars + OS proxy) | "none" (direct) | "manual"
+    /// "system"（环境变量 + 操作系统代理）| "none"（直接连接）| "manual"（手动设置）
     pub proxy_mode: String,
     pub proxy_url: String,
     pub proxy_username: String,
     pub proxy_password: String,
-    /// Show an aggregated desktop notification after background refresh finds new articles.
+    /// 后台刷新发现新文章后显示聚合桌面通知。
     pub notify_on_new: bool,
-    /// Closing the main window hides it to the tray instead of quitting.
+    /// 关闭主窗口时隐藏到托盘而非退出应用。
     pub close_to_tray: bool,
-    /// Auto-delete unstarred read articles older than N days; 0 = never.
+    /// 自动清理超过 N 天的未加星标已读文章；0 表示永不清理。
     pub retention_days: u32,
-    /// Cap unstarred articles kept per source; 0 = unlimited.
+    /// 每个订阅源保留的未加星标文章数量上限；0 表示无限制。
     pub max_items_per_source: u32,
-    /// Allow favicon lookup via third-party services (Google/DUCKDUCKGO),
-    /// which discloses subscribed domains to them. Off = origin servers only.
+    /// 允许通过第三方服务（Google / DuckDuckGo）查询网站图标，
+    /// 这会将订阅域名暴露给对应服务。关闭则仅从源服务器获取。
     #[serde(default = "default_favicon_third_party")]
     pub favicon_third_party: bool,
-    /// Cloud sync account; None = pure local mode.
+    /// 云同步账户；None 表示纯本地模式。
     pub sync_account: Option<SyncAccount>,
 }
 
@@ -337,7 +337,7 @@ impl Default for Settings {
             version: env!("CARGO_PKG_VERSION").to_string(),
             theme: "system".into(),
             view: "cards".into(),
-            // Empty means "not chosen yet"; the frontend fills it from the system locale.
+            // 为空表示“尚未选择”，前端将根据系统区域语言自动填充。
             locale: String::new(),
             ui_scale: 100.0,
             font_size: 16.0,
@@ -369,12 +369,12 @@ fn default_ui_scale() -> f64 {
     100.0
 }
 
-/// Default value for allowing third-party favicon lookup.
+/// 是否允许第三方网站图标查询的默认值。
 fn default_favicon_third_party() -> bool {
     true
 }
 
-/// Strip all HTML tags, keeping only text.
+/// 剥离所有 HTML 标签，仅保留纯文本。
 pub fn html_to_text(html: &str) -> String {
     ammonia::Builder::new()
         .tags(std::collections::HashSet::new())

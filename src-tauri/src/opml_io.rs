@@ -8,9 +8,9 @@ pub struct ImportResult {
     pub sources_existing: usize,
 }
 
-/// Normalize a feed URL for duplicate detection: trim, default to https,
-/// lowercase scheme + host (via the URL parser), drop credentials/fragment
-/// and trailing slashes. Unparseable input falls back to the trimmed string.
+/// 规范化订阅源 URL 用于查重：去除首尾空格、默认补充 https 协议、
+/// 方案及主机名转为小写（通过 URL 解析器）、剥离凭据与 URL 片段、
+/// 移除末尾斜杠。无法解析的输入回退至去空格后的原字符串。
 pub fn normalize_feed_url(raw: &str) -> String {
     let trimmed = raw.trim();
     let with_scheme = if trimmed.contains("://") {
@@ -34,8 +34,8 @@ pub fn normalize_feed_url(raw: &str) -> String {
 pub fn import(conn: &rusqlite::Connection, text: &str) -> Result<ImportResult, String> {
     let doc = opml::OPML::from_str(text).map_err(|e| format!("invalid OPML: {e}"))?;
     let mut result = ImportResult { groups_added: 0, sources_added: 0, sources_existing: 0 };
-    // Seed the dedup set with normalized existing URLs (exact-match lookups
-    // alone miss http/https or trailing-slash variants of the same feed).
+    // 用已规范化的既有订阅源 URL 初始化去重集合（单纯的精确匹配
+    // 可能会遗漏相同订阅源的 http/https 或带末尾斜杠的变体）。
     let mut seen: HashSet<String> = db::get_sources(conn)
         .map_err(|e| e.to_string())?
         .iter()
@@ -63,9 +63,9 @@ fn walk_outline(
         return Ok(());
     }
 
-    // A folder maps to its own group, so nested folders keep their structure
-    // (one group per level; the DB has no nesting). A folder that also
-    // carries a feed URL imports that feed under the *parent* group.
+    // 文件夹映射为其独立的分组，以便嵌套文件夹保留层级结构
+    // （每层一个分组；数据库不支持分组嵌套）。同时携带
+    // 订阅源 URL 的文件夹节点会将该源导入到 *父级* 分组下。
     if let Some(url) = feed_url {
         import_source(conn, url, &outline.text, parent_group, seen, result)?;
     }
@@ -159,8 +159,8 @@ mod tests {
 
     #[test]
     fn normalize_unifies_variants() {
-        // Given: textual variants of the same feed
-        // When/Then: all normalize identically
+        // 给定：同一订阅源的文本变体
+        // 当/那么：全部规范化为相同字符串
         let a = normalize_feed_url("https://Example.COM/feed.xml/");
         let b = normalize_feed_url("https://example.com/feed.xml");
         let c = normalize_feed_url("example.com/feed.xml");
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn nested_folders_keep_structure_and_dedup() {
-        // Given: two-level folders plus a URL duplicate with trailing slash
+        // 给定：两层文件夹外加一个带末尾斜杠的重复 URL
         let conn = mem_db();
         let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0"><head><title>subs</title></head><body>
@@ -180,9 +180,9 @@ mod tests {
 <outline text="Tech" xmlUrl="https://a.example/feed.xml/"/>
 <outline text="Loose" xmlUrl="https://c.example/feed"/>
 </body></opml>"#;
-        // When: imported
+        // 当：导入时
         let r = import(&conn, doc).unwrap();
-        // Then: each folder level became a group, feeds landed, slash-variant deduped
+        // 那么：各层文件夹转为分组，订阅源成功导入，斜杠变体被去重
         assert_eq!(r.groups_added, 2);
         assert_eq!(r.sources_added, 3);
         assert_eq!(r.sources_existing, 1);
@@ -193,7 +193,7 @@ mod tests {
         let go = sources.iter().find(|s| s.title == "Go blog").unwrap();
         let go_group = groups.iter().find(|g| g.name == "Go").unwrap();
         assert_eq!(go.group_id, Some(go_group.id));
-        // The nested feed sits one level down from the top folder, not flattened.
+        // 嵌套订阅源位于顶层文件夹下一级，未被错误扁平化。
         let tech_group = groups.iter().find(|g| g.name == "Tech").unwrap();
         let rust = sources.iter().find(|s| s.url == "https://a.example/feed.xml").unwrap();
         assert_eq!(rust.group_id, Some(tech_group.id));

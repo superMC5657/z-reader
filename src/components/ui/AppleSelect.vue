@@ -50,7 +50,7 @@ function openMenu(e: MouseEvent) {
     },
   }))
 
-  // Anchor menu: right-align if trigger is on the right side of the screen/container
+  // 定位菜单：若触发按钮位于屏幕或容器右半侧，则采用右对齐
   const estimatedMenuWidth = Math.max(rect.width, props.compact ? 120 : 150)
   const isRightSide = rect.left > window.innerWidth / 2 || rect.right + 20 > window.innerWidth
   const posX = isRightSide

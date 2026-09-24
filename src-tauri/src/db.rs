@@ -194,10 +194,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// Current schema version; bump when adding a migration block above.
+/// 当前数据库架构版本；若在上方追加迁移块请同步递增此版本号。
 pub const CURRENT_VERSION: i64 = 5;
 
-/// Test helper so other modules' tests can build a fully-migrated in-memory DB.
+/// 测试辅助函数，供其他模块的单元测试构建完成全部迁移的内存数据库。
 #[cfg(test)]
 pub fn migrate_for_tests(conn: &Connection) -> Result<(), String> {
     migrate(conn)
@@ -475,14 +475,14 @@ pub struct UpsertEntry<'a> {
     pub summary: Option<&'a str>,
     pub snippet: Option<&'a str>,
     pub image: Option<&'a str>,
-    /// Pre-applied rule-engine flags, applied only when a new row is created.
+    /// 预先应用的规则引擎标志位，仅在新建数据行时生效。
     pub has_been_read: bool,
     pub starred: bool,
     pub hidden: bool,
 }
 
-/// Insert an entry, skipping if (source_id, guid) already exists.
-/// Returns true when a new row was created.
+/// 插入一条文章，若 (source_id, guid) 已存在则跳过。
+/// 若创建了新数据行则返回 true。
 pub fn insert_item(conn: &Connection, source_id: i64, e: &UpsertEntry) -> Result<bool, String> {
     let n = conn
         .execute(
@@ -510,19 +510,19 @@ pub fn insert_item(conn: &Connection, source_id: i64, e: &UpsertEntry) -> Result
 }
 
 pub fn get_items(conn: &Connection, p: &crate::models::GetItemsParams) -> Result<Vec<Item>, String> {
-    // FTS5 MATCH syntax from user input can be rejected; fall back to LIKE on any error.
+    // 用户输入的 FTS5 MATCH 语法可能会被拒绝；发生任何错误时回退到 LIKE 模糊查询。
     match get_items_impl(conn, p, true) {
         Ok(items) => Ok(items),
         Err(_) => {
-            // Static message only: the rejected MATCH text is user input and
-            // never enters logs.
+            // 仅使用静态日志消息：被拒绝的 MATCH 文本属于用户输入，
+            // 绝不记入日志。
             log::warn!("items fts match rejected, like fallback");
             get_items_impl(conn, p, false)
         }
     }
 }
 
-/// Build a safe FTS5 MATCH expression: each whitespace token is quoted, joined with AND.
+/// 构建安全的 FTS5 MATCH 表达式：每个空格分词均被双引号包裹，并用 AND 连接。
 fn fts_match_query(q: &str) -> Option<String> {
     let tokens: Vec<String> = q
         .split_whitespace()
@@ -561,7 +561,7 @@ fn get_items_impl(
     match p.filter.unwrap_or(0) {
         1 => conditions.push("has_been_read = 0 AND hidden = 0".into()),
         2 => conditions.push("starred = 1 AND hidden = 0".into()),
-        // 3 = hidden-only review list used by the rules editor
+        // 3 = 仅隐藏文章的审查列表，供规则编辑器使用
         3 => conditions.push("hidden = 1".into()),
         _ => conditions.push("hidden = 0".into()),
     }
@@ -579,9 +579,9 @@ fn get_items_impl(
                 }
             }
             if !matched {
-                // LIKE fallback mirrors the FTS index shape (title/summary/
-                // content) plus author, so results stay consistent when FTS
-                // rejects the query syntax.
+                // LIKE 回退查询镜像了 FTS 索引字段（标题/摘要/正文）
+                // 并补充了作者字段，确保在 FTS 拒绝查询语法时
+                // 搜索结果保持一致。
                 for _ in 0..4 {
                     args.push(Box::new(format!("%{q}%")));
                 }
@@ -684,7 +684,7 @@ pub fn set_item_content(conn: &Connection, id: i64, content: &str, snippet: &str
     Ok(())
 }
 
-// ---------- Regex rules ----------
+// ---------- 正则规则 ----------
 
 fn row_to_rule(row: &Row) -> rusqlite::Result<crate::models::Rule> {
     Ok(crate::models::Rule {
@@ -766,7 +766,7 @@ pub fn delete_rule(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-// ---------- Stats & retention ----------
+// ---------- 统计与数据保留 ----------
 
 pub fn total_unread(conn: &Connection) -> Result<i64, String> {
     conn.query_row(
@@ -782,8 +782,8 @@ pub fn item_count(conn: &Connection) -> Result<i64, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Apply the retention policy: drop unstarred articles past the retention
-/// window, then cap each source's unstarred history. Returns deleted count.
+/// 应用数据保留策略：清理超出保留时间窗口的未加星标文章，
+/// 随后限制每个订阅源的未加星标历史文章数量。返回已删除的文章数量。
 pub fn cleanup_retention(
     conn: &Connection,
     retention_days: u32,
@@ -803,9 +803,9 @@ pub fn cleanup_retention(
             .map_err(|e| e.to_string())?;
     }
     if max_per_source > 0 {
-        // One statement for all sources: rank every row within its source by
-        // recency and drop unstarred rows past the per-source cap. Starred
-        // rows are never deleted even when they sit inside the keep window.
+        // 针对所有订阅源的单条语句：在各订阅源内部按时间倒序排列，
+        // 删除超出单源上限的未加星标数据行。星标文章绝不删除，
+        // 即使它们位于保留范围之外。
         deleted += tx
             .execute(
                 "DELETE FROM items WHERE starred = 0 AND id IN (
@@ -828,7 +828,7 @@ pub fn vacuum(conn: &Connection) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-// ---------- Cloud sync ----------
+// ---------- 云端同步 ----------
 
 pub fn get_group(conn: &Connection, id: i64) -> Result<Option<Group>, String> {
     conn.query_row(
@@ -931,12 +931,11 @@ pub fn set_source_remote(conn: &Connection, source_id: i64, remote_id: Option<&s
     Ok(())
 }
 
-/// Insert or reconcile one remote article. Matching order: by remote id, then
-/// by (source, url) for rows that were fetched locally before linking. On
-/// match the remote read/starred state overwrites local (server wins / LWW),
-/// OR-ed with the caller's rule-engine flags (mark_read/star/hide from local
-/// rules apply on top); otherwise a new row is inserted. Returns true when a
-/// new row was created.
+/// 插入或对齐单篇远端文章。匹配顺序：优先按远端 ID，其次按 (source, url)
+/// 匹配在绑定同步前已从本地抓取的数据行。匹配成功时远端已读/加星状态
+/// 将覆盖本地（服务端优先 / LWW 规则），并与调用方的规则引擎标志位进行逻辑或
+/// （本地规则的标记已读/加星/隐藏叠加生效）；若未匹配则插入新数据行。
+/// 若创建了新数据行则返回 true。
 pub struct RemoteItemUpsert<'a> {
     pub remote_id: &'a str,
     pub source_id: i64,
@@ -949,7 +948,7 @@ pub struct RemoteItemUpsert<'a> {
     pub snippet: Option<&'a str>,
     pub has_been_read: bool,
     pub starred: bool,
-    /// Rule-engine "hide" flag (excluded from normal lists).
+    /// 规则引擎“隐藏”标志（从常规列表中排除）。
     pub hidden: bool,
 }
 
@@ -989,7 +988,7 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     r.source_id,
-                    r.remote_id, // guid: stable per source
+                    r.remote_id, // guid：单个订阅源内稳定唯一
                     r.title,
                     r.url,
                     r.author,
@@ -1017,8 +1016,8 @@ pub struct QueueEntry {
     pub target: String,
 }
 
-/// Queue one action per item, skipping items without a remote id.
-/// Returns the queued count.
+/// 为每篇文章加入一条操作队列记录，跳过没有远端 ID 的文章。
+/// 返回入队的操作条数。
 pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAction) -> Result<usize, String> {
     let mut n = 0usize;
     for id in item_ids {
@@ -1037,7 +1036,7 @@ pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAct
     Ok(n)
 }
 
-/// Queue a stream-level action (e.g. mark-all-read for feed/label/reading-list).
+/// 入队一个流级别的操作（例如对整个 feed / label / reading-list 全部标记为已读）。
 pub fn enqueue_stream_action(conn: &Connection, action: SyncAction, target: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sync_queue (action, target, created_at) VALUES (?1, ?2, ?3)",
@@ -1115,13 +1114,13 @@ mod tests {
         for i in 1..=5 {
             insert_item(&conn, s.id, &item(&format!("g{i}"), "t", "x", i, false, false, false)).unwrap();
         }
-        // Given: newest-first ordering (published_at 5..1)
-        // When: fetched in limit-2 pages
+        // 给定：按时间从新到旧排序（published_at 5..1）
+        // 当：以每页 2 条进行分页获取时
         let page = |offset| {
             get_items(&conn, &GetItemsParams { limit: Some(2), offset: Some(offset), ..Default::default() }).unwrap()
         };
         let (p0, p1, p2) = (page(0), page(2), page(4));
-        // Then: pages tile the full list with no overlap and no gaps
+        // 那么：各页平铺完整列表，无重叠且无遗漏
         let ids = |v: Vec<Item>| v.into_iter().map(|i| i.guid).collect::<Vec<_>>();
         assert_eq!(ids(p0), vec!["g5".to_string(), "g4".to_string()]);
         assert_eq!(ids(p1), vec!["g3".to_string(), "g2".to_string()]);
@@ -1153,8 +1152,8 @@ mod tests {
         )
         .unwrap();
 
-        // Given: the FTS path is unavailable (simulates a rejected MATCH query)
-        // When/Then: author and summary still match via the LIKE fallback
+        // 给定：FTS 路径不可用（模拟被拒绝的 MATCH 查询）
+        // 当/那么：通过 LIKE 回退仍然能匹配到作者和摘要
         for q in ["Austen", "unique-summary-xyz", "boring", "plain"] {
             let found = get_items_impl(
                 &conn,
@@ -1173,16 +1172,16 @@ mod tests {
 
         let s = insert_source(&conn, "https://example.com/1", "Source 1", None, None).expect("insert");
 
-        // Given: a failed fetch with a reason
+        // 给定：一次附带原因的失败抓取
         mark_source_fetched(&conn, s.id, false, Some("HTTP 503")).expect("mark failed");
-        // Then: error count bumps and the reason is persisted
+        // 那么：错误计数递增且错误原因被持久化
         let fetched = get_source(&conn, s.id).expect("get source");
         assert_eq!(fetched.error_count, 1);
         assert_eq!(fetched.last_error.as_deref(), Some("HTTP 503"));
 
-        // Given: a later success
+        // 给定：后续成功抓取
         mark_source_fetched(&conn, s.id, true, None).expect("mark ok");
-        // Then: counters clear and the stale reason is gone
+        // 那么：计数器清零且过期的错误原因被清除
         let fetched = get_source(&conn, s.id).expect("get source");
         assert_eq!(fetched.error_count, 0);
         assert_eq!(fetched.last_error, None);
@@ -1197,7 +1196,7 @@ mod tests {
         let source1 = insert_source(&conn, "https://example.com/1", "Source 1", None, Some(group.id)).expect("insert source 1");
         let source2 = insert_source(&conn, "https://example.com/2", "Source 2", None, None).expect("insert source 2");
 
-        // Insert unread items
+        // 插入未读文章
         conn.execute(
             "INSERT INTO items (source_id, guid, title, published_at, content, snippet, has_been_read, starred, created_at) VALUES (?1, 'g1', 'Title 1', 100, 'Content', 'Snippet', 0, 0, 100)",
             params![source1.id],
@@ -1207,15 +1206,15 @@ mod tests {
             params![source2.id],
         ).expect("insert item 2");
 
-        // Mark by source
+        // 按订阅源标记已读
         let count = mark_all_read(&conn, Some("source"), Some(source1.id)).expect("mark by source");
         assert_eq!(count, 1);
 
-        // Mark by group
+        // 按分组标记已读
         let count = mark_all_read(&conn, Some("group"), Some(group.id)).expect("mark by group");
         assert_eq!(count, 1);
 
-        // Mark all (global) - this was the broken branch
+        // 全部标记已读（全局）
         let count = mark_all_read(&conn, None, None).expect("mark all read");
         assert_eq!(count, 2);
     }
@@ -1255,24 +1254,24 @@ mod tests {
         insert_item(&conn, s.id, &item("g1", "Rust async guide", "<p>tokio runtime deep dive</p>", 100, false, false, false)).unwrap();
         insert_item(&conn, s.id, &item("g2", "cooking blog", "pasta recipe", 200, false, false, true)).unwrap();
 
-        // FTS matches across title and content with AND-combined tokens
+        // FTS 通过 AND 组合分词跨标题和正文匹配
         let found = get_items(&conn, &GetItemsParams { search: Some("tokio dive".into()), ..Default::default() }).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].guid, "g1");
 
-        // hidden items stay out of the normal list but show up under filter=3
+        // 隐藏文章排除在常规列表之外，但在 filter=3 时展示
         let all = get_items(&conn, &GetItemsParams::default()).unwrap();
         assert_eq!(all.len(), 1);
         let hidden = get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap();
         assert_eq!(hidden.len(), 1);
         assert_eq!(hidden[0].guid, "g2");
 
-        // full-content updates flow into the FTS index via trigger
+        // 全文更新通过触发器同步更新到 FTS 索引
         set_item_content(&conn, found[0].id, "quantum computing", "quantum").unwrap();
         let found2 = get_items(&conn, &GetItemsParams { search: Some("quantum".into()), ..Default::default() }).unwrap();
         assert_eq!(found2.len(), 1);
 
-        // deletes flow into the FTS index via trigger (cascade from source)
+        // 删除操作通过触发器同步清除 FTS 索引（从订阅源级联删除）
         remove_source(&conn, s.id).unwrap();
         let found3 = get_items(&conn, &GetItemsParams { search: Some("quantum".into()), ..Default::default() }).unwrap();
         assert!(found3.is_empty());
@@ -1291,7 +1290,7 @@ mod tests {
         insert_item(&conn, s.id, &item("c", "recent read", "x", now - 10 * day, true, false, false)).unwrap();
         insert_item(&conn, s.id, &item("d", "old hidden", "x", now - 100 * day, false, false, true)).unwrap();
 
-        // 30-day retention: old unstarred (read or hidden) go, starred stays
+        // 30天保留策略：旧的未加星标文章（已读或隐藏）被删除，星标文章保留
         let deleted = cleanup_retention(&conn, 30, 0).unwrap();
         assert_eq!(deleted, 2);
         let hidden_list = get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap();
@@ -1301,11 +1300,11 @@ mod tests {
         assert!(remaining.iter().any(|i| i.guid == "b"));
         assert!(remaining.iter().any(|i| i.guid == "c"));
 
-        // per-source cap keeps only the newest N unstarred items
+        // 单源数量上限仅保留最新的 N 篇未加星标文章
         for i in 0..4 {
             insert_item(&conn, s.id, &item(&format!("n{i}"), "recent", "x", now - i * 3600, false, false, false)).unwrap();
         }
-        // unstarred set = c (now-10d) + n0..n3 → cap 3 keeps n0..n2, drops n3 and c
+        // 未加星标集合 = c (10天前) + n0..n3 → 上限 3 保留 n0..n2，丢弃 n3 和 c
         let deleted = cleanup_retention(&conn, 0, 3).unwrap();
         assert_eq!(deleted, 2);
         let remaining = get_items(&conn, &GetItemsParams::default()).unwrap();
@@ -1328,7 +1327,7 @@ mod tests {
         let found = get_source_by_remote_id(&conn, "feed/2").unwrap().unwrap();
         assert_eq!(found.id, s.id);
 
-        // first upsert inserts a row carrying the remote read state
+        // 首次 upsert 插入带有远端已读状态的数据行
         let inserted = upsert_remote_item(
             &conn,
             &RemoteItemUpsert {
@@ -1349,7 +1348,7 @@ mod tests {
         .unwrap();
         assert!(inserted);
 
-        // second pull with changed server state: LWW overwrite, no new row
+        // 第二次拉取且服务端状态发生变化：LWW 覆盖，不产生新行
         let again = upsert_remote_item(
             &conn,
             &RemoteItemUpsert {
@@ -1374,7 +1373,7 @@ mod tests {
         assert!(!items[0].has_been_read);
         assert!(items[0].starred);
 
-        // a pre-existing local row (no remote id) is matched by (source, url)
+        // 本地既有数据行（无远端 ID）通过 (source, url) 成功关联匹配
         insert_item(&conn, s.id, &item("local", "local row", "x", 50, false, false, false)).unwrap();
         conn.execute(
             "UPDATE items SET url='https://e.example/b' WHERE guid='local'",
@@ -1409,8 +1408,8 @@ mod tests {
             .unwrap();
         assert_eq!(rid.as_deref(), Some("def"));
 
-        // queue: actions for items without a remote id are skipped
-        let with_remote = items[0].id; // matched by remote id "abc"
+        // 同步队列：无远端 ID 的文章操作被跳过
+        let with_remote = items[0].id; // 匹配远端 ID "abc"
         insert_item(&conn, s.id, &item("plain", "never synced", "x", 40, false, false, false)).unwrap();
         let no_remote: i64 = conn
             .query_row("SELECT id FROM items WHERE guid='plain'", [], |row| row.get(0))
@@ -1427,24 +1426,24 @@ mod tests {
         queue_clear(&conn).unwrap();
         assert_eq!(queue_len(&conn).unwrap(), 0);
 
-        // sync_state cursor roundtrip
+        // sync_state 游标往返测试
         assert_eq!(get_state(&conn, "greader.last_sync").unwrap(), None);
         set_state(&conn, "greader.last_sync", "123").unwrap();
         set_state(&conn, "greader.last_sync", "456").unwrap();
         assert_eq!(get_state(&conn, "greader.last_sync").unwrap().as_deref(), Some("456"));
 
-        // find_or_create_group is idempotent by name
+        // find_or_create_group 按名称具有幂等性
         let g1 = find_or_create_group(&conn, "Tech").unwrap();
         let g2 = find_or_create_group(&conn, "Tech").unwrap();
         assert_eq!(g1.id, g2.id);
 
-        // find_or_create_group_by_remote links existing name or creates new with remote_id
+        // find_or_create_group_by_remote 关联既有同名分组或创建带有 remote_id 的新分组
         let g3 = find_or_create_group_by_remote(&conn, "user/-/label/Tech", "Tech").unwrap();
         assert_eq!(g3.id, g1.id);
         assert_eq!(g3.remote_id.as_deref(), Some("user/-/label/Tech"));
         assert_eq!(get_group_by_remote_id(&conn, "user/-/label/Tech").unwrap().map(|g| g.id), Some(g1.id));
 
-        // remote rename updates local name
+        // 远端重命名同步更新本地名称
         let g4 = find_or_create_group_by_remote(&conn, "user/-/label/Tech", "Technology").unwrap();
         assert_eq!(g4.id, g1.id);
         assert_eq!(g4.name, "Technology");

@@ -9,7 +9,7 @@ import Switch from './ui/Switch.vue'
 import Icon from './ui/Icon.vue'
 
 const props = defineProps<{
-  /** null = create a new rule */
+  /** null 表示新建规则 */
   rule: Rule | null
   sources: Source[]
   groups: Group[]

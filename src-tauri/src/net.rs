@@ -1,6 +1,6 @@
 use crate::models::Settings;
 
-/// Extract host and sanitized path (stripping sensitive query params like tokens/keys/passwords)
+/// 提取主机名和脱敏路径（剥离诸如 token/key/password 等敏感查询参数）
 pub fn sanitize_url(raw_url: &str) -> (String, String) {
     if let Ok(mut u) = url::Url::parse(raw_url) {
         let host = u.host_str().unwrap_or("unknown").to_string();
@@ -42,8 +42,8 @@ pub fn sanitize_url(raw_url: &str) -> (String, String) {
     }
 }
 
-/// Generate an 8-char hex cycle id (no new deps: nanos + pid mix).
-/// Used to correlate all log lines of one refresh/sync cycle.
+/// 生成 8 字符的十六进制周期 ID（无需额外依赖：纳秒时间戳 + 进程 ID 混合）。
+/// 用于关联单次刷新/同步周期内的所有日志行。
 pub fn new_cycle() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
@@ -54,8 +54,8 @@ pub fn new_cycle() -> String {
     format!("{mixed:08x}")
 }
 
-/// Classify a one-line error into a stable `error_kind` for log aggregation.
-/// Never includes URLs/titles/bodies — input is already a short reason.
+/// 将单行错误信息归类为稳定的 `error_kind` 以便于日志聚合。
+/// 绝不包含 URL、标题或正文——入参已经是简短的原因描述。
 pub fn classify_error(msg: &str) -> &'static str {
     let s = msg.to_ascii_lowercase();
     if s.contains("timed out") || s.contains("timeout") || s.contains("deadline exceeded") {
@@ -106,9 +106,8 @@ pub fn classify_error(msg: &str) -> &'static str {
     "other"
 }
 
-/// Classify a reqwest transport error (timeout/dns/connect/body first,
-///
-/// fallback to string classification).
+/// 对 reqwest 传输层错误进行分类（优先判断超时/DNS/连接/响应体，
+/// 随后回退至字符串分类）。
 #[allow(dead_code)]
 pub fn reqwest_err_kind(e: &reqwest::Error) -> &'static str {
     if e.is_timeout() {
@@ -133,9 +132,9 @@ pub struct RequestLog {
     pub host: String,
     pub path: String,
     pub start: std::time::Instant,
-    /// 8-char cycle id; empty = omit from log line (backward compat).
+    /// 8 字符周期 ID；为空时在日志行中省略（保持向后兼容）。
     pub cycle: String,
-    /// Per-source id; None = omit.
+    /// 订阅源 ID；None 表示省略。
     pub source_id: Option<i64>,
 }
 
@@ -173,7 +172,7 @@ impl RequestLog {
         }
     }
 
-    /// ` cycle=abcd1234 id=7` — empty when no cycle/id (old callers).
+    /// ` cycle=abcd1234 id=7` —— 当没有周期 ID / 订阅源 ID 时为空（旧调用方兼容）。
     fn suffix(cycle: &str, source_id: Option<i64>) -> String {
         let mut s = String::new();
         if !cycle.is_empty() {
@@ -211,9 +210,9 @@ impl RequestLog {
         let suffix = self.suffix_self();
 
         if status.is_success() {
-            // Feed success back to debug (log-volume cut); per-feed INFO
-            // in lib.rs already carries destination + timing.
-            // favicon/other kinds stay debug.
+            // 订阅源抓取成功降级为 debug（减少日志量）；lib.rs 中每个源的
+            // INFO 日志已包含目标与耗时。
+            // favicon/其他类型保持 debug。
             log::debug!(
                 "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]{suffix}",
                 self.method,
@@ -304,10 +303,9 @@ pub async fn send_logged_with(
     }
 }
 
-/// One-line reason for a reqwest failure with the echoed request URL reduced
-/// to its host: reqwest's `Error` Display appends `for url (<full>)`, which
-/// would otherwise leak full URLs (query/userinfo) into logs. Callers still
-/// wrap the result in `short_reason` at the log site.
+/// 生成单行 reqwest 失败原因，并将回显的请求 URL 精简为主机名：reqwest 的
+/// `Error` Display 实现会追加 `for url (<full>)`，否则会将完整 URL（查询参数/用户信息）
+/// 泄漏到日志中。调用方在记录日志时仍应使用 `short_reason` 处理返回值。
 pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     let mut msg = e.to_string();
     if let Some(url) = e.url() {
@@ -321,8 +319,8 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     }
 }
 
-/// Validate a manual proxy URL before it is saved or tested, so a typo fails
-/// loudly instead of silently falling back to a direct connection.
+/// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
+/// 而非静默回退至直连。
 pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
     if settings.proxy_mode == "manual" {
         let url = settings.proxy_url.trim();
@@ -334,18 +332,17 @@ pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 
-/// Build the shared HTTP client honoring the user's proxy configuration.
+/// 根据用户的代理配置构建共享的 HTTP 客户端。
 ///
-/// Note: an invalid manual URL falls back to direct here silently; the
-/// settings and connectivity-test paths reject it upfront via
-/// [`validate_proxy`], so this branch only covers hand-edited config files.
+/// 注意：无效的手动代理 URL 在此处会静默回退至直连；设置保存与
+/// 连通性测试路径已通过 [`validate_proxy`] 进行了前置校验，因此该分支仅覆盖手动修改配置文件的情况。
 pub fn build_http_client(settings: &Settings) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; ZReader/0.2)")
         .timeout(std::time::Duration::from_secs(30));
 
     match settings.proxy_mode.as_str() {
-        // Explicitly bypass any system/env proxy.
+        // 显式绕过所有系统/环境变量代理。
         "none" => builder = builder.no_proxy(),
         "manual" => {
             let url = settings.proxy_url.trim();
@@ -360,7 +357,7 @@ pub fn build_http_client(settings: &Settings) -> reqwest::Client {
                 builder = builder.no_proxy();
             }
         }
-        // "system": keep reqwest defaults (env vars + OS proxy integration).
+        // "system"：保持 reqwest 默认行为（环境变量 + 操作系统代理集成）。
         _ => {}
     }
 
@@ -381,7 +378,7 @@ mod tests {
 
     #[test]
     fn builds_for_all_modes() {
-        // All modes must produce a usable client (or default fallback), never panic.
+        // 所有模式都必须生成可用的客户端（或默认回退），绝不能 panic。
         let _ = build_http_client(&settings("system", ""));
         let _ = build_http_client(&settings("none", ""));
         let _ = build_http_client(&settings("manual", ""));
@@ -396,8 +393,8 @@ mod tests {
 
     #[test]
     fn validate_proxy_rejects_bad_manual_url() {
-        // Given: manual mode with a typo'd URL
-        // When/Then: validation fails instead of silently going direct
+        // 给定：手动模式且 URL 存在拼写错误
+        // 当/那么：验证失败，而非静默回退到直连
         assert!(validate_proxy(&settings("manual", "not a url")).is_err());
         assert!(validate_proxy(&settings("manual", "")).is_err());
         assert!(validate_proxy(&settings("manual", "http://127.0.0.1:7890")).is_ok());

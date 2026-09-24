@@ -1,6 +1,6 @@
-/* Apple (macOS & iOS HIG) Design System */
+/* Apple (macOS & iOS HIG) 设计规范系统 */
 :root {
-  /* Apple System Colors */
+  /* Apple 系统色彩 */
   --accent: #007aff;
   --accent-hover: #0066d6;
   --accent-tint: rgba(0, 122, 255, 0.12);
@@ -12,7 +12,7 @@
   --warning: #ff9500;
   --star: #ff9f0a;
 
-  /* Surfaces & Backgrounds */
+  /* 表面与背景 */
   --bg: #f5f5f7;
   --bg-secondary: #ffffff;
   --bg-sidebar: rgba(236, 236, 240, 0.82);
@@ -28,26 +28,26 @@
   --bg-track: rgba(120, 120, 128, 0.12);
   --apple-switch-bg: rgba(120, 120, 128, 0.22);
 
-  /* Typography & Labels */
+  /* 排版与文字标签 */
   --text-primary: #1d1d1f;
   --text-secondary: #6e6e73;
   --text-tertiary: #86868b;
   --text-quaternary: #aeaeb2;
 
-  /* Borders & Dividers */
+  /* 边框与分割线 */
   --border: rgba(0, 0, 0, 0.08);
   --border-subtle: rgba(0, 0, 0, 0.04);
   --border-strong: rgba(0, 0, 0, 0.16);
   --border-card: rgba(0, 0, 0, 0.06);
 
-  /* Elevation & Shadows */
+  /* 阴影与层级 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.1);
   --shadow-segmented: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
 
-  /* Radii & Metrics */
+  /* 圆角与度量规格 */
   --radius-card: 14px;
   --radius-sheet: 16px;
   --radius-btn: 8px;
@@ -56,7 +56,7 @@
   --nav-width: 260px;
   --app-font-size: 15px;
 
-  /* Physics Transitions */
+  /* 物理动效过渡 */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-fast: cubic-bezier(0.2, 0, 0, 1);
   --glass-blur: blur(28px) saturate(180%);
@@ -64,7 +64,7 @@
 
 [data-theme='dark'] {
   color-scheme: dark;
-  /* Apple System Colors - Dark Mode */
+  /* Apple 系统色彩 - 深色模式 */
   --accent: #0a84ff;
   --accent-hover: #3697ff;
   --accent-tint: rgba(10, 132, 255, 0.2);
@@ -76,7 +76,7 @@
   --warning: #ffd60a;
   --star: #ffd60a;
 
-  /* Surfaces & Backgrounds - Dark Mode */
+  /* 表面与背景 - 深色模式 */
   --bg: #1c1c1e;
   --bg-secondary: #242426;
   --bg-sidebar: rgba(28, 28, 30, 0.82);
@@ -92,19 +92,19 @@
   --bg-track: rgba(120, 120, 128, 0.24);
   --apple-switch-bg: rgba(120, 120, 128, 0.32);
 
-  /* Typography & Labels - Dark Mode */
+  /* 排版与文字标签 - 深色模式 */
   --text-primary: #f5f5f7;
   --text-secondary: #a1a1a6;
   --text-tertiary: #7c7c80;
   --text-quaternary: #48484a;
 
-  /* Borders & Dividers - Dark Mode */
+  /* 边框与分割线 - 深色模式 */
   --border: rgba(255, 255, 255, 0.1);
   --border-subtle: rgba(255, 255, 255, 0.05);
   --border-strong: rgba(255, 255, 255, 0.2);
   --border-card: rgba(255, 255, 255, 0.08);
 
-  /* Elevation & Shadows - Dark Mode */
+  /* 阴影与层级 - 深色模式 */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
   --shadow-card-hover: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
@@ -164,7 +164,7 @@ button {
   outline: none;
 }
 
-/* Apple Native Inputs */
+/* Apple 原生输入框控件 */
 input,
 select,
 textarea {
@@ -233,7 +233,7 @@ input[type='range']:focus {
   box-shadow: none;
 }
 
-/* Apple Buttons */
+/* Apple 按钮样式 */
 .f-btn {
   display: inline-flex;
   align-items: center;
@@ -285,7 +285,7 @@ input[type='range']:focus {
   transform: none !important;
 }
 
-/* Apple Icon Buttons */
+/* Apple 图标按钮 */
 .f-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -323,7 +323,7 @@ input[type='range']:focus {
   transform: none !important;
 }
 
-/* Apple macOS Segmented Control */
+/* Apple macOS 分段控制器 */
 .segmented {
   display: inline-flex;
   background: var(--bg-track);
@@ -364,7 +364,7 @@ input[type='range']:focus {
   background: rgba(120, 120, 128, 0.45);
 }
 
-/* Apple Unread Dots & Badges */
+/* Apple 未读标记与小圆点 */
 .unread-dot {
   display: inline-block;
   width: 7.5px;
@@ -393,7 +393,7 @@ input[type='range']:focus {
   transition: opacity 0.2s ease;
 }
 
-/* Apple Native Overlay Scrollbars */
+/* Apple 原生浮动滚动条 */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -417,7 +417,7 @@ input[type='range']:focus {
   background: transparent;
 }
 
-/* Apple macOS Sheet Modal */
+/* Apple macOS 表单工作表弹窗 */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -488,7 +488,7 @@ input[type='range']:focus {
   background: var(--bg-card-secondary);
 }
 
-/* Apple Inset Grouped Rows */
+/* Apple 内嵌分组列表行 */
 .grouped-inset-box {
   background: var(--bg-card);
   border-radius: 12px;
@@ -527,7 +527,7 @@ input[type='range']:focus {
   color: var(--text-tertiary);
 }
 
-/* Animations */
+/* 动画定义 */
 @keyframes appleSheetIn {
   0% {
     opacity: 0;
@@ -559,7 +559,7 @@ input[type='range']:focus {
   animation: spin 0.85s linear infinite;
 }
 
-/* Search result highlight (used via v-html in list views) */
+/* 搜索结果高亮（用于列表视图中的 v-html） */
 mark {
   background: var(--accent-tint);
   color: var(--accent);

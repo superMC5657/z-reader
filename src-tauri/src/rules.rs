@@ -3,8 +3,7 @@ use crate::models::{html_to_text, Rule, RuleActionType, RuleSourceScope, RuleTar
 use regex::{Regex, RegexSet};
 use rusqlite::{params, Connection};
 
-/// A group of rules targeting the same field, compiled into a single `RegexSet`
-/// for single-pass batch matching.
+/// 针对同一目标字段的一组规则，编译为单个 `RegexSet` 以支持单遍批量匹配。
 struct FieldRuleGroup {
     rules: Vec<Rule>,
     set: Option<RegexSet>,
@@ -33,7 +32,7 @@ impl FieldRuleGroup {
     }
 }
 
-/// Compiled, enabled rules ready for evaluation.
+/// 已编译且已启用的规则集合，可直接用于执行评估。
 pub struct RuleEngine {
     title_rules: FieldRuleGroup,
     content_rules: FieldRuleGroup,
@@ -43,7 +42,7 @@ pub struct RuleEngine {
     total_rules: usize,
 }
 
-/// Actions to apply to a single article after rule evaluation.
+/// 规则评估后针对单篇文章应用的动作结果。
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Outcome {
     pub mark_read: bool,
@@ -60,7 +59,7 @@ pub struct BackfillStats {
     pub notified: usize,
 }
 
-/// Compile the pattern with an inline `(?i)` flag when case-insensitive.
+/// 编译正则模式，若不区分大小写则在开头内联追加 `(?i)` 标志。
 pub fn compile_pattern(rule: &Rule) -> Result<Regex, String> {
     let mut pattern = String::new();
     if !rule.is_case_sensitive {
@@ -70,7 +69,7 @@ pub fn compile_pattern(rule: &Rule) -> Result<Regex, String> {
     Regex::new(&pattern).map_err(|e| format!("invalid regex: {e}"))
 }
 
-/// Context bundled for evaluating rules against an article.
+/// 规则评估上下文，打包了针对单篇文章匹配所需的所有字段信息。
 #[derive(Debug, Clone)]
 pub struct ArticleEvalContext<'a> {
     pub source_id: i64,
@@ -83,7 +82,7 @@ pub struct ArticleEvalContext<'a> {
 }
 
 impl RuleEngine {
-    /// Load and compile all enabled rules into field-specific RegexSet groups.
+    /// 从数据库加载并编译所有已启用的规则，按字段归类为多个 RegexSet 组。
     pub fn load(conn: &Connection) -> Result<Self, String> {
         let all = db::get_rules(conn)?;
         let mut title_rules = Vec::new();
@@ -143,7 +142,7 @@ impl RuleEngine {
         }
     }
 
-    /// Evaluate all applicable rules against one article context.
+    /// 针对单篇文章上下文评估所有适用的规则。
     pub fn evaluate(&self, ctx: &ArticleEvalContext<'_>) -> Outcome {
         let mut out = Outcome::default();
         if self.total_rules == 0 {
@@ -212,10 +211,9 @@ impl RuleEngine {
     }
 }
 
-/// Apply all rules to existing articles in a single pass.
-/// Rows stream through in id pages (bounded memory on large archives) while
-/// only id lists accumulate; flag writes go out as batched IN-statements in
-/// one transaction instead of one UPDATE per row.
+/// 单遍扫描并将所有规则应用到现有文章（历史回溯）。
+/// 数据行按 ID 分页流式处理（在大型归档下保证内存受限），仅累积 ID 列表；
+/// 标志位写入在单个事务中通过分批 IN 语句批量提交，而非逐行单独执行 UPDATE。
 pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats, String> {
     struct Row {
         id: i64,
@@ -289,7 +287,7 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
             }
             if out.hide {
                 to_hide.push(r.id);
-                // Hidden articles leave the reading flow entirely.
+                // 隐藏文章完全脱离阅读流（同时标记为已读）。
                 if !out.mark_read {
                     to_read.push(r.id);
                 }
@@ -312,8 +310,8 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
     Ok(stats)
 }
 
-/// Set one flag column for many rows with chunked `WHERE id IN` statements.
-/// `column` is always an internal constant, never user input.
+/// 使用分批 `WHERE id IN` 语句为多行批量设置某个布尔标志位列。
+/// `column` 始终为内部常量，绝非用户输入。
 fn batch_set_flag(
     tx: &rusqlite::Transaction,
     column: &str,
@@ -366,7 +364,7 @@ mod tests {
         let s = crate::db::insert_source(&conn, "https://s.example", "S", None, Some(g.id)).unwrap();
         let s2 = crate::db::insert_source(&conn, "https://t.example", "T", None, None).unwrap();
 
-        // case-insensitive title rule scoped to group G
+        // 作用于分组 G 且不区分大小写的标题规则
         let _r1 = crate::db::create_rule(&conn, &rule_input("ad", "广告|ADs?", RuleTargetField::Title, RuleActionType::MarkRead, false, RuleSourceScope::All)).unwrap();
         let _r2 = crate::db::create_rule(&conn, &rule_input("star-release", "重磅", RuleTargetField::Any, RuleActionType::Star, false, RuleSourceScope::Source(s.id))).unwrap();
         let _r3 = crate::db::create_rule(&conn, &rule_input("hide-spam", "casino", RuleTargetField::Content, RuleActionType::Hide, false, RuleSourceScope::All)).unwrap();
@@ -375,7 +373,7 @@ mod tests {
         let engine = RuleEngine::load(&conn).unwrap();
         assert_eq!(engine.len(), 4);
 
-        // matches case-insensitively
+        // 不区分大小写匹配
         let out = engine.evaluate(&ArticleEvalContext {
             source_id: s.id,
             group_id: Some(g.id),
@@ -387,7 +385,7 @@ mod tests {
         });
         assert!(out.mark_read && !out.star && !out.hide);
 
-        // scope-limited rule applies only to its source
+        // 受限作用域规则仅应用于指定订阅源
         let out_s = engine.evaluate(&ArticleEvalContext {
             source_id: s.id,
             group_id: Some(g.id),
@@ -409,7 +407,7 @@ mod tests {
         });
         assert!(!out_t.star);
 
-        // hide implies leaving list; content plain-text matching works over html
+        // 隐藏意味着离开列表；正文纯文本匹配能够穿透 HTML
         let out_h = engine.evaluate(&ArticleEvalContext {
             source_id: s.id,
             group_id: Some(g.id),
@@ -421,7 +419,7 @@ mod tests {
         });
         assert!(out_h.hide);
 
-        // case-sensitive rule does not match different case
+        // 区分大小写的规则不会匹配不同大小写
         let out_c = engine.evaluate(&ArticleEvalContext {
             source_id: s.id,
             group_id: Some(g.id),
@@ -446,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_backfill_pages_through_thousands() {
-        // Given: 2500 articles (multiple id pages) with every other matching
+        // 给定：2500 篇文章（跨多个 ID 分页），隔篇匹配
         let conn = Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
         let s = crate::db::insert_source(&conn, "https://s.example", "S", None, None).unwrap();
@@ -477,10 +475,10 @@ mod tests {
             )
             .unwrap();
         }
-        // When: backfilled
+        // 当：执行回溯应用时
         let engine = RuleEngine::load(&conn).unwrap();
         let stats = backfill(&conn, &engine).unwrap();
-        // Then: exactly the matching half is marked, nothing lost to paging
+        // 那么：恰好匹配的一半被标记，分页过程中无遗漏
         assert_eq!(stats.marked_read, 1250);
         let remaining = crate::db::get_items(
             &conn,

@@ -17,8 +17,8 @@ pub(crate) fn favicon_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// First line of an error message, truncated: reasons never carry file paths,
-/// URLs, tokens or article text.
+/// 截取错误消息的第一行：原因描述中绝不包含文件路径、
+/// URL、令牌或文章文本。
 fn short_reason(msg: &str) -> String {
     const MAX_CHARS: usize = 160;
     let first = msg.lines().next().unwrap_or("").trim();
@@ -29,7 +29,7 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
-/// Basename only: full file paths never enter logs.
+/// 仅保留文件名（基础名称）：完整文件路径绝不写入日志。
 fn file_base(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -78,7 +78,7 @@ pub async fn set_group_expanded(state: State<'_, AppState>, id: i64, expanded: b
     db::set_group_expanded(&conn, id, expanded)
 }
 
-/// Validate the URL by fetching its feed, then persist the source and its entries.
+/// 通过抓取订阅源以验证 URL，随后持久化该订阅源及其文章条目。
 #[tauri::command]
 pub async fn add_source(
     app: AppHandle,
@@ -90,7 +90,7 @@ pub async fn add_source(
     if !url.contains("://") {
         url = format!("https://{url}");
     }
-    // Log host only: full URLs can carry tokens/query secrets.
+    // 仅记录主机名：完整 URL 可能包含令牌或查询参数等机密信息。
     let (host, _) = crate::net::sanitize_url(&url);
     log::info!("[CMD] action=add_source host={host}");
     let client = state.http_client();
@@ -102,7 +102,7 @@ pub async fn add_source(
         }
     }
 
-    // Probe without persisting: parse the remote feed to validate first.
+    // 探测而不立即持久化：先解析远端订阅源进行验证。
     let parsed = feed::fetch_and_parse(&client, &url).await.inspect_err(|e| {
         log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
     })?;
@@ -178,8 +178,8 @@ pub async fn set_custom_favicon(
     if bytes.is_empty() || bytes.len() > 5_000_000 {
         return Err("image data too large or empty".into());
     }
-    // Extension comes from the payload, never the data-URL hint: SVG and
-    // non-image uploads are rejected instead of being stored.
+    // 扩展名来自文件内容负载，绝非 data-URL 提示：SVG 和
+    // 非图片上传会被拒绝，不会被存储。
     let Some(ext) = crate::feed::sniff_image_ext(&bytes) else {
         return Err("unsupported image format (SVG is not accepted)".into());
     };
@@ -224,7 +224,7 @@ pub async fn refresh_favicon(
     }
 }
 
-/// Fetch all sources, or just the given ids. Emits "fetch-progress" / "fetch-done".
+/// 抓取所有订阅源或仅抓取指定的订阅源 ID。触发 "fetch-progress" / "fetch-done" 事件。
 #[tauri::command]
 pub async fn fetch_sources(app: AppHandle, ids: Option<Vec<i64>>) -> Result<usize, String> {
     crate::refresh_all_sources(app, ids, false).await
@@ -236,7 +236,7 @@ pub async fn get_items(
     params: GetItemsParams,
 ) -> Result<Vec<crate::models::Item>, String> {
     let conn = state.db.lock().await;
-    // The list never ships full article HTML; the reader loads it per-item via get_item.
+    // 列表绝不传输完整文章 HTML；阅读器通过 get_item 按篇加载。
     Ok(db::get_items(&conn, &params)?
         .into_iter()
         .map(|mut i| {
@@ -259,7 +259,7 @@ pub async fn mark_read(
     ids: Vec<i64>,
     read: bool,
 ) -> Result<(), String> {
-    // Count only, no titles: article titles never enter logs.
+    // 仅记录数量，不记标题：文章标题绝不写入日志。
     log::debug!("[CMD] action=mark_read count={} read={read}", ids.len());
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
@@ -280,7 +280,7 @@ pub async fn mark_all_read(
     scope: Option<String>,
     scope_id: Option<i64>,
 ) -> Result<(), String> {
-    // Scope ids only: feed/folder names never enter logs.
+    // 仅记录作用域 ID：订阅源/文件夹名称绝不写入日志。
     log::debug!(
         "[CMD] action=mark_all_read scope={} scope_id={:?}",
         scope.as_deref().unwrap_or("all"),
@@ -290,10 +290,9 @@ pub async fn mark_all_read(
     let conn = state.db.lock().await;
     db::mark_all_read(&conn, scope.as_deref(), scope_id)?;
     if acct.as_ref().is_some_and(|a| a.provider == "greader") {
-        // Map the scope to a remote stream and queue the server-side mark-all.
-        // Only streams the server actually knows (remote_id) are reported;
-        // fabricating a label stream for never-synced groups would push a
-        // bogus target.
+        // 将作用域映射到远端数据流，并将服务端“全部标记已读”操作入队。
+        // 仅上报服务端已知的数据流（remote_id）；
+        // 为从未同步过的分组伪造标签流会导致推送无效目标。
         let stream = match scope.as_deref() {
             Some("source") => db::get_source(&conn, scope_id.unwrap_or(-1))?.remote_id,
             Some("group") => db::get_group(&conn, scope_id.unwrap_or(-1))?
@@ -374,7 +373,7 @@ pub async fn save_settings(
     state: State<'_, AppState>,
     settings: Settings,
 ) -> Result<(), String> {
-    // No field details: proxy credentials/URLs never enter logs.
+    // 不记录字段详情：代理凭据与 URL 绝不写入日志。
     log::debug!("[CMD] action=save_settings");
     crate::net::validate_proxy(&settings)?;
     let path = settings_io::settings_path(&app)?;
@@ -389,8 +388,7 @@ pub async fn save_settings(
         state.set_http_client(crate::net::build_http_client(&settings));
     }
     if locale_changed {
-        // Tray menu labels are baked at creation; refresh them so the
-        // language switch applies outside the main window too.
+        // 托盘菜单标签在创建时固化；刷新托盘使语言切换在主窗口外部也能即时生效。
         crate::tray::update_tray(&app).await;
     }
     Ok(())
@@ -421,7 +419,7 @@ pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<ser
     }
 }
 
-/// Returns the OPML document as XML text for the frontend to download.
+/// 返回 OPML 文档的 XML 文本，供前端下载导出。
 #[tauri::command]
 pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
     let conn = state.db.lock().await;
@@ -437,12 +435,12 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
     }
 }
 
-// ---------- Proxy ----------
+// ---------- 代理设置 ----------
 
-/// Probe connectivity with candidate proxy settings (before they are saved).
-/// `target` is the URL actually fetched: the caller passes a failing feed URL
-/// when one exists so the test reflects real conditions, else a default probe.
-/// Returns the request latency in milliseconds.
+/// 使用候选代理设置探测连通性（在保存前测试）。
+/// `target` 为实际抓取的 URL：调用方在存在抓取失败的订阅源时传入该 URL
+/// 以反映真实网络状况，否则使用默认探测目标。
+/// 返回请求延迟（单位：毫秒）。
 #[tauri::command]
 pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
     log::debug!("[CMD] action=test_proxy");
@@ -477,10 +475,10 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     Ok(ms)
 }
 
-// ---------- Cloud Sync (Google Reader API) ----------
+// ---------- 云端同步（Google Reader API） ----------
 
-/// Validate credentials against the server and store the account on success.
-/// Returns the number of subscriptions on the server.
+/// 向服务器验证凭据，验证成功后保存账户。
+/// 返回服务器上的订阅源总数。
 #[tauri::command]
 pub async fn sync_login(
     app: AppHandle,
@@ -517,15 +515,15 @@ pub async fn sync_login(
     Ok(subs.len())
 }
 
-/// Disconnect the account. Local data is kept; queued (unpushed) actions are
-/// dropped because their target server is gone.
+/// 断开账户连接。本地数据予以保留；已入队（未推送）的操作将被丢弃，
+/// 因为其目标服务器已解除绑定。
 #[tauri::command]
 pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let path = settings_io::settings_path(&app)?;
     let mut s = settings_io::load(&path);
     s.sync_account = None;
     settings_io::save(&path, &s)?;
-    // Best effort: a stale account password must not survive next to logout.
+    // 尽力而为：退出登录后绝不能残留过期的账户密码。
     let _ = settings_io::clear_sync_secret(&path);
     crate::sync::clear_session(&state);
     {
@@ -552,7 +550,7 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
     }))
 }
 
-/// Run one manual sync cycle.
+/// 手动执行一次同步周期。
 #[tauri::command]
 pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     log::info!("[CMD] action=sync_now");
@@ -593,7 +591,7 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
     }))
 }
 
-// ---------- Regex Automation Rules ----------
+// ---------- 正则自动化规则 ----------
 
 fn validate_rule_input(r: &crate::models::RuleInput) -> Result<(), String> {
     if r.name.trim().is_empty() {
@@ -653,7 +651,7 @@ pub async fn delete_rule(state: State<'_, AppState>, id: i64) -> Result<(), Stri
     db::delete_rule(&conn, id)
 }
 
-/// Re-run all enabled rules over the whole article archive.
+/// 重新对整个文章归档库应用所有已启用的规则（历史回溯）。
 #[tauri::command]
 pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     log::debug!("[CMD] action=apply_rules_backfill");
@@ -688,7 +686,7 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
     }
 }
 
-// ---------- Backup & Restore ----------
+// ---------- 备份与恢复 ----------
 
 #[tauri::command]
 pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
@@ -728,7 +726,7 @@ async fn export_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     .await
     .map_err(|e| e.to_string())?;
     let Some(target) = target else {
-        return Ok(None); // dialog cancelled
+        return Ok(None); // 对话框已取消
     };
     let out_path = target.into_path().map_err(|e| e.to_string())?;
 
@@ -775,7 +773,7 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     .await
     .map_err(|e| e.to_string())?;
     let Some(picked) = picked else {
-        return Ok(None); // dialog cancelled
+        return Ok(None); // 对话框已取消
     };
     let archive_path = picked.into_path().map_err(|e| e.to_string())?;
 
@@ -791,31 +789,29 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     }
     crate::backup::validate_db(&restored_db)?;
 
-    // Stage the validated DB next to the live file (outside the lock so a
-    // slow copy doesn't block readers) and re-validate the staged copy.
+    // 将验证通过的数据库暂存到活跃文件旁（在锁外执行，避免耗时的文件拷贝阻塞读者），并重新验证暂存副本。
     let db_path = state.db_path.clone();
     let staged = db_path.with_extension("db.restoring");
     std::fs::copy(&restored_db, &staged).map_err(|e| e.to_string())?;
     crate::backup::validate_db(&staged)?;
 
-    // Snapshot the live DB for rollback (best effort; restore proceeds anyway).
+    // 为当前活跃数据库创建快照以备回滚（尽力而为；即使快照失败仍继续恢复）。
     let rollback = db_path.with_extension("db.pre-restore-bak");
     {
         let conn = state.db.lock().await;
         let _ = crate::backup::snapshot_live(&conn, &rollback);
     }
 
-    // Swap the database: drop the live connection, replace files, reopen
-    // (db::open runs migrations, so v1 backups are upgraded in place).
-    // Any failure restores the pre-restore snapshot, so the live data is
-    // never left in a half-replaced state.
+    // 切换数据库：释放活跃数据库连接、替换文件并重新打开
+    // （db::open 会执行迁移，因此旧版本备份会原地升级）。
+    // 发生任何失败均会回滚至恢复前的快照，保证活跃数据绝不会处于替换一半的状态。
     {
         let mut guard = state.db.lock().await;
         *guard = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
         let swapped: Result<(), String> = (|| {
             let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
             let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-            // Same-directory rename/copy is the atomic point; see replace_live.
+            // 同目录重命名/复制是原子操作的关键点；参见 replace_live。
             crate::backup::replace_live(&staged, &db_path)?;
             *guard = crate::db::open(&db_path)?;
             Ok(())
@@ -842,14 +838,14 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
         }
     }
 
-    // Settings + favicons land only after the DB swap succeeded.
+    // 仅在数据库切换成功后，才应用设置和网站图标。
     let restored_settings = tmp_dir.join(crate::backup::SETTINGS_ENTRY);
     if restored_settings.exists() {
         let settings_file = settings_io::settings_path(&app)?;
         std::fs::copy(&restored_settings, &settings_file).map_err(|e| e.to_string())?;
     }
 
-    // Favicons are plain files; copy them back over the live ones.
+    // 网站图标为普通文件；将其复制覆盖回现有文件。
     let restored_favicons = tmp_dir.join("favicons");
     if restored_favicons.is_dir() {
         let fav_dir = dir.join("favicons");
@@ -872,7 +868,7 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     Ok(Some(archive_path.to_string_lossy().to_string()))
 }
 
-// ---------- Storage Lifecycle & Stats ----------
+// ---------- 存储生命周期与统计 ----------
 
 #[tauri::command]
 pub async fn get_stats(_app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
@@ -897,8 +893,7 @@ pub async fn vacuum_now(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Apply the retention policy immediately, compacting only when something
-/// was actually deleted.
+/// 立即应用数据保留策略，仅在确实删除了文章时才执行数据库压缩（VACUUM）。
 #[tauri::command]
 pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
     let s = settings_io::load(&settings_io::settings_path(&app)?);

@@ -35,7 +35,7 @@ const ui = useUiStore()
 const showGroupModal = ref(false)
 const groupModalTitle = ref('')
 const groupModalName = ref('')
-let groupModalTarget: number | null = null // null = create new
+let groupModalTarget: number | null = null // null = 新建分组
 let modalMode: 'createGroup' | 'renameGroup' | 'renameSource' = 'createGroup'
 
 const ungroupedSources = computed(() => data.sources.filter((s) => s.groupId === null))
@@ -168,7 +168,7 @@ async function toggleExpand(gid: number) {
 
 <template>
   <nav class="side-nav">
-    <!-- macOS Window Chrome Traffic Lights & Header -->
+    <!-- macOS 窗口红绿灯控制按钮与标题栏 -->
     <div class="nav-header" data-tauri-drag-region>
       <div class="traffic-lights">
         <button
@@ -207,9 +207,9 @@ async function toggleExpand(gid: number) {
       </div>
     </div>
 
-    <!-- Navigation Body -->
+    <!-- 导航主体 -->
     <div class="nav-body">
-      <!-- All Items -->
+      <!-- 全部文章 -->
       <button
         class="nav-row all"
         :class="{ active: data.scope.type === 'all' }"
@@ -226,7 +226,7 @@ async function toggleExpand(gid: number) {
         <span>FEEDS</span>
       </div>
 
-      <!-- Groups -->
+      <!-- 分组列表 -->
       <template v-for="g in data.groups" :key="g.id">
         <div class="nav-row group" :class="{ active: data.scope.type === 'group' && data.scope.id === g.id }">
           <button class="chevron" @click="toggleExpand(g.id)">
@@ -243,7 +243,7 @@ async function toggleExpand(gid: number) {
           </button>
         </div>
 
-        <!-- Sources in Group -->
+        <!-- 分组内的订阅源 -->
         <template v-if="g.expanded">
           <button
             v-for="s in sourcesOf(g.id)"
@@ -263,7 +263,7 @@ async function toggleExpand(gid: number) {
 
       <div v-if="data.groups.length && ungroupedSources.length" class="divider"></div>
 
-      <!-- Ungrouped Sources -->
+      <!-- 未分组的订阅源 -->
       <button
         v-for="s in ungroupedSources"
         :key="s.id"
@@ -278,7 +278,7 @@ async function toggleExpand(gid: number) {
         <span v-if="s.unread" class="unread-badge">{{ s.unread }}</span>
       </button>
 
-      <!-- Hidden file input for uploading custom icon -->
+      <!-- 上传自定义图标的隐藏文件输入框 -->
       <input
         ref="iconFileInput"
         type="file"
@@ -287,7 +287,7 @@ async function toggleExpand(gid: number) {
         @change="onIconFileSelected"
       />
 
-      <!-- Empty State -->
+      <!-- 空状态 -->
       <div v-if="!data.sources.length" class="empty-hint">
         <Icon name="rss" :size="24" color="var(--text-quaternary)" />
         <p>{{ t('nav.noSources') }}</p>
@@ -295,7 +295,7 @@ async function toggleExpand(gid: number) {
       </div>
     </div>
 
-    <!-- macOS Frosted Bottom Bar -->
+    <!-- macOS 毛玻璃底栏 -->
     <div class="nav-footer">
       <button class="f-icon-btn action-btn" :title="t('nav.addSource')" @click="$emit('add-source')">
         <Icon name="plus" :size="16" />
@@ -318,7 +318,7 @@ async function toggleExpand(gid: number) {
     </div>
   </nav>
 
-  <!-- macOS Sheet Modal for Group -->
+  <!-- 分组操作的 macOS 工作表弹窗 -->
   <Modal v-if="showGroupModal" :title="groupModalTitle" @close="showGroupModal = false">
     <div class="form-row">
       <label class="input-label">{{ t('group.namePlaceholder') }}</label>

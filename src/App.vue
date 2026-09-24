@@ -71,7 +71,7 @@ function scrollArticleList(delta: number) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  // Block native zoom shortcuts (Ctrl/Cmd +/-, Ctrl/Cmd 0)
+  // 拦截浏览器原生缩放快捷键（Ctrl/Cmd +/-, Ctrl/Cmd 0）
   if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '_', '0'].includes(e.key)) {
     e.preventDefault()
     return
@@ -171,20 +171,20 @@ onBeforeUnmount(() => {
     <main class="main">
       <div class="panes" :class="{ 'article-open': data.selectedItem }">
         <ArticleList class="pane-list" />
-        <!-- Standard Split Pane Mode -->
+        <!-- 标准分栏模式 -->
         <ArticleView v-if="data.selectedItem && !app.isFocusMode" class="pane-article" />
       </div>
     </main>
   </div>
 
-  <!-- Focus Mode: Elevated Acrylic Sheet Overlay -->
+  <!-- 专注模式：亚克力浮层工作表 -->
   <Transition name="focus-sheet">
     <div
       v-if="data.selectedItem && app.isFocusMode"
       class="focus-backdrop"
       @click.self="data.selectedItem = null; data.selectedId = null"
     >
-      <!-- Left Prev Article Button -->
+      <!-- 左侧上一篇按钮 -->
       <button
         class="focus-nav-btn prev-btn"
         :class="{ disabled: !hasPrevArticle }"
@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
         <ArticleView is-focus-modal />
       </div>
 
-      <!-- Right Next Article Button -->
+      <!-- 右侧下一篇按钮 -->
       <button
         class="focus-nav-btn next-btn"
         :class="{ disabled: !hasNextArticle }"
@@ -259,7 +259,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* Acrylic Focus Mode Styles */
+/* 亚克力专注模式样式 */
 .focus-backdrop {
   position: fixed;
   inset: 0;

@@ -23,24 +23,24 @@ const data = useDataStore()
       @click="emit('select', item)"
       @contextmenu.prevent="emit('context', $event, item)"
     >
-      <!-- Unread Indicator -->
+      <!-- 未读指示小圆点 -->
       <div class="unread-slot">
         <span v-if="!item.hasBeenRead" class="unread-dot"></span>
       </div>
 
-      <!-- Main Content -->
+      <!-- 主要内容区域 -->
       <div class="row-main">
         <h3 class="title" v-html="highlightText(item.title, data.search)"></h3>
         <p v-if="item.snippet" class="snippet" v-html="highlightText(item.snippet, data.search)"></p>
       </div>
 
-      <!-- Metadata & Channel -->
+      <!-- 元数据与发布源 -->
       <div class="meta">
         <span class="source">{{ data.sourceById(item.sourceId)?.title }}</span>
         <span class="time">{{ formatTime(item.publishedAt) }}</span>
       </div>
 
-      <!-- Star Button -->
+      <!-- 星标按钮 -->
       <button
         class="f-icon-btn star-btn"
         :class="{ 'active-star': item.starred }"

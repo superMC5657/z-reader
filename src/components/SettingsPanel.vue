@@ -42,7 +42,7 @@ const currentTabLabel = computed(() => {
   return tabs.value.find((t) => t.value === tab.value)?.label ?? ''
 })
 
-// ---------- General tab: proxy / notification / tray / storage ----------
+// ---------- 常规选项卡：代理 / 通知 / 托盘 / 存储 ----------
 
 const proxyModeOptions = computed(() => [
   { value: 'system', label: t('settings.general.proxySystem'), icon: 'display' },
@@ -72,7 +72,7 @@ const proxyResult = ref<string>('')
 async function testProxy() {
   proxyTesting.value = true
   proxyResult.value = ''
-  // Probe a failing feed when one exists so the test reflects real conditions.
+  // 若存在抓取失败的源，则优先探测该源以反映真实网络状况。
   const failing = data.sources.find((s) => s.errorCount > 0)
   const target = failing?.url ?? null
   try {
@@ -127,7 +127,7 @@ watch(tab, (v) => {
   if (v === 'sync') loadSyncStatus()
 })
 
-// ---------- Sync tab ----------
+// ---------- 同步选项卡 ----------
 
 const syncServerUrl = ref('')
 const syncUsername = ref('')
@@ -199,7 +199,7 @@ async function doSyncLogout() {
   }
 }
 
-// ---------- Rules tab ----------
+// ---------- 规则选项卡 ----------
 
 const rules = ref<Rule[]>([])
 const rulesLoading = ref(false)
@@ -415,7 +415,7 @@ async function exportOpml() {
   dataMsg.value = t('settings.data.exported')
 }
 
-// ---------- Full backup & restore ----------
+// ---------- 完整备份与恢复 ----------
 
 const backingUp = ref(false)
 const restoreConfirmVisible = ref(false)
@@ -442,7 +442,7 @@ async function doImportBackup() {
   try {
     const path = await api.importBackup()
     if (path) {
-      // A successful restore swaps the database; relaunch for a clean reload.
+      // 恢复成功后会替换数据库；重启应用以完成全新重载。
       await restartApp()
     }
   } catch (err) {
@@ -476,7 +476,7 @@ function adjustFontSize(delta: number) {
 <template>
   <Modal custom-layout extra-wide @close="emit('close')">
     <div class="settings-layout">
-      <!-- Left Sidebar -->
+      <!-- 左侧侧边栏 -->
       <aside class="settings-sidebar">
         <div class="settings-sidebar-header">
           <span class="settings-title">{{ t('settings.title') }}</span>
@@ -495,7 +495,7 @@ function adjustFontSize(delta: number) {
         </nav>
       </aside>
 
-      <!-- Right Main Panel -->
+      <!-- 右侧主面板 -->
       <main class="settings-main">
         <header class="settings-main-header">
           <span class="settings-current-title">{{ currentTabLabel }}</span>
@@ -505,7 +505,7 @@ function adjustFontSize(delta: number) {
         </header>
 
         <div class="settings-main-content">
-          <!-- Tab: Sources -->
+          <!-- 选项卡：订阅源管理 -->
           <div v-if="tab === 'sources'" class="settings-tab-pane">
       <div v-if="data.sources.length" class="grouped-inset-box">
         <div v-for="s in data.sources" :key="s.id" class="grouped-inset-row">
@@ -535,7 +535,7 @@ function adjustFontSize(delta: number) {
       </div>
     </div>
 
-    <!-- Tab: General (network / notification / tray / storage) -->
+    <!-- 选项卡：常规（网络 / 通知 / 托盘 / 存储） -->
     <div v-else-if="tab === 'general'" class="settings-tab-pane">
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
@@ -682,7 +682,7 @@ function adjustFontSize(delta: number) {
       </div>
     </div>
 
-    <!-- Tab: Regex Rules -->
+    <!-- 选项卡：正则自动化规则 -->
     <div v-else-if="tab === 'rules'" class="settings-tab-pane">
       <div class="rules-toolbar">
         <p class="rules-hint">{{ t('settings.rules.hint') }}</p>
@@ -753,7 +753,7 @@ function adjustFontSize(delta: number) {
       />
     </div>
 
-    <!-- Tab: Cloud Sync -->
+    <!-- 选项卡：云端同步 -->
     <div v-else-if="tab === 'sync'" class="settings-tab-pane">
       <template v-if="!app.s.syncAccount">
         <div class="sync-form">
@@ -853,10 +853,10 @@ function adjustFontSize(delta: number) {
       </template>
     </div>
 
-    <!-- Tab: App Settings (macOS Inset Grouped) -->
+    <!-- 选项卡：应用设置（macOS 内嵌分组风格） -->
     <div v-else-if="tab === 'app'" class="settings-tab-pane">
       <div class="grouped-inset-box">
-        <!-- Theme -->
+        <!-- 主题外观 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.theme') }}</span>
@@ -868,7 +868,7 @@ function adjustFontSize(delta: number) {
           />
         </div>
 
-        <!-- Default View -->
+        <!-- 默认视图 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.view') }}</span>
@@ -880,7 +880,7 @@ function adjustFontSize(delta: number) {
           />
         </div>
 
-        <!-- Reader Mode -->
+        <!-- 阅读模式 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.readerMode') }}</span>
@@ -892,7 +892,7 @@ function adjustFontSize(delta: number) {
           />
         </div>
 
-        <!-- Language -->
+        <!-- 界面语言 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.language') }}</span>
@@ -904,7 +904,7 @@ function adjustFontSize(delta: number) {
           />
         </div>
 
-        <!-- UI Scale / Resolution -->
+        <!-- 界面缩放 / 分辨率 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.uiScale') }}</span>
@@ -946,7 +946,7 @@ function adjustFontSize(delta: number) {
           </div>
         </div>
 
-        <!-- Font Size Slider -->
+        <!-- 字体大小滑块 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.fontSize') }}</span>
@@ -980,7 +980,7 @@ function adjustFontSize(delta: number) {
           </div>
         </div>
 
-        <!-- Background Fetch Interval -->
+        <!-- 后台刷新间隔 -->
         <div class="grouped-inset-row">
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.fetchInterval') }}</span>
@@ -996,7 +996,7 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
 
-      <!-- View Configuration Switches -->
+      <!-- 视图配置开关 -->
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
           <div class="label-box">
@@ -1030,7 +1030,7 @@ function adjustFontSize(delta: number) {
       </div>
     </div>
 
-    <!-- Tab: Shortcuts -->
+    <!-- 选项卡：快捷键设置 -->
     <div v-else-if="tab === 'shortcuts'" class="settings-tab-pane">
       <div class="shortcuts-header-bar">
         <p class="shortcuts-hint">{{ t('settings.shortcuts.hint') }}</p>
@@ -1061,7 +1061,7 @@ function adjustFontSize(delta: number) {
       </div>
     </div>
 
-    <!-- Tab: Data (OPML) -->
+    <!-- 选项卡：数据导入导出（OPML） -->
     <div v-else-if="tab === 'data'" class="settings-tab-pane">
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
@@ -1088,7 +1088,7 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
 
-      <!-- Full backup & restore -->
+      <!-- 完整备份与恢复 -->
       <div class="grouped-inset-box">
         <div class="grouped-inset-row">
           <div class="label-box">
@@ -1118,7 +1118,7 @@ function adjustFontSize(delta: number) {
         <span>{{ dataMsg }}</span>
       </div>
 
-      <!-- Restore confirmation -->
+      <!-- 恢复确认弹窗 -->
       <Modal v-if="restoreConfirmVisible" :title="t('settings.data.restore')" @close="restoreConfirmVisible = false">
         <p class="restore-confirm-text">{{ t('settings.data.confirmRestore') }}</p>
         <template #footer>
@@ -1138,9 +1138,9 @@ function adjustFontSize(delta: number) {
         <p class="about-ver">{{ t('settings.about.version') }} {{ app.s.version }}</p>
         <p class="about-desc">{{ t('settings.about.desc') }}</p>
 
-        <!-- Updater Box -->
+        <!-- 检查更新模块 -->
         <div class="updater-box">
-          <!-- Idle -->
+          <!-- 空闲状态 -->
           <div v-if="updateState.status === 'idle'" class="updater-action">
             <button class="f-btn compact-updater-btn" @click="checkForUpdates()">
               <Icon name="refresh" :size="13" />
@@ -1148,13 +1148,13 @@ function adjustFontSize(delta: number) {
             </button>
           </div>
 
-          <!-- Checking -->
+          <!-- 检查中状态 -->
           <div v-else-if="updateState.status === 'checking'" class="updater-status checking">
             <Icon name="refresh" :size="14" class="spinning" />
             <span>{{ t('settings.about.checking') }}</span>
           </div>
 
-          <!-- Up to date -->
+          <!-- 已是最新状态 -->
           <div v-else-if="updateState.status === 'up-to-date'" class="updater-status up-to-date">
             <div class="status-badge success">
               <Icon name="checkmark" :size="13" color="var(--success)" />
@@ -1166,7 +1166,7 @@ function adjustFontSize(delta: number) {
             </button>
           </div>
 
-          <!-- Available -->
+          <!-- 有新版本可用状态 -->
           <div v-else-if="updateState.status === 'available'" class="updater-available-card">
             <div class="update-badge-row">
               <span class="new-ver-badge">{{ t('settings.about.newVersion') }} v{{ updateState.newVersion }}</span>
@@ -1178,7 +1178,7 @@ function adjustFontSize(delta: number) {
             </button>
           </div>
 
-          <!-- Downloading -->
+          <!-- 下载中状态 -->
           <div v-else-if="updateState.status === 'downloading'" class="updater-downloading">
             <div class="progress-info">
               <span>{{ t('settings.about.downloading') }}…</span>
@@ -1189,7 +1189,7 @@ function adjustFontSize(delta: number) {
             </div>
           </div>
 
-          <!-- Downloaded: Ready to Restart -->
+          <!-- 下载完成：准备重启状态 -->
           <div v-else-if="updateState.status === 'downloaded'" class="updater-status ready">
             <div class="status-badge success">
               <Icon name="checkmark" :size="13" color="var(--success)" />
@@ -1200,7 +1200,7 @@ function adjustFontSize(delta: number) {
             </button>
           </div>
 
-          <!-- Error -->
+          <!-- 更新出错状态 -->
           <div v-else-if="updateState.status === 'error'" class="updater-status error">
             <span class="error-text">{{ t('settings.about.updateError') }}: {{ updateState.error }}</span>
             <button class="f-btn compact-updater-btn secondary" @click="checkForUpdates()">
@@ -1229,7 +1229,7 @@ function adjustFontSize(delta: number) {
   user-select: none;
 }
 
-/* Left Sidebar */
+/* 左侧侧边栏样式 */
 .settings-sidebar {
   width: 190px;
   flex-shrink: 0;
@@ -1315,7 +1315,7 @@ function adjustFontSize(delta: number) {
   text-overflow: ellipsis;
 }
 
-/* Right Main Area */
+/* 右侧主面板样式 */
 .settings-main {
   flex: 1;
   min-width: 0;
@@ -1549,7 +1549,7 @@ function adjustFontSize(delta: number) {
   line-height: 1.5;
 }
 
-/* Shortcuts Tab Styles */
+/* 快捷键选项卡样式 */
 .shortcuts-header-bar {
   display: flex;
   align-items: center;
@@ -1650,7 +1650,7 @@ function adjustFontSize(delta: number) {
   }
 }
 
-/* Updater Styles */
+/* 检查更新模块样式 */
 .updater-box {
   margin-top: 1rem;
   width: 100%;
@@ -1885,7 +1885,7 @@ function adjustFontSize(delta: number) {
   margin: 0;
 }
 
-/* Sync Tab Styles */
+/* 云同步选项卡样式 */
 .sync-form {
   display: flex;
   flex-direction: column;

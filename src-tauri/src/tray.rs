@@ -9,7 +9,7 @@ const ID_MARK_ALL: &str = "zreader-mark-all";
 const ID_SHOW: &str = "zreader-show";
 const ID_QUIT: &str = "zreader-quit";
 
-/// Tray handles kept alive for the whole app lifetime.
+/// 在整个应用生命周期中保持活跃的托盘句柄。
 pub struct TrayHandles {
     pub icon: TrayIcon,
     pub unread_item: MenuItem<Wry>,
@@ -109,8 +109,7 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// First line of an error message, truncated: reasons never carry file
-/// paths, tokens or article text.
+/// 错误消息的首行（截断后）：错误原因不包含文件路径、令牌或文章正文。
 fn short_reason(msg: &str) -> String {
     const MAX_CHARS: usize = 160;
     let first = msg.lines().next().unwrap_or("").trim();
@@ -121,7 +120,7 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
-/// Recompute the unread count and refresh the tray label + badge dot.
+/// 重新计算未读文章数并刷新托盘标签与徽标红点。
 pub async fn update_tray(app: &AppHandle) {
     let Some(guard) = app.try_state::<TrayState>() else {
         return;
@@ -147,8 +146,7 @@ pub async fn update_tray(app: &AppHandle) {
     )) {
         log::warn!("tray label update failed reason {}", short_reason(&e.to_string()));
     }
-    // Menu labels are baked at creation; re-apply them so a language switch
-    // (which triggers this via save_settings) propagates to the tray.
+    // 菜单标签在创建时已固定；重新设置它们以便语言切换（通过 save_settings 触发）能传播到托盘菜单。
     for (item, text) in [
         (&handles.refresh_item, label(zh, "立即刷新所有订阅", "Refresh All")),
         (&handles.mark_all_item, label(zh, "全部标记已读", "Mark All as Read")),
@@ -166,7 +164,7 @@ pub async fn update_tray(app: &AppHandle) {
     }
 }
 
-/// Draw a red dot with a white ring in the top-right corner of the icon.
+/// 在图标右上角绘制带白边的红点徽标。
 fn with_badge(base: &tauri::image::Image, show: bool) -> tauri::image::Image<'static> {
     let w = base.width() as i32;
     let h = base.height() as i32;

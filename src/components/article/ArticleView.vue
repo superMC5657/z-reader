@@ -32,7 +32,7 @@ const displayBody = computed(() => {
   return ''
 })
 
-// Match the reader iframe's palette to the app theme
+// 让阅读器 iframe 配色与应用主题保持一致
 const isDark = computed(() => app.isDark)
 
 function escapeHtmlAttr(str: string): string {
@@ -176,9 +176,9 @@ const docHtml = computed(() => {
   </style></head><body>${displayBody.value}</body></html>`
 })
 
-// Auto-fetch full text when not found in local cache.
-// If already cached, it renders immediately from cache with zero delay.
-// Guarded per item ID so failed fetches don't loop indefinitely (manual retry stays available).
+// 当本地缓存中未找到全文时自动抓取。
+// 若已缓存，则直接从本地缓存渲染，零延迟。
+// 按文章 ID 记录失败状态，防止抓取失败时陷入无限重试循环（仍保留手动重试入口）。
 const failedFetchIds = ref(new Set<number>())
 
 watch(
@@ -187,12 +187,12 @@ watch(
     extractError.value = ''
     if (!next || !next.url) return
 
-    // 1. Cache hit: article already has full content cached in local SQLite!
+    // 1. 缓存命中：本地 SQLite 中已缓存该文章全文！
     if (isFullContentCached(next)) {
       return
     }
 
-    // 2. Cache miss: not in cache, automatically fetch full text in the background!
+    // 2. 缓存未命中：本地无全文缓存，后台自动抓取全文！
     if (!failedFetchIds.value.has(next.id) && !fetchingFull.value) {
       executeFetch(next.id, false)
     }
@@ -213,7 +213,7 @@ async function executeFetch(id: number, isManual: boolean) {
   extractError.value = ''
   try {
     await fetchFullContent(id)
-    // Drop stale results when the user navigated away mid-flight.
+    // 若用户在抓取期间已切换到其它文章，丢弃陈旧结果。
     if (data.selectedId !== id) return
     await data.selectItem(id)
     data.loadItems().catch(() => {})
@@ -272,7 +272,7 @@ function onIframeLoad(e: Event) {
 
 <template>
   <section v-if="item" class="article-view" :class="{ 'in-focus-modal': isFocusModal }">
-    <!-- Safari Reader Header -->
+    <!-- Safari 风格阅读器顶部导航 -->
     <header class="reader-head" data-tauri-drag-region>
       <div class="head-top" data-tauri-drag-region>
         <div class="head-meta">
@@ -293,7 +293,7 @@ function onIframeLoad(e: Event) {
         </div>
 
         <div class="action-group">
-          <!-- Re-fetch Full Text -->
+          <!-- 重新抓取全文 -->
           <button
             class="f-icon-btn reader-action-btn"
             :title="t('item.refetch')"
@@ -307,7 +307,7 @@ function onIframeLoad(e: Event) {
             />
           </button>
 
-          <!-- Open in Browser -->
+          <!-- 在浏览器中打开 -->
           <button
             v-if="item.url"
             class="f-icon-btn reader-action-btn"
@@ -317,7 +317,7 @@ function onIframeLoad(e: Event) {
             <Icon name="open-web" :size="15" />
           </button>
 
-          <!-- Star -->
+          <!-- 星标收藏 -->
           <button
             class="f-icon-btn reader-action-btn"
             :class="{ 'active-star': item.starred }"
@@ -327,7 +327,7 @@ function onIframeLoad(e: Event) {
             <Icon :name="item.starred ? 'star-fill' : 'star'" :size="15" />
           </button>
 
-          <!-- Mark Unread -->
+          <!-- 标记为未读 -->
           <button
             class="f-icon-btn reader-action-btn"
             :title="t('item.markUnread')"
@@ -336,7 +336,7 @@ function onIframeLoad(e: Event) {
             <Icon name="circle" :size="15" />
           </button>
 
-          <!-- Toggle Focus Mode -->
+          <!-- 切换专注模式 -->
           <button
             class="f-icon-btn reader-action-btn focus-toggle-btn"
             :class="{ 'active-focus': app.isFocusMode }"
@@ -346,7 +346,7 @@ function onIframeLoad(e: Event) {
             <Icon :name="app.isFocusMode ? 'split' : 'focus'" :size="14.5" />
           </button>
 
-          <!-- Explicit Close Button -->
+          <!-- 关闭文章按钮 -->
           <button
             class="f-icon-btn reader-action-btn close-article-btn"
             :title="t('item.close')"
@@ -373,7 +373,7 @@ function onIframeLoad(e: Event) {
       </button>
     </div>
 
-    <!-- Auto-fetching Full Text Loading State (cache miss) -->
+    <!-- 自动抓取全文加载状态（缓存未命中） -->
     <div v-if="fetchingFull && !isCached" class="loading-reader">
       <div class="loading-icon-circle">
         <Icon name="arrow-clockwise" :size="26" class="spin" />
@@ -382,7 +382,7 @@ function onIframeLoad(e: Event) {
       <p class="loading-sub">{{ t('item.autoFetchingHint') }}</p>
     </div>
 
-    <!-- Reader Iframe -->
+    <!-- 阅读器 Iframe -->
     <iframe
       v-else-if="displayBody"
       class="reader-frame"
@@ -391,7 +391,7 @@ function onIframeLoad(e: Event) {
       @load="onIframeLoad"
     ></iframe>
 
-    <!-- No Content Empty State -->
+    <!-- 无正文空状态 -->
     <div v-else class="empty-reader">
       <div class="empty-icon-circle">
         <Icon name="sparkles" :size="32" color="var(--text-quaternary)" />

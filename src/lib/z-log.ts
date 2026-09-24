@@ -1,9 +1,9 @@
-// Batched frontend logging via @tauri-apps/plugin-log.
+// 基于 @tauri-apps/plugin-log 的前端批量日志机制。
 //
-// The reader fires high-volume events during subscription refreshes, so
-// records are coalesced and forwarded at most every FLUSH_MS or BATCH_SIZE
-// entries instead of one IPC call per log line. Both frontend and backend
-// records land in a single unified log file named after the application (z-reader.log).
+// 阅读器在刷新订阅时会产生大量高频日志事件，因此通过合并缓冲，
+// 达到 FLUSH_MS 时间间隔或 BATCH_SIZE 批量条数时才集中转发，
+// 避免每打一行日志就触发一次 IPC 调用。前端和后端的日志都会统一写入
+// 以应用名称命名的单一日志文件中（z-reader.log）。
 
 import { attachConsole, debug, error, info, trace, warn } from '@tauri-apps/plugin-log'
 
@@ -39,7 +39,7 @@ function flush(): void {
   if (queue.length === 0) return
   const batch = queue.splice(0, queue.length)
   for (const entry of batch) {
-    // Fire-and-forget: logging must never break UI flows.
+    // 异步派发（fire-and-forget）：日志记录绝不能阻塞或破坏前端 UI 流程。
     senders[entry.level](entry.message).catch(() => undefined)
   }
 }
@@ -57,9 +57,8 @@ function enqueue(level: Level, message: string, immediate = false): void {
     schedule()
   }
   if (typeof window !== 'undefined' && !pagehideHooked) {
-    // Flush remaining entries when the page hides so refresh bursts
-    // are not lost on reload/close. Registered once: enqueue runs per
-    // log line and must not pile up duplicate listeners.
+    // 页面隐藏/卸载时刷新剩余日志，避免刷新过程中的突发日志在重载或关闭时丢失。
+    // 单例注册：enqueue 会在每次打日志时执行，不得重复添加事件监听器。
     pagehideHooked = true
     window.addEventListener('pagehide', flush)
   }
@@ -77,8 +76,8 @@ function formatAction(action: string, meta?: Record<string, unknown>): string {
 }
 
 /**
- * Start the batched forwarder. Call once from the app entry.
- * `attachConsole` (webview log streaming) is DEV-only.
+ * 启动批量日志转发器。在应用入口处调用一次。
+ * `attachConsole`（webview 控制台日志流）仅在开发模式（DEV）下启用。
  */
 export function initZLog(): void {
   if (started) return

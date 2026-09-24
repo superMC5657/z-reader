@@ -108,7 +108,7 @@ export const useAppStore = defineStore('app', {
     async init() {
       this.settings = await getSettings().catch(() => DEFAULTS)
       if (!this.s.locale) {
-        // First run: pick the system locale and persist it.
+        // 首次运行：读取系统语言并持久化保存。
         this.settings.locale = DEFAULTS.locale
         await saveSettings(this.settings).catch(() => {})
       }
@@ -132,7 +132,7 @@ export const useAppStore = defineStore('app', {
         this.settings.readerMode = 'split'
       }
       if (this.s.faviconThirdParty === undefined) {
-        // Settings files written before the toggle existed.
+        // 兼容该设置项引入前旧版本保存的配置文件。
         this.settings.faviconThirdParty = true
       }
       if ((this.s.view as string) === 'compact') {
@@ -163,7 +163,7 @@ export const useAppStore = defineStore('app', {
       apply(this.s)
       await saveSettings(this.settings)
     },
-    /** Re-read settings.json after backend-side changes (sync login/logout). */
+    /** 后端发生变更后（如同步登录/登出）重新读取 settings.json。 */
     async refresh() {
       this.settings = await getSettings().catch(() => this.settings)
       if (this.settings) apply(this.s)

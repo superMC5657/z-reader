@@ -1,6 +1,6 @@
-//! Client for the Google Reader compatible API (FreshRSS, Bazqux, Inoreader,
-//! TT-RSS plugins, ...). Pure parsing helpers are separated from network calls
-//! so they can be tested against recorded response fixtures.
+//! 兼容 Google Reader API 的客户端（支持 FreshRSS、Bazqux、Inoreader、
+//! TT-RSS 插件等）。纯解析辅助函数与网络调用分离，
+//! 以便针对录制的响应夹具进行独立测试。
 
 use serde_json::Value;
 
@@ -11,9 +11,9 @@ const ITEM_ID_PREFIX: &str = "tag:google.com,2005:reader/item/";
 
 #[derive(Debug)]
 pub enum GReaderError {
-    /// 401/403 — session should be refreshed by logging in again.
+    /// 401/403 认证错误 —— 会话已失效，应通过重新登录刷新。
     Auth(String),
-    /// Anything else (network, server, malformed payload).
+    /// 其他任何错误（网络、服务端异常、响应格式畸形）。
     Other(String),
 }
 
@@ -29,11 +29,11 @@ impl std::fmt::Display for GReaderError {
 pub struct GSubscription {
     pub stream_id: String,
     pub title: String,
-    /// Feed URL as reported by the server.
+    /// 服务端上报的订阅源 URL。
     pub url: Option<String>,
-    /// Category stream id (e.g. "user/-/label/Tech").
+    /// 分类流 ID（例如 "user/-/label/Tech"）。
     pub category_id: Option<String>,
-    /// Category label (maps to a local group).
+    /// 分类标签名（映射到本地分组）。
     pub category: Option<String>,
 }
 
@@ -49,11 +49,11 @@ pub struct GItem {
     pub starred: bool,
 }
 
-// ---------- id normalization ----------
+// ---------- ID 规范化 ----------
 
-/// Canonical remote id: the 16-char lowercase hex from the long-form item id.
-/// `stream/items/ids` reports decimal int64 ids while `contents` reports the
-/// long form; both normalize to the same value.
+/// 规范化远程 ID：从长格式条目 ID 中提取的 16 位小写十六进制字符串。
+/// `stream/items/ids` 返回十进制 int64 ID，而 `contents` 返回长格式；
+/// 两者规范化后得到相同的值。
 pub fn normalize_item_id(raw: &str) -> Option<String> {
     if let Some(hex) = raw.strip_prefix(ITEM_ID_PREFIX) {
         let hex = hex.trim().to_ascii_lowercase();
@@ -61,24 +61,24 @@ pub fn normalize_item_id(raw: &str) -> Option<String> {
             return Some(hex);
         }
     }
-    // Also accept 16-char hex directly.
+    // 同时也直接接受 16 位十六进制字符。
     let hex = raw.trim().to_ascii_lowercase();
     if hex.len() == 16 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return Some(hex);
     }
-    // Try decimal int64 -> hex format.
+    // 尝试十进制 int64 -> 十六进制格式转换。
     if let Ok(val) = raw.trim().parse::<u64>() {
         return Some(format!("{val:016x}"));
     }
     None
 }
 
-/// Convert canonical hex remote id back to GReader long-form id for edit-tag.
+/// 将规范化十六进制远程 ID 转换回 GReader 长格式 ID，供 edit-tag 调用使用。
 pub fn long_form_id(hex_id: &str) -> String {
     format!("{ITEM_ID_PREFIX}{hex_id}")
 }
 
-// ---------- parser helpers ----------
+// ---------- 解析辅助函数 ----------
 
 pub fn parse_login(body: &str) -> Option<String> {
     body.lines()
@@ -124,7 +124,7 @@ pub fn parse_subscriptions(body: &str) -> Result<Vec<GSubscription>, String> {
         .collect())
 }
 
-/// Returns (decimal item ids, continuation token if more pages exist).
+/// 返回（十进制条目 ID 列表，存在更多分页时的 continuation 续订令牌）。
 pub fn parse_item_ids(body: &str) -> Result<(Vec<String>, Option<String>), String> {
     let v: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let refs = v
@@ -214,7 +214,7 @@ fn category_states(item: &Value) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-// ---------- network ----------
+// ---------- 网络调用 ----------
 
 pub fn base_url(base: &str) -> String {
     base.trim().trim_end_matches('/').to_string()
@@ -280,7 +280,7 @@ pub async fn login(
     parse_login(&text).ok_or_else(|| GReaderError::Other("no Auth in ClientLogin response".into()))
 }
 
-/// The short-lived CSRF "T" token required by edit-tag calls.
+/// edit-tag 调用所需的短期 CSRF "T" 令牌。
 pub async fn get_token(client: &reqwest::Client, base: &str, auth: &str) -> Result<String, GReaderError> {
     let url = format!("{}/reader/api/0/token", base_url(base));
     let text = read_authed(client, auth, &url).await?;
@@ -301,8 +301,8 @@ pub async fn subscriptions(
     parse_subscriptions(&text).map_err(GReaderError::Other)
 }
 
-/// One page of the reading-list stream, restricted to items changed after
-/// `ot` (unix seconds). Follow `continuation` until it comes back None.
+/// 获取 reading-list 流的单页数据，仅限于 `ot`（Unix 秒）之后变更的条目。
+/// 持续沿用 `continuation` 直至返回 None。
 pub async fn stream_ids(
     client: &reqwest::Client,
     base: &str,
@@ -335,8 +335,8 @@ pub async fn contents(
     ids: &[String],
 ) -> Result<Vec<GItem>, GReaderError> {
     let url = format!("{}/reader/api/0/stream/items/contents", base_url(base));
-    // The serializer holds a non-Send closure and has a drop guard; finish it
-    // inside a scope so it cannot live across the await below.
+    // 序列化器持有非 Send 闭包且带有 drop 守卫；
+    // 在独立作用域内将其完成，使其生命周期不跨越下方的 await。
     let body = {
         let mut form = url::form_urlencoded::Serializer::new(String::new());
         form.append_pair("output", "json");
@@ -369,8 +369,7 @@ pub async fn contents(
     parse_contents(&text).map_err(GReaderError::Other)
 }
 
-/// Push state changes for specific items. `add`/`remove` are state stream ids
-/// (e.g. STATE_READ) applied via the `a`/`r` form fields.
+/// 推送指定条目的状态变更。`add`/`remove` 为通过表单字段 `a`/`r` 应用的状态流 ID（例如 STATE_READ）。
 pub async fn edit_tag(
     client: &reqwest::Client,
     base: &str,
@@ -381,7 +380,7 @@ pub async fn edit_tag(
     remove: &[&str],
 ) -> Result<(), GReaderError> {
     let url = format!("{}/reader/api/0/edit-tag", base_url(base));
-    // The serializer is non-Send with a drop guard — confine it to a scope.
+    // 序列化器为带有 drop 守卫的非 Send 类型 —— 限制在独立作用域内。
     let body = {
         let mut form = url::form_urlencoded::Serializer::new(String::new());
         for id in ids {
@@ -401,7 +400,7 @@ pub async fn edit_tag(
     post_authed(client, auth, &url, &body).await
 }
 
-/// Stream-level edit-tag, used for mark-all-read (s = feed/label/reading-list).
+/// 流级别的 edit-tag，用于全部标记已读（s = feed/label/reading-list）。
 pub async fn edit_tag_stream(
     client: &reqwest::Client,
     base: &str,
@@ -452,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_normalize_item_id() {
-        // decimal (from stream/items/ids) and long form (from contents) agree
+        // 十进制（来自 stream/items/ids）与长格式（来自 contents）解析结果一致
         let decimal = 0x00000000175c6d3b_i64;
         assert_eq!(
             normalize_item_id(&decimal.to_string()).unwrap(),
@@ -521,7 +520,7 @@ mod tests {
         assert_eq!(items[0].url.as_deref(), Some("https://example.com/a"));
         assert_eq!(items[0].content, "<p>body text</p>");
         assert_eq!(items[0].author.as_deref(), Some("Alice"));
-        // decimal id normalized to hex, content-form body picked up
+        // 十进制 ID 规范化为十六进制，并成功提取 content 格式的正文
         assert_eq!(items[1].remote_id, format!("{:016x}", 1692932246948035500i64));
         assert!(!items[1].read);
         assert!(items[1].starred);

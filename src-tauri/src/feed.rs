@@ -2,21 +2,21 @@ use crate::db;
 use crate::models::html_to_text;
 use feed_rs::parser;
 
-/// Minimal source identity needed for rule evaluation and storage.
+/// 规则评估与文章存储所需的最小订阅源标识信息。
 pub struct SourceCtx {
     pub id: i64,
     pub group_id: Option<i64>,
     pub url: String,
 }
 
-/// Result of storing a parsed feed.
+/// 存储已解析订阅源的结果。
 pub struct StoreOutcome {
     pub inserted: usize,
-    /// Titles of new articles matched by a "notify" rule.
+    /// 匹配到“通知”规则的新增文章标题列表。
     pub notified: Vec<String>,
 }
 
-/// A feed entry converted to plain DB-ready values.
+/// 转换为适合存入数据库的扁平化订阅源条目。
 pub struct NewEntry {
     pub guid: String,
     pub title: String,
@@ -37,13 +37,13 @@ pub struct ParsedFeed {
     pub entries: Vec<NewEntry>,
 }
 
-/// Network-only stage: download and parse a feed. Holds no DB references.
+/// 仅网络阶段：下载并解析订阅源。不持有任何数据库连接引用。
 pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<ParsedFeed, String> {
     fetch_and_parse_with(client, url, "", None).await
 }
 
-/// Same as [`fetch_and_parse`] but tags NET lines with `cycle=`/`id=`.
-/// Empty cycle + None id keep old callers (commands) unchanged.
+/// 功能同 [`fetch_and_parse`]，但在网络日志行上标记 `cycle=` / `id=`。
+/// 周期为空且订阅源 ID 为 None 时与旧调用方（命令层）保持行为一致。
 pub async fn fetch_and_parse_with(
     client: &reqwest::Client,
     url: &str,
@@ -150,9 +150,8 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
     Ok(ParsedFeed { title, description, icon_url, site_url, entries })
 }
 
-/// DB-only stage: insert parsed entries, skipping known guids. Applies the
-/// rule engine to new entries before insertion (mark read / star / hide /
-/// notify). Existing rows are never touched.
+/// 仅数据库阶段：插入已解析条目，跳过已存在的 GUID。在插入前对新条目
+/// 应用规则引擎（标记已读 / 加星标 / 隐藏 / 通知）。绝不修改已有数据行。
 pub fn store(
     conn: &rusqlite::Connection,
     source: &SourceCtx,
@@ -209,9 +208,8 @@ pub fn store(
     Ok(out)
 }
 
-/// Sniff the image format from magic bytes. Returns the file extension to
-/// store under, or `None` for unknown payloads. SVG is deliberately rejected:
-/// favicons render in the UI and inline SVG can carry active content.
+/// 通过魔数识别图片格式。返回用于存储的文件扩展名，若负载未知则返回 `None`。
+/// 故意拒绝 SVG 格式：网站图标直接在 UI 中渲染，内联 SVG 可能携带动态脚本代码。
 pub fn sniff_image_ext(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
         Some("png")
@@ -240,8 +238,8 @@ pub async fn fetch_favicon(
     fetch_favicon_with(client, feed_url, icon_url, site_url, favicon_dir, source_id, allow_third_party, "").await
 }
 
-/// Same as [`fetch_favicon`] but tags NET lines with `cycle=` (favicon
-/// candidates stay debug, never INFO).
+/// 功能同 [`fetch_favicon`]，但在网络日志行上标记 `cycle=`（网站图标
+/// 候选请求保持 debug 级别，绝不升为 INFO）。
 pub async fn fetch_favicon_with(
     client: &reqwest::Client,
     feed_url: &str,
@@ -254,7 +252,7 @@ pub async fn fetch_favicon_with(
 ) -> Option<std::path::PathBuf> {
     let mut candidates = Vec::new();
 
-    // 1. Explicit feed icon URL from RSS/Atom
+    // 1. RSS/Atom 中显式指定的订阅源图标 URL
     if let Some(u) = icon_url {
         let u = u.trim();
         if !u.is_empty() {
@@ -262,7 +260,7 @@ pub async fn fetch_favicon_with(
         }
     }
 
-    // 2. Derive origins and domains
+    // 2. 派生源地址（Origin）和域名（Domain）
     let target = site_url.unwrap_or(feed_url);
     if let Ok(parsed) = url::Url::parse(target) {
         let origin = parsed.origin().ascii_serialization();
@@ -273,8 +271,8 @@ pub async fn fetch_favicon_with(
         candidates.push(format!("{origin}/apple-touch-icon.png"));
         candidates.push(format!("{origin}/apple-touch-icon-precomposed.png"));
 
-        // Third-party fallbacks disclose subscribed domains to Google/DuckDuckGo;
-        // only include them when the user opted in.
+        // 第三方回退会将订阅域名暴露给 Google/DuckDuckGo；
+        // 仅在用户显式开启时才纳入候选。
         if allow_third_party && !host.is_empty() {
             candidates.push(format!("https://www.google.com/s2/favicons?domain={host}&sz=64"));
             candidates.push(format!("https://icons.duckduckgo.com/ip2/{host}.ico"));
@@ -295,8 +293,8 @@ pub async fn fetch_favicon_with(
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if bytes.len() > 80 && bytes.len() < 2_000_000 {
-                        // Extension comes from the payload, never the URL:
-                        // mislabeled or non-image bodies are skipped.
+                        // 扩展名来自文件内容负载而非 URL：
+                        // 跳过错误标注或非图片的响应体。
                         if let Some(ext) = sniff_image_ext(&bytes) {
                             let path = favicon_dir.join(format!("{source_id}.{ext}"));
                             if tokio::fs::write(&path, &bytes).await.is_ok() {
@@ -319,8 +317,8 @@ mod tests {
 
     #[test]
     fn test_sniff_image_ext() {
-        // Given: canonical magic headers
-        // When/Then: each format is recognized, SVG and junk are refused
+        // 给定：规范的魔数文件头
+        // 当/那么：识别各有效图片格式，拒绝 SVG 和无效垃圾数据
         assert_eq!(sniff_image_ext(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00]), Some("png"));
         assert_eq!(sniff_image_ext(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]), Some("jpg"));
         assert_eq!(sniff_image_ext(b"GIF89a\x01\x00"), Some("gif"));

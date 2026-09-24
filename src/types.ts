@@ -8,9 +8,9 @@ export interface Source {
   lastFetched: number | null
   errorCount: number
   unread: number
-  /** remote stream id when synced from a cloud service */
+  /** 从云端服务同步时的远程流 ID */
   remoteId: string | null
-  /** last fetch/store failure message; null when healthy */
+  /** 最近一次抓取/存储失败的错误信息；正常时为 null */
   lastError: string | null
 }
 
@@ -37,7 +37,7 @@ export interface Item {
   hasBeenRead: boolean
   starred: boolean
   hidden: boolean
-  /** remote item id (hex) when the article came from a sync server */
+  /** 文章来自同步服务器时的远程条目 ID（十六进制） */
   remoteId: string | null
 }
 
@@ -49,34 +49,34 @@ export interface Settings {
   uiScale: number
   fontSize: number
   fetchInterval: number
-  /** 0 = all, 1 = unread, 2 = starred */
+  /** 0 = 全部，1 = 未读，2 = 星标 */
   filterType: number
-  /** bit0 = showCover, bit1 = showSnippet, bit2 = fadeRead */
+  /** 位标记：bit0 = 显示封面图，bit1 = 显示摘要，bit2 = 已读变暗 */
   viewConfigs: number
   menuOn: boolean
   readerMode: 'split' | 'focus'
   shortcuts: Record<string, string>
-  /** "system" (env vars + OS proxy) | "none" (direct) | "manual" */
+  /** 代理模式："system"（环境变量 + 系统代理）| "none"（直连）| "manual"（手动配置） */
   proxyMode: 'system' | 'none' | 'manual'
   proxyUrl: string
   proxyUsername: string
   proxyPassword: string
   notifyOnNew: boolean
   closeToTray: boolean
-  /** auto-delete unstarred read articles older than N days; 0 = never */
+  /** 自动清理超过 N 天且未加星标的已读文章；0 = 从不清理 */
   retentionDays: number
-  /** cap unstarred articles kept per source; 0 = unlimited */
+  /** 每个订阅源保留未星标文章的最大上限；0 = 不限制 */
   maxItemsPerSource: number
-  /** allow favicon lookup via Google/DuckDuckGo (discloses domains); off = origin only */
+  /** 允许通过 Google/DuckDuckGo 获取网站图标（会外发域名请求）；关闭则仅从源站获取 */
   faviconThirdParty: boolean
-  /** cloud sync account; null = pure local mode */
+  /** 云同步账户；null 表示纯本地模式 */
   syncAccount: SyncAccount | null
 }
 
 export interface SyncAccount {
-  /** "greader" (Google Reader compatible API) */
+  /** "greader"（兼容 Google Reader API） */
   provider: 'greader'
-  /** API base URL, e.g. "https://host/api/greader.php" for FreshRSS */
+  /** API 基地址，例如 FreshRSS 的 "https://host/api/greader.php" */
   serverUrl: string
   username: string
   password: string
@@ -113,7 +113,7 @@ export interface Rule {
   actionType: RuleActionType
   isCaseSensitive: boolean
   isEnabled: boolean
-  /** "all" | "source:{id}" | "group:{id}" */
+  /** 作用范围："all" | "source:{id}" | "group:{id}" */
   sourceScope: string
   createdAt: number
 }

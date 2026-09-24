@@ -28,7 +28,7 @@ const pixelSize = computed(() => {
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
-    <!-- All Feeds / Tray Stack -->
+    <!-- 全部源 / 托盘堆叠 -->
     <template v-if="name === 'all' || name === 'tray-stack'">
       <path
         d="M4 6.5C4 5.67157 4.67157 5 5.5 5H18.5C19.3284 5 20 5.67157 20 6.5V17.5C20 18.3284 19.3284 19 18.5 19H5.5C4.67157 19 4 18.3284 4 17.5V6.5Z"
@@ -52,7 +52,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Folder -->
+    <!-- 文件夹 / 分组 -->
     <template v-else-if="name === 'folder'">
       <path
         d="M3.75 6.75C3.75 5.50736 4.75736 4.5 6 4.5H9.41421C9.81205 4.5 10.1936 4.65804 10.4749 4.93934L12.0607 6.52513C12.342 6.80643 12.7235 6.96447 13.1213 6.96447H18C19.2426 6.96447 20.25 7.97183 20.25 9.21447V17.25C20.25 18.4926 19.2426 19.5 18 19.5H6C4.75736 19.5 3.75 18.4926 3.75 17.25V6.75Z"
@@ -62,7 +62,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Folder Plus -->
+    <!-- 新建分组 -->
     <template v-else-if="name === 'folder-plus'">
       <path
         d="M3.75 6.75C3.75 5.50736 4.75736 4.5 6 4.5H9.41421C9.81205 4.5 10.1936 4.65804 10.4749 4.93934L12.0607 6.52513C12.342 6.80643 12.7235 6.96447 13.1213 6.96447H18C19.2426 6.96447 20.25 7.97183 20.25 9.21447V17.25C20.25 18.4926 19.2426 19.5 18 19.5H6C4.75736 19.5 3.75 18.4926 3.75 17.25V6.75Z"
@@ -79,7 +79,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Chevron Left -->
+    <!-- 左箭头 -->
     <template v-else-if="name === 'chevron-left'">
       <path
         d="M14.5 7L9.5 12L14.5 17"
@@ -90,7 +90,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Chevron Right -->
+    <!-- 右箭头 -->
     <template v-else-if="name === 'chevron-right'">
       <path
         d="M9.5 7L14.5 12L9.5 17"
@@ -101,7 +101,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Chevron Down -->
+    <!-- 下箭头 -->
     <template v-else-if="name === 'chevron-down'">
       <path
         d="M7 9.5L12 14.5L17 9.5"
@@ -112,7 +112,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Chevrons Up Down (macOS PopUp button indicator) -->
+    <!-- 上下箭头（macOS 弹出按钮指示符） -->
     <template v-else-if="name === 'chevrons-up-down' || name === 'chevron-up-down'">
       <path
         d="M7 15L12 20L17 15M7 9L12 4L17 9"
@@ -123,7 +123,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Sun (Light Theme) -->
+    <!-- 太阳（浅色主题） -->
     <template v-else-if="name === 'sun'">
       <circle cx="12" cy="12" r="4" :stroke="props.color" :stroke-width="props.strokeWidth" />
       <path
@@ -134,7 +134,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Moon (Dark Theme) -->
+    <!-- 月亮（深色主题） -->
     <template v-else-if="name === 'moon'">
       <path
         d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
@@ -145,7 +145,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Display (System Theme) -->
+    <!-- 显示器（跟随系统主题） -->
     <template v-else-if="name === 'display' || name === 'desktop'">
       <rect
         x="2"
@@ -164,7 +164,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Globe (Language) -->
+    <!-- 地球（语言） -->
     <template v-else-if="name === 'globe'">
       <circle
         cx="12"
@@ -182,7 +182,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Plus -->
+    <!-- 加号 -->
     <template v-else-if="name === 'plus'">
       <path
         d="M12 5V19M5 12H19"
@@ -193,7 +193,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Refresh / Clockwise -->
+    <!-- 刷新 / 顺时针旋转 -->
     <template v-else-if="name === 'refresh' || name === 'arrow-clockwise'">
       <path
         d="M20 11C19.5539 7.05369 16.2098 4 12.11 4C7.63 4 4 7.58 4 12C4 16.42 7.63 20 12.11 20C15.82 20 18.91 17.51 19.82 14.1"
@@ -211,7 +211,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Settings / Gear -->
+    <!-- 设置 / 齿轮 -->
     <template v-else-if="name === 'gear' || name === 'settings'">
       <path
         d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z"
@@ -229,7 +229,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Search / Magnifying Glass -->
+    <!-- 搜索 / 放大镜 -->
     <template v-else-if="name === 'search' || name === 'magnifying-glass'">
       <path
         d="M10.5 18C14.6421 18 18 14.6421 18 10.5C18 6.35786 14.6421 3 10.5 3C6.35786 3 3 6.35786 3 10.5C3 14.6421 6.35786 18 10.5 18Z"
@@ -247,7 +247,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Clear / X Mark / Close -->
+    <!-- 清除 / 叉号 / 关闭 -->
     <template v-else-if="name === 'close' || name === 'xmark' || name === 'x'">
       <path
         d="M6 6L18 18M18 6L6 18"
@@ -258,7 +258,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Focus Mode (Expand to Center Focus Modal) -->
+    <!-- 专注模式（展开至居中浮层） -->
     <template v-else-if="name === 'focus' || name === 'expand'">
       <path
         d="M15 3H21V9M9 21H3V15M21 3L14 10M3 21L10 14"
@@ -269,7 +269,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Split Mode / Columns / Exit Focus -->
+    <!-- 分栏模式 / 双栏 / 退出专注 -->
     <template v-else-if="name === 'split' || name === 'collapse'">
       <path
         d="M4 14H10V20M20 10H14V4M10 14L3 21M14 10L21 3"
@@ -280,13 +280,13 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Reader Layout / Split View -->
+    <!-- 阅读器布局 / 分割视图 -->
     <template v-else-if="name === 'layout-split' || name === 'sidebar-right'">
       <rect x="3" y="4" width="18" height="16" rx="3" :stroke="props.color" :stroke-width="props.strokeWidth" />
       <path d="M14 4V20" :stroke="props.color" :stroke-width="props.strokeWidth" />
     </template>
 
-    <!-- Checkmark -->
+    <!-- 对勾 -->
     <template v-else-if="name === 'checkmark'">
       <path
         d="M5 12.5L9.5 17L19 7.5"
@@ -297,7 +297,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Checkmark Circle / Mark All Read -->
+    <!-- 圆圈对勾 / 全部标为已读 -->
     <template v-else-if="name === 'checkmark-circle' || name === 'mark-all-read'">
       <circle
         cx="12"
@@ -315,7 +315,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Star Fill -->
+    <!-- 实心星标 -->
     <template v-else-if="name === 'star-fill'">
       <path
         d="M12 2.5L15.09 8.76L22 9.77L17 14.64L18.18 21.52L12 18.27L5.82 21.52L7 14.64L2 9.77L8.91 8.76L12 2.5Z"
@@ -327,7 +327,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Star Outline -->
+    <!-- 空心星标 -->
     <template v-else-if="name === 'star'">
       <path
         d="M12 2.5L15.09 8.76L22 9.77L17 14.64L18.18 21.52L12 18.27L5.82 21.52L7 14.64L2 9.77L8.91 8.76L12 2.5Z"
@@ -338,7 +338,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- View: Cards -->
+    <!-- 视图：卡片 -->
     <template v-else-if="name === 'view-cards'">
       <rect
         x="3.5"
@@ -378,7 +378,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- View: List -->
+    <!-- 视图：列表 -->
     <template v-else-if="name === 'view-list'">
       <path
         d="M4 6H20M4 12H20M4 18H20"
@@ -388,7 +388,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- View: Magazine -->
+    <!-- 视图：杂志 -->
     <template v-else-if="name === 'view-magazine'">
       <rect
         x="3.5"
@@ -422,7 +422,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- View: Compact -->
+    <!-- 视图：紧凑 -->
     <template v-else-if="name === 'view-compact'">
       <path
         d="M4 5H20M4 9H20M4 13H20M4 17H20M4 21H20"
@@ -432,7 +432,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Arrow Up Right / Open in Browser -->
+    <!-- 右上箭头 / 在浏览器中打开 -->
     <template v-else-if="name === 'open-web' || name === 'arrow-up-right'">
       <path
         d="M18 13V18C18 19.1046 17.1046 20 16 20H6C4.89543 20 4 19.1046 4 18V8C4 6.89543 4.89543 6 6 6H11"
@@ -455,7 +455,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Fetch Full Content / Sparkles -->
+    <!-- 抓取全文 / 闪烁效果 -->
     <template v-else-if="name === 'sparkles' || name === 'doc-text-magnifyingglass'">
       <path
         d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z"
@@ -479,7 +479,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Circle (Unread Toggle) -->
+    <!-- 圆圈（未读切换） -->
     <template v-else-if="name === 'circle'">
       <circle
         cx="12"
@@ -490,7 +490,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Circle Fill -->
+    <!-- 实心圆圈 -->
     <template v-else-if="name === 'circle-fill'">
       <circle
         cx="12"
@@ -500,7 +500,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Trash / Delete -->
+    <!-- 垃圾桶 / 删除 -->
     <template v-else-if="name === 'trash' || name === 'delete'">
       <path
         d="M4 7H20M10 11V17M14 11V17M5 7L6 19C6 20.1046 6.89543 21 8 21H16C17.1046 21 18 20.1046 18 19L19 7M9 7V4C9 3.44772 9.44772 3 10 3H14C14.5523 3 15 3.44772 15 4V7"
@@ -511,7 +511,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Pencil / Edit / Rename -->
+    <!-- 铅笔 / 编辑 / 重命名 -->
     <template v-else-if="name === 'pencil' || name === 'rename'">
       <path
         d="M17 3L21 7L7 21H3V17L17 3Z"
@@ -522,7 +522,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Import / Download -->
+    <!-- 导入 / 下载 -->
     <template v-else-if="name === 'import' || name === 'arrow-down-tray'">
       <path
         d="M4 17V19C4 20.1046 4.89543 21 6 21H18C19.1046 21 20 20.1046 20 19V17"
@@ -539,7 +539,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Export / Upload -->
+    <!-- 导出 / 上传 -->
     <template v-else-if="name === 'export' || name === 'arrow-up-tray'">
       <path
         d="M4 17V19C4 20.1046 4.89543 21 6 21H18C19.1046 21 20 20.1046 20 19V17"
@@ -556,7 +556,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Info / About -->
+    <!-- 信息 / 关于 -->
     <template v-else-if="name === 'info' || name === 'about'">
       <circle
         cx="12"
@@ -573,7 +573,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Rss / Feed -->
+    <!-- RSS / 订阅源 -->
     <template v-else-if="name === 'rss' || name === 'feed'">
       <path
         d="M4 11C8.41828 11 12 14.5817 12 19"
@@ -590,7 +590,7 @@ const pixelSize = computed(() => {
       <circle cx="5" cy="19" r="1.5" fill="currentColor" />
     </template>
 
-    <!-- App / General -->
+    <!-- 应用 / 常规 -->
     <template v-else-if="name === 'app' || name === 'sliders'">
       <path
         d="M4 21V14M4 10V3M12 21V12M12 8V3M20 21V16M20 12V3M1 14H7M9 8H15M17 16H23"
@@ -600,7 +600,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Keyboard / Shortcuts -->
+    <!-- 键盘 / 快捷键 -->
     <template v-else-if="name === 'keyboard'">
       <rect
         x="2.5"
@@ -620,7 +620,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Sources -->
+    <!-- 订阅源管理 -->
     <template v-else-if="name === 'sources' || name === 'antenna'">
       <path
         d="M4.93 4.93C1.02 8.84 1.02 15.16 4.93 19.07M19.07 4.93C22.98 8.84 22.98 15.16 19.07 19.07"
@@ -637,7 +637,7 @@ const pixelSize = computed(() => {
       <circle cx="12" cy="12.7" r="2" :stroke="props.color" :stroke-width="props.strokeWidth" fill="currentColor" />
     </template>
 
-    <!-- Database / Data -->
+    <!-- 数据库 / 数据 -->
     <template v-else-if="name === 'data' || name === 'cylinder'">
       <ellipse
         cx="12"
@@ -659,7 +659,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Funnel / Rules / Filter -->
+    <!-- 漏斗 / 规则 / 过滤 -->
     <template v-else-if="name === 'funnel' || name === 'rules'">
       <path
         d="M3 5C3 4.44772 3.44772 4 4 4H20C20.5523 4 21 4.44772 21 5V6.58579C21 6.851 20.8946 7.10536 20.7071 7.29289L14.5 13.5V19C14.5 19.3746 14.2907 19.7181 13.9576 19.8847L10.9576 21.3847C10.2929 21.717 9.5 21.2342 9.5 20.5V13.5L3.29289 7.29289C3.10536 7.10536 3 6.851 3 6.58579V5Z"
@@ -670,7 +670,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Bell / Notification -->
+    <!-- 铃铛 / 通知 -->
     <template v-else-if="name === 'bell'">
       <path
         d="M6 8C6 4.68629 8.68629 2 12 2C15.3137 2 18 4.68629 18 8V11.5L19.4472 14.8944C19.7672 15.6442 19.2159 16.483 18.3986 16.483H5.60142C4.78411 16.483 4.23275 15.6442 4.55279 14.8944L6 11.5V8Z"
@@ -687,7 +687,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Archive box / Backup -->
+    <!-- 归档箱 / 备份 -->
     <template v-else-if="name === 'archivebox'">
       <path
         d="M4 8.5C3.72386 8.5 3.5 8.27614 3.5 8V5C3.5 4.17157 4.17157 3.5 5 3.5H19C19.8284 3.5 20.5 4.17157 20.5 5V8C20.5 8.27614 20.2761 8.5 20 8.5H4Z"
@@ -710,7 +710,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Cloud / Sync -->
+    <!-- 云端 / 同步 -->
     <template v-else-if="name === 'cloud' || name === 'sync'">
       <path
         d="M7 18.5C4.51472 18.5 2.5 16.4853 2.5 14C2.5 11.6915 4.24528 9.78924 6.47736 9.53373C6.99233 6.89229 9.26744 4.9 12 4.9C14.7326 4.9 17.0077 6.89229 17.5226 9.53373C19.7547 9.78924 21.5 11.6915 21.5 14C21.5 16.4853 19.4853 18.5 17 18.5H7Z"
@@ -728,7 +728,7 @@ const pixelSize = computed(() => {
       />
     </template>
 
-    <!-- Fallback / Default -->
+    <!-- 回退 / 默认 -->
     <template v-else>
       <circle cx="12" cy="12" r="8" :stroke="props.color" :stroke-width="props.strokeWidth" />
     </template>

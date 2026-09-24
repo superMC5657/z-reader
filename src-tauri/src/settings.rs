@@ -15,10 +15,9 @@ fn secrets_path(settings_path: &Path) -> PathBuf {
     settings_path.with_file_name("secrets.json")
 }
 
-/// On-disk secrets stored in a dedicated file (`secrets.json`).
-/// NEVER packed into backups (see `backup::write_archive`) and written
-/// with owner-only permissions on Unix. Keeps credentials physically
-/// isolated from public configuration.
+/// 存储在独立文件（`secrets.json`）中的磁盘密钥。
+/// 绝不打包进备份文件（参见 `backup::write_archive`），并在 Unix 系统上
+/// 设置仅所有者可读写权限。使敏感凭据在物理层面与公开配置隔离。
 #[derive(Serialize, Deserialize, Default)]
 struct SecretStore {
     #[serde(default)]
@@ -30,7 +29,7 @@ struct SecretStore {
 fn read_secrets(settings_path: &Path) -> SecretStore {
     let path = secrets_path(settings_path);
     match std::fs::read_to_string(&path) {
-        // Missing file is the normal first-run state: stay silent.
+        // 文件不存在是首次运行的正常状态：保持静默。
         Err(_) => SecretStore::default(),
         Ok(t) => match serde_json::from_str(&t) {
             Ok(s) => s,
@@ -62,8 +61,8 @@ fn write_secrets(settings_path: &Path, store: &SecretStore) -> Result<(), String
     Ok(())
 }
 
-/// Drop the synced account secret (used on logout so a stale password does
-/// not survive next to a removed account).
+/// 清除同步账户的密码凭据（用于退出登录，避免已移除账户的残留密码
+/// 继续驻留在磁盘中）。
 pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
     let mut store = read_secrets(settings_path);
     store.sync_password.clear();
@@ -72,7 +71,7 @@ pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
 
 pub fn load(path: &PathBuf) -> Settings {
     let mut s = match std::fs::read_to_string(path) {
-        // Missing file is the normal first-run state: stay silent.
+        // 文件不存在是首次运行的正常状态：保持静默。
         Err(_) => Settings::default(),
         Ok(text) => match serde_json::from_str::<Settings>(&text) {
             Ok(s) => s,
@@ -118,8 +117,7 @@ pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
-/// First line of an error message, truncated: reasons never carry file
-/// paths, tokens or article text.
+/// 截取错误消息的第一行：原因描述中绝不包含文件路径、令牌或文章文本。
 fn short_reason(msg: &str) -> String {
     const MAX_CHARS: usize = 160;
     let first = msg.lines().next().unwrap_or("").trim();
@@ -130,7 +128,7 @@ fn short_reason(msg: &str) -> String {
     }
 }
 
-/// Basename only: full file paths never enter logs.
+/// 仅获取文件名（基础名称）：完整文件路径绝不写入日志。
 fn file_base(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
@@ -171,14 +169,14 @@ mod tests {
 
     #[test]
     fn save_redacts_json_and_load_hydrates() {
-        // Given: settings carrying secrets
+        // 给定：带有凭据的设置
         let path = temp_settings("roundtrip");
-        // When: saved
+        // 当：保存时
         save(&path, &settings_with_secrets()).unwrap();
-        // Then: the JSON on disk carries no secret…
+        // 那么：磁盘上的 JSON 不包含任何凭据…
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("hunter2") && !raw.contains("s3cret"));
-        // …while load() still returns them from the sidecar file
+        // …同时 load() 仍能从附随的密钥文件中读取它们
         let loaded = load(&path);
         assert_eq!(loaded.sync_account.as_ref().unwrap().password, "hunter2");
         assert_eq!(loaded.proxy_password, "s3cret");
