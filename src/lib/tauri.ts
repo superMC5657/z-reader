@@ -67,12 +67,7 @@ export const importBackup = () => invoke<string | null>('import_backup')
 
 // ---------- 存储生命周期与统计 ----------
 export const getStats = () => invoke<AppStats>('get_stats')
-export const vacuumNow = () => invoke<void>('vacuum_now')
 export const cleanupNow = () => invoke<number>('cleanup_now')
-
-// ---------- 日志导出（用户自选，仅限本地文件） ----------
-export const zlogGetDir = () => invoke<string>('zlog_get_dir')
-export const zlogExportBundle = () => invoke<string>('zlog_export_bundle')
 
 // ---------- 云同步（Google Reader API） ----------
 export const syncLogin = (serverUrl: string, username: string, password: string) =>

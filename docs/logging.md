@@ -10,8 +10,6 @@
 - macOS: `~/Library/Logs/com.zreader.app/`
 - Linux: `~/.local/share/com.zreader.app/logs/`（XDG；以运行时为准）
 
-前端通过 `zlog_get_dir` 命令查询该目录。
-
 ## 单一应用日志文件 (`z-reader.log`)
 
 所有日志汇流至同一文件，彻底消除多文件时标对齐与因果错位成本：

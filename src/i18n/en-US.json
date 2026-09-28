@@ -152,8 +152,6 @@
       "unhide": "Unhide"
     },
     "sources": {
-      "title": "Manage Subscriptions",
-      "group": "Group",
       "ungrouped": "Ungrouped",
       "remove": "Remove",
       "confirmRemove": "Remove this source and all its articles?"
@@ -177,7 +175,6 @@
       "fadeRead": "Fade read articles"
     },
     "shortcuts": {
-      "title": "Keyboard Shortcuts",
       "hint": "Click any shortcut key to customize it with your keyboard",
       "reset": "Reset to Defaults",
       "pressKey": "Press a key…",
@@ -228,7 +225,6 @@
   "group": {
     "new": "New Group",
     "namePlaceholder": "Group name",
-    "create": "Create",
     "rename": "Rename",
     "delete": "Delete group",
     "confirmDelete": "Delete this group? (sources will move to ungrouped)",
@@ -237,8 +233,7 @@
   "feed": {
     "rename": "Rename",
     "refreshIcon": "Refresh Icon",
-    "changeIcon": "Change Custom Icon",
-    "iconUpdated": "Icon updated"
+    "changeIcon": "Change Custom Icon"
   },
   "common": {
     "cancel": "Cancel",

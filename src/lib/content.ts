@@ -35,6 +35,6 @@ export function isFullContentCached(item: Item | null | undefined): boolean {
 /**
  * 检查文本是否匹配常见的 RSS 截断摘要结尾提示语。
  */
-export function isStubText(text: string): boolean {
+function isStubText(text: string): boolean {
   return /查看全文|阅读全文|继续阅读|原文链接|阅读更多|Read more|Continue reading/i.test(text)
 }

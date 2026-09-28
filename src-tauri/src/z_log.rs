@@ -3,7 +3,7 @@
 //! - 后端 `log::*!` 与通过 `@tauri-apps/plugin-log` 发送的前端日志记录均汇入以应用命名的单个统一日志文件（`z-reader.log`）。
 //! - 日志文件保存在操作系统的日志目录中（[`log_dir`]）；业务数据保存在 SQLite（`zreader.db`）中。日志绝不会写入数据库。
 //! - 保留策略为尽力而为的文件清理：删除超过 14 天的文件，然后按最旧优先的顺序删除，直至整个目录小于 25 MiB。
-//! - 绝不自动向任何远程上传日志。远程上报保持为显式选择加入的功能（待办：添加需用户确认的“导出并发送”流程）。
+//! - 绝不自动向任何远程上传日志。
 
 use std::path::{Path, PathBuf};
 
@@ -309,57 +309,6 @@ pub fn install_panic_hook() {
             prev(info);
         }));
     });
-}
-
-/// 前端命令：获取日志目录的绝对路径。
-#[tauri::command]
-pub fn zlog_get_dir(app: AppHandle) -> Result<String, String> {
-    Ok(log_dir(&app)?.to_string_lossy().into_owned())
-}
-
-/// 前端命令：将近期的 `*.log` 文件合并为一个打包日志文件并返回其路径。仅供用户主动选择——应用绝不会自行上传日志。
-///
-/// 待办(opt-in)：在此基础上添加需用户确认的“导出并发送”流程。
-#[tauri::command]
-pub async fn zlog_export_bundle(app: AppHandle) -> Result<String, String> {
-    let dir = log_dir(&app)?;
-    let mut logs: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            if !p.is_file() || p.extension().and_then(|e| e.to_str()) != Some("log") {
-                return false;
-            }
-            // 跳过之前生成的打包文件，避免重复导出导致新包中嵌套无限膨胀的副本。
-            !p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("zreader-log-bundle-"))
-        })
-        .collect();
-    logs.sort();
-    if logs.is_empty() {
-        return Err("no log files found".into());
-    }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let bundle = dir.join(format!("zreader-log-bundle-{stamp}.log"));
-    let mut out = String::new();
-    for path in &logs {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        out.push_str(&format!("===== {name} =====\n"));
-        match std::fs::read_to_string(path) {
-            Ok(text) => out.push_str(&text),
-            Err(e) => out.push_str(&format!("<unreadable: {e}>\n")),
-        }
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-    std::fs::write(&bundle, out).map_err(|e| e.to_string())?;
-    Ok(bundle.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

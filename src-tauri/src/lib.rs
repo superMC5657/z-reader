@@ -124,10 +124,7 @@ pub fn run() {
             commands::export_backup,
             commands::import_backup,
             commands::get_stats,
-            commands::vacuum_now,
             commands::cleanup_now,
-            z_log::zlog_get_dir,
-            z_log::zlog_export_bundle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

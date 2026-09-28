@@ -884,15 +884,6 @@ pub async fn get_stats(_app: AppHandle, state: State<'_, AppState>) -> Result<se
     }))
 }
 
-#[tauri::command]
-pub async fn vacuum_now(state: State<'_, AppState>) -> Result<(), String> {
-    log::info!("[CMD] action=vacuum_now");
-    let conn = state.db.lock().await;
-    db::vacuum(&conn)?;
-    log::info!("[CMD] action=vacuum_now ok");
-    Ok(())
-}
-
 /// 立即应用数据保留策略，仅在确实删除了文章时才执行数据库压缩（VACUUM）。
 #[tauri::command]
 pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {

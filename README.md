@@ -80,7 +80,7 @@ pnpm tauri build   # 生产打包出包 (产物位于 src-tauri/target/release/b
 ### 质量检查
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml          # 后端单元测试 (32项测试)
+cargo test --manifest-path src-tauri/Cargo.toml          # 后端单元测试
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings # 后端代码检查
 pnpm build                                               # 前端类型检查与构建
 ```

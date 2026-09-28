@@ -106,26 +106,6 @@ pub fn classify_error(msg: &str) -> &'static str {
     "other"
 }
 
-/// 对 reqwest 传输层错误进行分类（优先判断超时/DNS/连接/响应体，
-/// 随后回退至字符串分类）。
-#[allow(dead_code)]
-pub fn reqwest_err_kind(e: &reqwest::Error) -> &'static str {
-    if e.is_timeout() {
-        return "timeout";
-    }
-    if e.is_connect() {
-        let s = e.to_string().to_ascii_lowercase();
-        if s.contains("dns") || s.contains("resolve") {
-            return "dns";
-        }
-        return "connect";
-    }
-    if e.is_body() || e.is_decode() {
-        return "body";
-    }
-    classify_error(&e.to_string())
-}
-
 pub struct RequestLog {
     pub kind: &'static str,
     pub method: &'static str,
@@ -139,11 +119,6 @@ pub struct RequestLog {
 }
 
 impl RequestLog {
-    #[allow(dead_code)]
-    pub fn start(kind: &'static str, method: &'static str, url: &str) -> Self {
-        Self::start_with(kind, method, url, "", None)
-    }
-
     pub fn start_with(
         kind: &'static str,
         method: &'static str,
@@ -338,7 +313,7 @@ pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
 /// 连通性测试路径已通过 [`validate_proxy`] 进行了前置校验，因此该分支仅覆盖手动修改配置文件的情况。
 pub fn build_http_client(settings: &Settings) -> reqwest::Client {
     let mut builder = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; ZReader/0.2)")
+        .user_agent("Mozilla/5.0 (compatible; ZReader/0.3)")
         .timeout(std::time::Duration::from_secs(30));
 
     match settings.proxy_mode.as_str() {

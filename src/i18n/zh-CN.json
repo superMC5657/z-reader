@@ -152,8 +152,6 @@
       "unhide": "取消隐藏"
     },
     "sources": {
-      "title": "订阅源管理",
-      "group": "所属分组",
       "ungrouped": "未分组",
       "remove": "删除",
       "confirmRemove": "确定删除此订阅源及其全部文章？"
@@ -177,7 +175,6 @@
       "fadeRead": "淡化已读文章"
     },
     "shortcuts": {
-      "title": "快捷键设置",
       "hint": "点击快捷键按钮即可按下键盘按键进行自定义修改",
       "reset": "恢复默认快捷键",
       "pressKey": "请按下按键…",
@@ -228,7 +225,6 @@
   "group": {
     "new": "新建分组",
     "namePlaceholder": "分组名称",
-    "create": "创建",
     "rename": "重命名",
     "delete": "删除分组",
     "confirmDelete": "确定删除分组？(分组内订阅源将移至未分组)",
@@ -237,8 +233,7 @@
   "feed": {
     "rename": "重命名",
     "refreshIcon": "重新获取图标",
-    "changeIcon": "更换自定义图标",
-    "iconUpdated": "图标已更新"
+    "changeIcon": "更换自定义图标"
   },
   "common": {
     "cancel": "取消",

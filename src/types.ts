@@ -96,12 +96,6 @@ export interface GetItemsParams {
   offset?: number
 }
 
-export interface MenuItem {
-  label: string
-  danger?: boolean
-  action: () => void
-}
-
 export type RuleTargetField = 'title' | 'content' | 'author' | 'source_url' | 'any'
 export type RuleActionType = 'mark_read' | 'star' | 'hide' | 'notify'
 
