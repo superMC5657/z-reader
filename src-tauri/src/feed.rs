@@ -226,6 +226,18 @@ pub fn sniff_image_ext(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// [`fetch_favicon`] / [`fetch_favicon_with`] 的参数包。
+/// 聚合后调用参数不超过 clippy `too_many_arguments` 上限(7 个)。
+pub struct FaviconFetchOptions<'a> {
+    pub feed_url: &'a str,
+    pub icon_url: Option<&'a str>,
+    pub site_url: Option<&'a str>,
+    pub favicon_dir: &'a std::path::Path,
+    pub source_id: i64,
+    pub allow_third_party: bool,
+    pub cycle: &'a str,
+}
+
 pub async fn fetch_favicon(
     client: &reqwest::Client,
     feed_url: &str,
@@ -235,21 +247,36 @@ pub async fn fetch_favicon(
     source_id: i64,
     allow_third_party: bool,
 ) -> Option<std::path::PathBuf> {
-    fetch_favicon_with(client, feed_url, icon_url, site_url, favicon_dir, source_id, allow_third_party, "").await
+    fetch_favicon_with(
+        client,
+        FaviconFetchOptions {
+            feed_url,
+            icon_url,
+            site_url,
+            favicon_dir,
+            source_id,
+            allow_third_party,
+            cycle: "",
+        },
+    )
+    .await
 }
 
 /// 功能同 [`fetch_favicon`]，但在网络日志行上标记 `cycle=`（网站图标
 /// 候选请求保持 debug 级别，绝不升为 INFO）。
 pub async fn fetch_favicon_with(
     client: &reqwest::Client,
-    feed_url: &str,
-    icon_url: Option<&str>,
-    site_url: Option<&str>,
-    favicon_dir: &std::path::Path,
-    source_id: i64,
-    allow_third_party: bool,
-    cycle: &str,
+    opts: FaviconFetchOptions<'_>,
 ) -> Option<std::path::PathBuf> {
+    let FaviconFetchOptions {
+        feed_url,
+        icon_url,
+        site_url,
+        favicon_dir,
+        source_id,
+        allow_third_party,
+        cycle,
+    } = opts;
     let mut candidates = Vec::new();
 
     // 1. RSS/Atom 中显式指定的订阅源图标 URL

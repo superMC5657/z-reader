@@ -227,8 +227,19 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
             if favicon.is_none() {
                 let icon_url = parsed.icon_url.as_deref();
                 let site_url = parsed.site_url.as_deref();
-                if let Some(fav) =
-                    feed::fetch_favicon_with(&client, &url, icon_url, site_url, &favicon_dir, id, allow_third_party, &cycle).await
+                if let Some(fav) = feed::fetch_favicon_with(
+                    &client,
+                    feed::FaviconFetchOptions {
+                        feed_url: &url,
+                        icon_url,
+                        site_url,
+                        favicon_dir: &favicon_dir,
+                        source_id: id,
+                        allow_third_party,
+                        cycle: &cycle,
+                    },
+                )
+                .await
                 {
                     let conn = state.db.lock().await;
                     let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
