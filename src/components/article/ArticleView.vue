@@ -9,6 +9,9 @@ import { isFullContentCached } from '../../lib/content'
 import { formatFullTime } from '../../lib/time'
 import { decodeHtmlEntities } from '../../lib/highlight'
 import Icon from '../ui/Icon.vue'
+import AlertBanner from '../ui/AlertBanner.vue'
+import EmptyState from '../ui/EmptyState.vue'
+import StarButton from '../ui/StarButton.vue'
 
 const props = defineProps<{
   isFocusModal?: boolean
@@ -318,14 +321,12 @@ function onIframeLoad(e: Event) {
           </button>
 
           <!-- 星标收藏 -->
-          <button
-            class="f-icon-btn reader-action-btn"
-            :class="{ 'active-star': item.starred }"
+          <StarButton
+            class="reader-action-btn"
+            :starred="item.starred"
             :title="t(item.starred ? 'item.unstar' : 'item.star')"
             @click="data.toggleStar(item)"
-          >
-            <Icon :name="item.starred ? 'star-fill' : 'star'" :size="15" />
-          </button>
+          />
 
           <!-- 标记为未读 -->
           <button
@@ -362,16 +363,16 @@ function onIframeLoad(e: Event) {
       </div>
     </header>
 
-    <div v-if="extractError" class="error-banner">
-      <Icon name="info" :size="15" />
-      <span class="error-message">
-        {{ displayBody ? t('item.fetchFailedSummaryShown') : `${t('common.error')}: ${extractError}` }}
-      </span>
-      <button class="error-retry-btn" :disabled="fetchingFull" @click="onManualFetchFull">
-        <Icon name="arrow-clockwise" :size="12" :class="{ spin: fetchingFull }" />
-        {{ t('item.retry') }}
-      </button>
-    </div>
+    <AlertBanner
+      v-if="extractError"
+      type="error"
+      retryable
+      :loading="fetchingFull"
+      :message="displayBody ? t('item.fetchFailedSummaryShown') : `${t('common.error')}: ${extractError}`"
+      :retry-text="t('item.retry')"
+      class="article-error-banner"
+      @retry="onManualFetchFull"
+    />
 
     <!-- 自动抓取全文加载状态（缓存未命中） -->
     <div v-if="fetchingFull && !isCached" class="loading-reader">
@@ -392,17 +393,17 @@ function onIframeLoad(e: Event) {
     ></iframe>
 
     <!-- 无正文空状态 -->
-    <div v-else class="empty-reader">
-      <div class="empty-icon-circle">
-        <Icon name="sparkles" :size="32" color="var(--text-quaternary)" />
-      </div>
-      <p class="empty-title">{{ t('item.noContent') }}</p>
-      <p class="empty-sub">{{ t('item.noContentHint') }}</p>
-      <button class="f-btn primary" :disabled="fetchingFull" @click="onManualFetchFull">
-        <Icon name="arrow-clockwise" :size="14" :class="{ spin: fetchingFull }" />
-        {{ fetchingFull ? t('item.fetching') : t('item.fetchFull') }}
-      </button>
-    </div>
+    <EmptyState
+      v-else
+      class="empty-reader"
+      icon="sparkles"
+      :icon-size="32"
+      :title="t('item.noContent')"
+      :description="t('item.noContentHint')"
+      :action-text="fetchingFull ? t('item.fetching') : t('item.fetchFull')"
+      :action-loading="fetchingFull"
+      @action="onManualFetchFull"
+    />
   </section>
 </template>
 
@@ -517,44 +518,9 @@ function onIframeLoad(e: Event) {
   background: transparent;
 }
 
-.error-banner {
+.article-error-banner {
+  border-radius: 0;
   padding: 0.65rem var(--reader-pad-x);
-  font-size: 0.82rem;
-  color: var(--danger);
-  background: var(--danger-tint);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.error-message {
-  flex: 1;
-  min-width: 0;
-  word-break: break-word;
-}
-
-.error-retry-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: transparent;
-  border: 1px solid currentColor;
-  color: inherit;
-  font-size: 0.78rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
-  white-space: nowrap;
-}
-
-.error-retry-btn:hover:not(:disabled) {
-  opacity: 0.75;
-}
-
-.error-retry-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .loading-reader {
@@ -595,30 +561,6 @@ function onIframeLoad(e: Event) {
 
 .empty-reader {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.55rem;
-  color: var(--text-secondary);
-  padding: 2rem;
-}
-
-.empty-icon-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 4.2rem;
-  height: 4.2rem;
-  border-radius: 50%;
-  background: var(--bg-track);
-  margin-bottom: 0.4rem;
-}
-
-.empty-title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 .mobile-back-btn {

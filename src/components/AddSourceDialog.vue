@@ -5,6 +5,7 @@ import { useDataStore } from '../stores/data'
 import Modal from './ui/Modal.vue'
 import Icon from './ui/Icon.vue'
 import AppleSelect from './ui/AppleSelect.vue'
+import AlertBanner from './ui/AlertBanner.vue'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -61,10 +62,7 @@ async function submit() {
         />
       </div>
 
-      <div v-if="error" class="error-banner">
-        <Icon name="info" :size="14" />
-        <span>{{ error }}</span>
-      </div>
+      <AlertBanner v-if="error" type="error" :message="error" />
     </div>
 
     <template #footer>
@@ -101,17 +99,5 @@ async function submit() {
 .apple-select {
   width: 100%;
   max-width: 100%;
-}
-
-.error-banner {
-  padding: 0.6rem 0.9rem;
-  border-radius: 8px;
-  background: var(--danger-tint);
-  color: var(--danger);
-  font-size: 0.8rem;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  word-break: break-all;
 }
 </style>

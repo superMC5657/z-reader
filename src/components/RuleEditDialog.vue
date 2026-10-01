@@ -7,6 +7,7 @@ import Modal from './ui/Modal.vue'
 import AppleSelect from './ui/AppleSelect.vue'
 import Switch from './ui/Switch.vue'
 import Icon from './ui/Icon.vue'
+import AlertBanner from './ui/AlertBanner.vue'
 
 const props = defineProps<{
   /** null 表示新建规则 */
@@ -115,7 +116,7 @@ async function save() {
       <label class="form-label">{{ t('settings.rules.fieldName') }}</label>
       <input
         v-model="form.name"
-        class="apple-text-input"
+        class="apple-input"
         :placeholder="t('settings.rules.namePlaceholder')"
       />
 
@@ -153,7 +154,7 @@ async function save() {
         <label class="form-label">{{ t('settings.rules.testTitle') }}</label>
         <input
           v-model="testText"
-          class="apple-text-input"
+          class="apple-input"
           :placeholder="t('settings.rules.testPlaceholder')"
           @input="runTest"
         />
@@ -163,7 +164,7 @@ async function save() {
         </div>
       </div>
 
-      <div v-if="errorMsg" class="rule-error">{{ errorMsg }}</div>
+      <AlertBanner v-if="errorMsg" type="error" :message="errorMsg" class="rule-error-banner" />
     </div>
 
     <template #footer>
@@ -237,12 +238,7 @@ async function save() {
   color: var(--success);
 }
 
-.rule-error {
+.rule-error-banner {
   margin-top: 10px;
-  padding: 9px 12px;
-  border-radius: 8px;
-  background: var(--danger-tint);
-  color: var(--danger);
-  font-size: 12px;
 }
 </style>

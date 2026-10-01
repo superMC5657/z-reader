@@ -3,7 +3,7 @@ import { useDataStore } from '../../stores/data'
 import { formatTime } from '../../lib/time'
 import { highlightText } from '../../lib/highlight'
 import type { Item } from '../../types'
-import Icon from '../ui/Icon.vue'
+import StarButton from '../ui/StarButton.vue'
 
 defineProps<{ items: Item[] }>()
 const emit = defineEmits<{ select: [Item]; context: [MouseEvent, Item] }>()
@@ -41,13 +41,11 @@ const data = useDataStore()
       </div>
 
       <!-- 星标按钮 -->
-      <button
-        class="f-icon-btn star-btn"
-        :class="{ 'active-star': item.starred }"
+      <StarButton
+        :starred="item.starred"
+        :size="14"
         @click.stop="data.toggleStar(item)"
-      >
-        <Icon :name="item.starred ? 'star-fill' : 'star'" :size="14" />
-      </button>
+      />
     </article>
   </div>
 </template>
@@ -159,28 +157,5 @@ const data = useDataStore()
 
 .row.selected .time {
   color: rgba(255, 255, 255, 0.75);
-}
-
-.star-btn {
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 6px;
-  color: var(--text-tertiary);
-}
-
-.row.selected .star-btn {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.row.selected .star-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.star-btn.active-star {
-  color: var(--star) !important;
-}
-
-.row.selected .star-btn.active-star {
-  color: #ffd60a !important;
 }
 </style>

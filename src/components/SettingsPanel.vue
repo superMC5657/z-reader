@@ -11,6 +11,11 @@ import Icon from './ui/Icon.vue'
 import FeedIcon from './ui/FeedIcon.vue'
 import AppleSelect from './ui/AppleSelect.vue'
 import Switch from './ui/Switch.vue'
+import EmptyState from './ui/EmptyState.vue'
+import AlertBanner from './ui/AlertBanner.vue'
+import StepperSlider from './ui/StepperSlider.vue'
+import ConfirmModal from './ui/ConfirmModal.vue'
+import Badge from './ui/Badge.vue'
 import RuleEditDialog from './RuleEditDialog.vue'
 import { LOCALES } from '../i18n'
 import {
@@ -25,6 +30,52 @@ const data = useDataStore()
 const app = useAppStore()
 
 const emit = defineEmits<{ close: [] }>()
+
+const confirmState = ref<{
+  show: boolean
+  title?: string
+  message: string
+  confirmText?: string
+  danger?: boolean
+  loading?: boolean
+  onConfirm?: () => void | Promise<void>
+}>({
+  show: false,
+  message: '',
+})
+
+function requestConfirm(options: {
+  title?: string
+  message: string
+  confirmText?: string
+  danger?: boolean
+  onConfirm: () => void | Promise<void>
+}) {
+  confirmState.value = {
+    show: true,
+    title: options.title,
+    message: options.message,
+    confirmText: options.confirmText,
+    danger: options.danger ?? true,
+    loading: false,
+    onConfirm: options.onConfirm,
+  }
+}
+
+async function handleConfirm() {
+  if (confirmState.value.onConfirm) {
+    confirmState.value.loading = true
+    try {
+      await confirmState.value.onConfirm()
+    } finally {
+      confirmState.value.loading = false
+      confirmState.value.show = false
+    }
+  } else {
+    confirmState.value.show = false
+  }
+}
+
 
 const tab = ref<'sources' | 'general' | 'rules' | 'sync' | 'app' | 'shortcuts' | 'data' | 'about'>('sources')
 const tabs = computed(() => [
@@ -245,11 +296,17 @@ async function toggleRule(rule: Rule, enabled: boolean) {
   rule.isEnabled = enabled
 }
 
-async function removeRule(id: number) {
-  if (confirm(t('settings.rules.confirmDelete'))) {
-    await api.deleteRule(id)
-    await loadRulesTab()
-  }
+function removeRule(id: number) {
+  requestConfirm({
+    title: t('settings.rules.delete'),
+    message: t('settings.rules.confirmDelete'),
+    confirmText: t('settings.rules.delete'),
+    danger: true,
+    onConfirm: async () => {
+      await api.deleteRule(id)
+      await loadRulesTab()
+    },
+  })
 }
 
 async function unhideItem(id: number) {
@@ -380,9 +437,15 @@ const dataMsg = ref('')
 const opmlInput = ref<HTMLInputElement | null>(null)
 
 function removeSource(id: number) {
-  if (confirm(t('settings.sources.confirmRemove'))) {
-    data.removeSource(id)
-  }
+  requestConfirm({
+    title: t('settings.sources.remove'),
+    message: t('settings.sources.confirmRemove'),
+    confirmText: t('settings.sources.remove'),
+    danger: true,
+    onConfirm: () => {
+      data.removeSource(id)
+    },
+  })
 }
 
 async function importOpml(e: Event) {
@@ -529,10 +592,12 @@ function adjustFontSize(delta: number) {
           </div>
         </div>
       </div>
-      <div v-else class="empty-sources">
-        <Icon name="rss" :size="32" color="var(--text-quaternary)" />
-        <p>{{ t('nav.noSources') }}</p>
-      </div>
+      <EmptyState
+        v-else
+        icon="rss"
+        :icon-size="32"
+        :title="t('nav.noSources')"
+      />
     </div>
 
     <!-- 选项卡：常规（网络 / 通知 / 托盘 / 存储） -->
@@ -557,7 +622,7 @@ function adjustFontSize(delta: number) {
               <span class="label-desc">http://127.0.0.1:7890 · socks5://127.0.0.1:1080</span>
             </div>
             <input
-              class="apple-text-input"
+              class="apple-input"
               style="width: 220px"
               placeholder="http://127.0.0.1:7890"
               :value="app.s.proxyUrl"
@@ -570,13 +635,13 @@ function adjustFontSize(delta: number) {
             </div>
             <div class="auth-inputs">
               <input
-                class="apple-text-input"
+                class="apple-input"
                 :placeholder="t('settings.general.proxyUser')"
                 :value="app.s.proxyUsername"
                 @change="app.patch({ proxyUsername: ($event.target as HTMLInputElement).value })"
               />
               <input
-                class="apple-text-input"
+                class="apple-input"
                 type="password"
                 :placeholder="t('settings.general.proxyPassword')"
                 :value="app.s.proxyPassword"
@@ -676,10 +741,7 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
 
-      <div v-if="cleanupMsg" class="info-banner">
-        <Icon name="checkmark" :size="14" color="var(--success)" />
-        <span>{{ cleanupMsg }}</span>
-      </div>
+      <AlertBanner v-if="cleanupMsg" type="success" :message="cleanupMsg" />
     </div>
 
     <!-- 选项卡：正则自动化规则 -->
@@ -703,8 +765,8 @@ function adjustFontSize(delta: number) {
           <div class="rule-info">
             <div class="rule-name-row">
               <span class="rule-name">{{ r.name }}</span>
-              <span class="rule-badge action">{{ t(`settings.rules.action_${r.actionType}`) }}</span>
-              <span class="rule-badge scope">{{ scopeLabel(r.sourceScope) }}</span>
+              <Badge variant="tint">{{ t(`settings.rules.action_${r.actionType}`) }}</Badge>
+              <Badge>{{ scopeLabel(r.sourceScope) }}</Badge>
             </div>
             <code class="rule-pattern">{{ r.pattern }}</code>
           </div>
@@ -719,15 +781,14 @@ function adjustFontSize(delta: number) {
           </div>
         </div>
       </div>
-      <div v-else class="empty-sources">
-        <Icon name="funnel" :size="32" color="var(--text-quaternary)" />
-        <p>{{ t('settings.rules.empty') }}</p>
-      </div>
+      <EmptyState
+        v-else
+        icon="funnel"
+        :icon-size="32"
+        :title="t('settings.rules.empty')"
+      />
 
-      <div v-if="backfillMsg" class="info-banner">
-        <Icon name="checkmark" :size="14" color="var(--success)" />
-        <span>{{ backfillMsg }}</span>
-      </div>
+      <AlertBanner v-if="backfillMsg" type="success" :message="backfillMsg" />
 
       <div v-if="hiddenItems.length" class="hidden-section">
         <div class="shortcut-group-title">{{ t('settings.rules.hiddenSection', { n: hiddenItems.length }) }}</div>
@@ -761,7 +822,7 @@ function adjustFontSize(delta: number) {
             <label class="form-label">{{ t('settings.sync.serverUrl') }}</label>
             <input
               v-model="syncServerUrl"
-              class="apple-text-input"
+              class="apple-input"
               placeholder="https://example.com/api/greader.php"
               spellcheck="false"
             />
@@ -771,15 +832,15 @@ function adjustFontSize(delta: number) {
           <div class="form-grid">
             <div class="form-field">
               <label class="form-label">{{ t('settings.sync.username') }}</label>
-              <input v-model="syncUsername" class="apple-text-input" autocomplete="off" spellcheck="false" />
+              <input v-model="syncUsername" class="apple-input" autocomplete="off" spellcheck="false" />
             </div>
             <div class="form-field">
               <label class="form-label">{{ t('settings.sync.password') }}</label>
-              <input v-model="syncPassword" class="apple-text-input" type="password" autocomplete="off" />
+              <input v-model="syncPassword" class="apple-input" type="password" autocomplete="off" />
             </div>
           </div>
 
-          <div v-if="syncErrorMsg" class="rule-error">{{ syncErrorMsg }}</div>
+          <AlertBanner v-if="syncErrorMsg" type="error" :message="syncErrorMsg" />
 
           <button class="f-btn primary sync-connect-btn" :disabled="syncConnecting" @click="doSyncLogin">
             <Icon name="cloud" :size="14" />
@@ -797,7 +858,7 @@ function adjustFontSize(delta: number) {
               <span class="label-title">{{ t('settings.sync.account') }}</span>
               <span class="label-desc">{{ app.s.syncAccount.serverUrl }}</span>
             </div>
-            <span class="sync-provider-badge">Google Reader API</span>
+            <Badge variant="tint">Google Reader API</Badge>
           </div>
           <div class="grouped-inset-row">
             <div class="label-box">
@@ -812,7 +873,7 @@ function adjustFontSize(delta: number) {
               <span class="label-title">{{ t('settings.sync.pendingQueue') }}</span>
               <span class="label-desc">{{ t('settings.sync.pendingQueueDesc') }}</span>
             </div>
-            <span class="value-badge">{{ syncStatusInfo?.queueLen ?? 0 }}</span>
+            <Badge>{{ syncStatusInfo?.queueLen ?? 0 }}</Badge>
           </div>
         </div>
 
@@ -838,18 +899,18 @@ function adjustFontSize(delta: number) {
           </div>
         </div>
 
-        <div v-if="syncResultMsg" class="info-banner">
-          <Icon name="checkmark" :size="14" color="var(--success)" />
-          <span>{{ syncResultMsg }}</span>
-        </div>
+        <AlertBanner v-if="syncResultMsg" type="success" :message="syncResultMsg" />
 
-        <Modal v-if="syncDisconnectVisible" :title="t('settings.sync.disconnect')" @close="syncDisconnectVisible = false">
-          <p class="restore-confirm-text">{{ t('settings.sync.confirmDisconnect') }}</p>
-          <template #footer>
-            <button class="f-btn" @click="syncDisconnectVisible = false">{{ t('common.cancel') }}</button>
-            <button class="f-btn danger" @click="doSyncLogout">{{ t('settings.sync.disconnect') }}</button>
-          </template>
-        </Modal>
+        <ConfirmModal
+          :show="syncDisconnectVisible"
+          :title="t('settings.sync.disconnect')"
+          :message="t('settings.sync.confirmDisconnect')"
+          :confirm-text="t('settings.sync.disconnect')"
+          danger
+          @confirm="doSyncLogout"
+          @cancel="syncDisconnectVisible = false"
+          @close="syncDisconnectVisible = false"
+        />
       </template>
     </div>
 
@@ -910,40 +971,16 @@ function adjustFontSize(delta: number) {
             <span class="label-title">{{ t('settings.app.uiScale') }}</span>
             <span class="label-desc">{{ t('settings.app.uiScaleDesc') }}</span>
           </div>
-          <div class="slider-row">
-            <button
-              class="f-icon-btn stepper-btn"
-              title="-"
-              :disabled="(app.s.uiScale || 100) <= 80"
-              @click="adjustUiScale(-5)"
-            >
-              <span class="stepper-label small">-</span>
-            </button>
-            <input
-              type="range"
-              min="80"
-              max="150"
-              step="5"
-              :value="app.s.uiScale || 100"
-              @input="app.patch({ uiScale: Number(($event.target as HTMLInputElement).value) })"
-            />
-            <button
-              class="f-icon-btn stepper-btn"
-              title="+"
-              :disabled="(app.s.uiScale || 100) >= 150"
-              @click="adjustUiScale(5)"
-            >
-              <span class="stepper-label large">+</span>
-            </button>
-            <span
-              class="value-badge"
-              style="cursor: pointer"
-              :title="t('settings.shortcuts.reset')"
-              @click="app.patch({ uiScale: 100 })"
-            >
-              {{ app.s.uiScale || 100 }}%
-            </span>
-          </div>
+          <StepperSlider
+            :model-value="app.s.uiScale || 100"
+            :min="80"
+            :max="150"
+            :step="5"
+            unit="%"
+            :reset-value="100"
+            :badge-title="t('settings.shortcuts.reset')"
+            @update:model-value="app.patch({ uiScale: $event })"
+          />
         </div>
 
         <!-- 字体大小滑块 -->
@@ -951,33 +988,16 @@ function adjustFontSize(delta: number) {
           <div class="label-box">
             <span class="label-title">{{ t('settings.app.fontSize') }}</span>
           </div>
-          <div class="slider-row">
-            <button
-              class="f-icon-btn stepper-btn"
-              title="A-"
-              :disabled="app.s.fontSize <= 12"
-              @click="adjustFontSize(-1)"
-            >
-              <span class="stepper-label small">A-</span>
-            </button>
-            <input
-              type="range"
-              min="12"
-              max="22"
-              step="1"
-              :value="app.s.fontSize"
-              @input="app.patch({ fontSize: Number(($event.target as HTMLInputElement).value) })"
-            />
-            <button
-              class="f-icon-btn stepper-btn"
-              title="A+"
-              :disabled="app.s.fontSize >= 22"
-              @click="adjustFontSize(1)"
-            >
-              <span class="stepper-label large">A+</span>
-            </button>
-            <span class="value-badge">{{ app.s.fontSize }}px</span>
-          </div>
+          <StepperSlider
+            :model-value="app.s.fontSize"
+            :min="12"
+            :max="22"
+            :step="1"
+            unit="px"
+            decrease-label="A-"
+            increase-label="A+"
+            @update:model-value="app.patch({ fontSize: $event })"
+          />
         </div>
 
         <!-- 后台刷新间隔 -->
@@ -1113,21 +1133,20 @@ function adjustFontSize(delta: number) {
         </div>
       </div>
 
-      <div v-if="dataMsg" class="info-banner">
-        <Icon name="checkmark" :size="14" color="var(--success)" />
-        <span>{{ dataMsg }}</span>
-      </div>
+      <AlertBanner v-if="dataMsg" type="success" :message="dataMsg" />
 
       <!-- 恢复确认弹窗 -->
-      <Modal v-if="restoreConfirmVisible" :title="t('settings.data.restore')" @close="restoreConfirmVisible = false">
-        <p class="restore-confirm-text">{{ t('settings.data.confirmRestore') }}</p>
-        <template #footer>
-          <button class="f-btn" @click="restoreConfirmVisible = false">{{ t('common.cancel') }}</button>
-          <button class="f-btn danger" :disabled="backingUp" @click="doImportBackup">
-            {{ t('settings.data.restore') }}
-          </button>
-        </template>
-      </Modal>
+      <ConfirmModal
+        :show="restoreConfirmVisible"
+        :title="t('settings.data.restore')"
+        :message="t('settings.data.confirmRestore')"
+        :confirm-text="t('settings.data.restore')"
+        danger
+        :loading="backingUp"
+        @confirm="doImportBackup"
+        @cancel="restoreConfirmVisible = false"
+        @close="restoreConfirmVisible = false"
+      />
     </div>
     <div v-else class="settings-tab-pane">
       <div class="about-card">
@@ -1156,10 +1175,10 @@ function adjustFontSize(delta: number) {
 
           <!-- 已是最新状态 -->
           <div v-else-if="updateState.status === 'up-to-date'" class="updater-status up-to-date">
-            <div class="status-badge success">
-              <Icon name="checkmark" :size="13" color="var(--success)" />
+            <Badge variant="success">
+              <Icon name="checkmark" :size="13" color="var(--success)" style="margin-right: 4px;" />
               <span>{{ t('settings.about.latest') }}</span>
-            </div>
+            </Badge>
             <button class="f-btn compact-updater-btn secondary" @click="checkForUpdates()">
               <Icon name="refresh" :size="12" />
               <span>{{ t('settings.about.checkUpdate') }}</span>
@@ -1169,7 +1188,7 @@ function adjustFontSize(delta: number) {
           <!-- 有新版本可用状态 -->
           <div v-else-if="updateState.status === 'available'" class="updater-available-card">
             <div class="update-badge-row">
-              <span class="new-ver-badge">{{ t('settings.about.newVersion') }} v{{ updateState.newVersion }}</span>
+              <Badge variant="tint">{{ t('settings.about.newVersion') }} v{{ updateState.newVersion }}</Badge>
             </div>
             <p v-if="updateState.releaseNotes" class="release-notes">{{ updateState.releaseNotes }}</p>
             <button class="f-btn primary compact-updater-btn" @click="startDownloadAndInstall()">
@@ -1191,22 +1210,24 @@ function adjustFontSize(delta: number) {
 
           <!-- 下载完成：准备重启状态 -->
           <div v-else-if="updateState.status === 'downloaded'" class="updater-status ready">
-            <div class="status-badge success">
-              <Icon name="checkmark" :size="13" color="var(--success)" />
+            <Badge variant="success">
+              <Icon name="checkmark" :size="13" color="var(--success)" style="margin-right: 4px;" />
               <span>{{ t('settings.about.downloaded') }}</span>
-            </div>
+            </Badge>
             <button class="f-btn primary compact-updater-btn" @click="restartApp()">
               <span>{{ t('settings.about.relaunch') }}</span>
             </button>
           </div>
 
           <!-- 更新出错状态 -->
-          <div v-else-if="updateState.status === 'error'" class="updater-status error">
-            <span class="error-text">{{ t('settings.about.updateError') }}: {{ updateState.error }}</span>
-            <button class="f-btn compact-updater-btn secondary" @click="checkForUpdates()">
-              <span>{{ t('settings.about.retry') }}</span>
-            </button>
-          </div>
+          <AlertBanner
+            v-else-if="updateState.status === 'error'"
+            type="error"
+            :message="`${t('settings.about.updateError')}: ${updateState.error}`"
+            retryable
+            :retry-text="t('settings.about.retry')"
+            @retry="checkForUpdates()"
+          />
         </div>
       </div>
     </div>
@@ -1218,6 +1239,18 @@ function adjustFontSize(delta: number) {
       </main>
     </div>
   </Modal>
+
+    <ConfirmModal
+      :show="confirmState.show"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :confirm-text="confirmState.confirmText"
+      :danger="confirmState.danger"
+      :loading="confirmState.loading"
+      @confirm="handleConfirm"
+      @cancel="confirmState.show = false"
+      @close="confirmState.show = false"
+    />
 </template>
 
 <style scoped>
@@ -1397,14 +1430,6 @@ function adjustFontSize(delta: number) {
   min-width: 0;
 }
 
-.settings-favicon {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 3px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
 .source-title {
   font-weight: 600;
   font-size: 0.88rem;
@@ -1451,12 +1476,6 @@ function adjustFontSize(delta: number) {
   color: var(--text-tertiary);
   gap: 0.6rem;
   font-size: 0.9rem;
-}
-
-.slider-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
 }
 
 .stepper-btn {
@@ -1797,7 +1816,7 @@ function adjustFontSize(delta: number) {
   width: 220px;
 }
 
-.auth-inputs .apple-text-input {
+.auth-inputs .apple-input {
   flex: 1;
   width: 0;
   min-width: 0;
@@ -1894,7 +1913,7 @@ function adjustFontSize(delta: number) {
   width: 100%;
 }
 
-.sync-form .apple-text-input {
+.sync-form .apple-input {
   width: 100%;
   box-sizing: border-box;
 }

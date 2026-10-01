@@ -1,32 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useDataStore, useUiStore } from '../../stores/data'
 import * as api from '../../lib/tauri'
 import type { Source } from '../../types'
 import Modal from '../ui/Modal.vue'
 import Icon from '../ui/Icon.vue'
 import FeedIcon from '../ui/FeedIcon.vue'
+import TrafficLights from '../ui/TrafficLights.vue'
+import EmptyState from '../ui/EmptyState.vue'
+import ConfirmModal from '../ui/ConfirmModal.vue'
 
 defineEmits<{
   'add-source': []
   'open-settings': []
 }>()
-
-const appWindow = getCurrentWindow()
-
-async function onWindowClose() {
-  await appWindow.close()
-}
-
-async function onWindowMinimize() {
-  await appWindow.minimize()
-}
-
-async function onWindowMaximize() {
-  await appWindow.toggleMaximize()
-}
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -37,6 +25,51 @@ const groupModalTitle = ref('')
 const groupModalName = ref('')
 let groupModalTarget: number | null = null // null = 新建分组
 let modalMode: 'createGroup' | 'renameGroup' | 'renameSource' = 'createGroup'
+
+const confirmState = ref<{
+  show: boolean
+  title?: string
+  message: string
+  confirmText?: string
+  danger?: boolean
+  loading?: boolean
+  onConfirm?: () => void | Promise<void>
+}>({
+  show: false,
+  message: '',
+})
+
+function requestConfirm(options: {
+  title?: string
+  message: string
+  confirmText?: string
+  danger?: boolean
+  onConfirm: () => void | Promise<void>
+}) {
+  confirmState.value = {
+    show: true,
+    title: options.title,
+    message: options.message,
+    confirmText: options.confirmText,
+    danger: options.danger ?? true,
+    loading: false,
+    onConfirm: options.onConfirm,
+  }
+}
+
+async function handleConfirm() {
+  if (confirmState.value.onConfirm) {
+    confirmState.value.loading = true
+    try {
+      await confirmState.value.onConfirm()
+    } finally {
+      confirmState.value.loading = false
+      confirmState.value.show = false
+    }
+  } else {
+    confirmState.value.show = false
+  }
+}
 
 const ungroupedSources = computed(() => data.sources.filter((s) => s.groupId === null))
 const sourcesOf = computed(() => {
@@ -100,7 +133,13 @@ function sourceMenu(e: MouseEvent, s: Source) {
       label: t('settings.sources.remove'),
       danger: true,
       action: () => {
-        if (confirm(t('settings.sources.confirmRemove'))) data.removeSource(s.id)
+        requestConfirm({
+          title: t('settings.sources.remove'),
+          message: t('settings.sources.confirmRemove'),
+          confirmText: t('settings.sources.remove'),
+          danger: true,
+          onConfirm: () => data.removeSource(s.id),
+        })
       },
     },
   ])
@@ -113,14 +152,20 @@ function groupMenu(e: MouseEvent, gid: number) {
     {
       label: t('group.delete'),
       danger: true,
-      action: async () => {
-        if (confirm(t('group.confirmDelete'))) {
-          if (data.scope.type === 'group' && data.scope.id === gid) {
-            await data.selectScope('all')
-          }
-          await api.deleteGroup(gid)
-          await Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])
-        }
+      action: () => {
+        requestConfirm({
+          title: t('group.delete'),
+          message: t('group.confirmDelete'),
+          confirmText: t('group.delete'),
+          danger: true,
+          onConfirm: async () => {
+            if (data.scope.type === 'group' && data.scope.id === gid) {
+              await data.selectScope('all')
+            }
+            await api.deleteGroup(gid)
+            await Promise.all([data.loadSources(), data.loadGroups(), data.loadItems()])
+          },
+        })
       },
     },
   ])
@@ -170,35 +215,7 @@ async function toggleExpand(gid: number) {
   <nav class="side-nav">
     <!-- macOS 窗口红绿灯控制按钮与标题栏 -->
     <div class="nav-header" data-tauri-drag-region>
-      <div class="traffic-lights">
-        <button
-          class="traffic-light close"
-          title="Close (关闭)"
-          @click.stop="onWindowClose"
-        >
-          <svg viewBox="0 0 10 10" class="tl-icon">
-            <path d="M2.5 2.5L7.5 7.5M7.5 2.5L2.5 7.5" stroke="#4c0000" stroke-width="1.3" stroke-linecap="round" />
-          </svg>
-        </button>
-        <button
-          class="traffic-light minimize"
-          title="Minimize (最小化)"
-          @click.stop="onWindowMinimize"
-        >
-          <svg viewBox="0 0 10 10" class="tl-icon">
-            <path d="M2 5H8" stroke="#5c3c00" stroke-width="1.3" stroke-linecap="round" />
-          </svg>
-        </button>
-        <button
-          class="traffic-light maximize"
-          title="Zoom / Maximize (最大化/还原)"
-          @click.stop="onWindowMaximize"
-        >
-          <svg viewBox="0 0 10 10" class="tl-icon">
-            <path d="M2.5 7.5L7.5 2.5M7.5 2.5H4.5M7.5 2.5V5.5" stroke="#004c00" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-      </div>
+      <TrafficLights />
       <div class="brand" data-tauri-drag-region>
         <span class="logo">
           <Icon name="rss" :size="13" color="#ffffff" />
@@ -288,11 +305,13 @@ async function toggleExpand(gid: number) {
       />
 
       <!-- 空状态 -->
-      <div v-if="!data.sources.length" class="empty-hint">
-        <Icon name="rss" :size="24" color="var(--text-quaternary)" />
-        <p>{{ t('nav.noSources') }}</p>
-        <p class="sub">{{ t('nav.addHint') }}</p>
-      </div>
+      <EmptyState
+        v-if="!data.sources.length"
+        icon="rss"
+        :icon-size="24"
+        :title="t('nav.noSources')"
+        :description="t('nav.addHint')"
+      />
     </div>
 
     <!-- macOS 毛玻璃底栏 -->
@@ -320,11 +339,11 @@ async function toggleExpand(gid: number) {
 
   <!-- 分组操作的 macOS 工作表弹窗 -->
   <Modal v-if="showGroupModal" :title="groupModalTitle" @close="showGroupModal = false">
-    <div class="form-row">
-      <label class="input-label">{{ t('group.namePlaceholder') }}</label>
+    <div class="form-field">
+      <label class="form-label">{{ t('group.namePlaceholder') }}</label>
       <input
         v-model="groupModalName"
-        class="apple-text-input"
+        class="apple-input"
         autofocus
         @keyup.enter="submitGroupModal"
       />
@@ -334,6 +353,18 @@ async function toggleExpand(gid: number) {
       <button class="f-btn primary" @click="submitGroupModal">{{ t('common.confirm') }}</button>
     </template>
   </Modal>
+
+  <ConfirmModal
+    :show="confirmState.show"
+    :title="confirmState.title"
+    :message="confirmState.message"
+    :confirm-text="confirmState.confirmText"
+    :danger="confirmState.danger"
+    :loading="confirmState.loading"
+    @confirm="handleConfirm"
+    @cancel="confirmState.show = false"
+    @close="confirmState.show = false"
+  />
 </template>
 
 <style scoped>
@@ -355,62 +386,6 @@ async function toggleExpand(gid: number) {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-}
-
-.traffic-lights {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0.15rem 0.2rem;
-}
-
-.traffic-light {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  position: relative;
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-  border: none;
-  outline: none;
-  transition: opacity 0.15s ease, filter 0.15s ease, transform 0.1s ease;
-}
-
-.traffic-light:hover {
-  filter: brightness(0.92);
-}
-
-.traffic-light:active {
-  transform: scale(0.9);
-  filter: brightness(0.8);
-}
-
-.traffic-light.close {
-  background: #ff5f56;
-}
-
-.traffic-light.minimize {
-  background: #ffbd2e;
-}
-
-.traffic-light.maximize {
-  background: #27c93f;
-}
-
-.tl-icon {
-  width: 7.5px;
-  height: 7.5px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-
-.traffic-lights:hover .tl-icon {
-  opacity: 1;
 }
 
 .brand {
@@ -559,36 +534,6 @@ async function toggleExpand(gid: number) {
   white-space: nowrap;
 }
 
-.favicon {
-  width: 1.05rem;
-  height: 1.05rem;
-  border-radius: 4px;
-  flex-shrink: 0;
-  object-fit: cover;
-}
-
-.favicon.initial-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.62rem;
-  font-weight: 750;
-  color: #ffffff;
-  border-radius: 4px;
-  line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: -0.02em;
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
-  user-select: none;
-}
-
-.favicon.placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-track);
-}
-
 .divider {
   height: 0.5px;
   background: var(--border);
@@ -643,7 +588,7 @@ async function toggleExpand(gid: number) {
   margin-bottom: 0.35rem;
 }
 
-.apple-text-input {
+.apple-input {
   width: 100%;
 }
 </style>

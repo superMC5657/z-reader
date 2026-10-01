@@ -5,6 +5,8 @@ import { useAppStore } from './stores/app'
 import { useDataStore, useUiStore } from './stores/data'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import SideNav from './components/nav/SideNav.vue'
+import Modal from './components/ui/Modal.vue'
+import TrafficLights from './components/ui/TrafficLights.vue'
 import ArticleList from './components/feed/ArticleList.vue'
 import ArticleView from './components/article/ArticleView.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -162,12 +164,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'blur-bg': data.selectedItem && app.isFocusMode }">
+  <div class="app-shell" :class="{ 'blur-bg': data.selectedItem && app.isFocusMode, 'no-sidebar': !app.s.menuOn }">
     <SideNav
       v-if="app.s.menuOn"
       @add-source="showAdd = true"
       @open-settings="showSettings = true"
     />
+    <div v-else class="app-traffic-lights" data-tauri-drag-region>
+      <TrafficLights />
+    </div>
     <main class="main">
       <div class="panes" :class="{ 'article-open': data.selectedItem }">
         <ArticleList class="pane-list" />
@@ -178,12 +183,12 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- 专注模式：亚克力浮层工作表 -->
-  <Transition name="focus-sheet">
-    <div
-      v-if="data.selectedItem && app.isFocusMode"
-      class="focus-backdrop"
-      @click.self="data.selectedItem = null; data.selectedId = null"
-    >
+  <Modal
+    v-if="data.selectedItem && app.isFocusMode"
+    preset="acrylic"
+    @close="data.selectedItem = null; data.selectedId = null"
+  >
+    <template #left>
       <!-- 左侧上一篇按钮 -->
       <button
         class="focus-nav-btn prev-btn"
@@ -194,11 +199,11 @@ onBeforeUnmount(() => {
       >
         <Icon name="chevron-left" :size="20" stroke-width="2.2" />
       </button>
+    </template>
 
-      <div class="focus-modal-card">
-        <ArticleView is-focus-modal />
-      </div>
+    <ArticleView is-focus-modal />
 
+    <template #right>
       <!-- 右侧下一篇按钮 -->
       <button
         class="focus-nav-btn next-btn"
@@ -209,8 +214,8 @@ onBeforeUnmount(() => {
       >
         <Icon name="chevron-right" :size="20" stroke-width="2.2" />
       </button>
-    </div>
-  </Transition>
+    </template>
+  </Modal>
 
   <SettingsPanel v-if="showSettings" @close="showSettings = false" />
   <AddSourceDialog v-if="showAdd" @close="showAdd = false" />
@@ -218,6 +223,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.app-traffic-lights {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding-left: 1rem;
+  z-index: 50;
+  -webkit-app-region: drag;
+}
+
 .app-shell {
   display: flex;
   height: 100vh;
@@ -263,19 +280,12 @@ onBeforeUnmount(() => {
 .focus-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 1.25rem;
   z-index: 1200;
   padding: 1.25rem 1.5rem;
-}
-
-[data-theme='dark'] .focus-backdrop {
-  background: rgba(0, 0, 0, 0.62);
 }
 
 .focus-nav-btn {

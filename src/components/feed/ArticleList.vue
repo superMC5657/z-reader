@@ -6,6 +6,10 @@ import { useDataStore, useUiStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import type { Item } from '../../types'
 import Icon from '../ui/Icon.vue'
+import Badge from '../ui/Badge.vue'
+import SegmentedControl, { type SegmentedOption } from '../ui/SegmentedControl.vue'
+import SearchInput from '../ui/SearchInput.vue'
+import EmptyState from '../ui/EmptyState.vue'
 import CardsView from './CardsView.vue'
 import ListView from './ListView.vue'
 import MagazineView from './MagazineView.vue'
@@ -22,7 +26,7 @@ const scopeTitle = computed(() => {
   return data.sourceById(data.scope.id ?? -1)?.title ?? ''
 })
 
-const filterTabs = computed(() => [
+const filterTabs = computed<SegmentedOption<number>[]>(() => [
   { value: 0, label: t('filter.all') },
   { value: 1, label: t('filter.unread') },
   { value: 2, label: t('filter.starred') },
@@ -34,6 +38,13 @@ const viewIcons: Record<string, string> = {
   magazine: 'view-magazine',
   list: 'view-list',
 }
+const viewOptions = computed<SegmentedOption[]>(() =>
+  views.map((v) => ({
+    value: v,
+    icon: viewIcons[v],
+    title: t(`toolbar.views.${v}`),
+  }))
+)
 
 const activeView = computed(() => app.s.view)
 
@@ -57,20 +68,6 @@ function itemContextMenu(e: MouseEvent, item: Item) {
     },
   ])
 }
-
-function clearSearch() {
-  window.clearTimeout(searchTimer)
-  searchInput.value = ''
-  data.search_('')
-}
-
-// 防抖搜索：输入停顿 250ms 后才触发后端查询。
-const searchInput = ref(data.search)
-let searchTimer: number | undefined
-watch(searchInput, (q) => {
-  window.clearTimeout(searchTimer)
-  searchTimer = window.setTimeout(() => data.search_(q), 250)
-})
 
 // 无限滚动：当哨兵元素进入列表可视区域时追加下一页。
 // 同时保留按钮作为兜底（若交叉观察器未触发）。
@@ -124,41 +121,27 @@ function openViewMenu(e: MouseEvent) {
     <header class="toolbar" data-tauri-drag-region>
       <div class="scope" data-tauri-drag-region>
         <h2 data-tauri-drag-region>{{ scopeTitle }}</h2>
-        <span v-if="data.unreadOf(data.scope)" class="count">
-          {{ data.unreadOf(data.scope) }}
-        </span>
+        <Badge v-if="data.unreadOf(data.scope)" variant="track" :value="data.unreadOf(data.scope)" />
       </div>
 
       <!-- 分段过滤器控件 -->
-      <div class="segmented filter-seg">
-        <button
-          v-for="tab in filterTabs"
-          :key="tab.value"
-          class="seg"
-          :class="{ active: app.s.filterType === tab.value }"
-          @click="data.setFilter(tab.value)"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
+      <SegmentedControl
+        class="filter-seg"
+        :model-value="app.s.filterType"
+        :options="filterTabs"
+        @update:model-value="(val: number) => data.setFilter(val)"
+      />
 
       <div class="spacer" data-tauri-drag-region></div>
 
       <!-- 右侧操作按钮组 -->
       <div class="toolbar-actions">
         <!-- Apple Spotlight 胶囊搜索框 -->
-        <div class="search-wrapper" :class="{ 'has-search': !!data.search }">
-          <Icon name="search" :size="13" color="var(--text-tertiary)" class="search-icon" />
-          <input
-            class="search-input"
-            :placeholder="t('toolbar.search')"
-            :value="searchInput"
-            @input="searchInput = ($event.target as HTMLInputElement).value"
-          />
-          <button v-if="data.search" class="clear-btn" @click="clearSearch" title="Clear">
-            <Icon name="xmark" :size="14" color="var(--text-tertiary)" />
-          </button>
-        </div>
+        <SearchInput
+          :model-value="data.search"
+          :placeholder="t('toolbar.search')"
+          @search="data.search_"
+        />
 
         <!-- 全部标为已读 -->
         <button
@@ -170,18 +153,12 @@ function openViewMenu(e: MouseEvent) {
         </button>
 
         <!-- 视图切换器：分段控制器（宽屏模式 >= 640px） -->
-        <div class="segmented view-switch wide-view-switch">
-          <button
-            v-for="v in views"
-            :key="v"
-            class="seg view-seg"
-            :class="{ active: activeView === v }"
-            :title="t(`toolbar.views.${v}`)"
-            @click="app.patch({ view: v })"
-          >
-            <Icon :name="viewIcons[v]" :size="14" />
-          </button>
-        </div>
+        <SegmentedControl
+          class="view-switch wide-view-switch"
+          :model-value="activeView"
+          :options="viewOptions"
+          @update:model-value="(v: any) => app.patch({ view: v })"
+        />
 
         <!-- 视图切换器：单下拉按钮（紧凑模式 < 640px） -->
         <button
@@ -203,13 +180,12 @@ function openViewMenu(e: MouseEvent) {
       </div>
 
       <!-- 空内容状态 -->
-      <div v-else-if="!data.items.length" class="state">
-        <div class="empty-icon-circle">
-          <Icon name="tray-stack" :size="32" color="var(--text-quaternary)" />
-        </div>
-        <p class="empty-title">{{ t('common.empty') }}</p>
-        <p class="sub">{{ t('common.emptyHint') }}</p>
-      </div>
+      <EmptyState
+        v-else-if="!data.items.length"
+        icon="tray-stack"
+        :title="t('common.empty')"
+        :description="t('common.emptyHint')"
+      />
 
       <!-- 信息流各视图呈现 -->
       <component
@@ -309,58 +285,6 @@ function openViewMenu(e: MouseEvent) {
   min-width: 0;
 }
 
-/* Apple 胶囊搜索框样式 */
-.search-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 8rem;
-  min-width: 2rem;
-  flex-shrink: 1;
-  transition: width 0.2s var(--ease);
-}
-
-.search-icon {
-  position: absolute;
-  left: 0.65rem;
-  pointer-events: none;
-}
-
-.search-input {
-  width: 100%;
-  font-size: 0.82rem;
-  border-radius: var(--radius-pill);
-  background: var(--bg-input);
-  padding: 0.32rem 1.8rem 0.32rem 1.85rem;
-  border: 1px solid var(--border-subtle);
-  transition: all 0.2s var(--ease);
-}
-
-.search-input:focus {
-  background: var(--bg-input-focus);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-tint);
-}
-
-.search-input::placeholder {
-  color: var(--text-tertiary);
-}
-
-.clear-btn {
-  position: absolute;
-  right: 0.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border-radius: 50%;
-  transition: opacity 0.15s ease;
-}
-
-.clear-btn:hover {
-  opacity: 0.75;
-}
-
 .toolbar-btn {
   border-radius: 8px;
   color: var(--text-secondary);
@@ -420,7 +344,7 @@ function openViewMenu(e: MouseEvent) {
     font-size: 0.98rem;
   }
 
-  .filter-seg .seg {
+  :deep(.filter-seg .seg) {
     padding: 0.2rem 0.48rem;
     font-size: 0.78rem;
   }
@@ -434,7 +358,7 @@ function openViewMenu(e: MouseEvent) {
     width: 7.5rem;
   }
 
-  .search-wrapper:not(:focus-within):not(.has-search) .search-input {
+  :deep(.search-wrapper:not(:focus-within):not(.has-search) .search-input) {
     cursor: pointer;
     background: transparent;
     border-color: transparent;
@@ -442,11 +366,11 @@ function openViewMenu(e: MouseEvent) {
     padding-left: 0.65rem;
   }
 
-  .search-wrapper:not(:focus-within):not(.has-search) .search-input::placeholder {
+  :deep(.search-wrapper:not(:focus-within):not(.has-search) .search-input::placeholder) {
     color: transparent;
   }
 
-  .search-wrapper:not(:focus-within):not(.has-search):hover {
+  :deep(.search-wrapper:not(:focus-within):not(.has-search):hover) {
     background: var(--bg-hover);
     border-radius: var(--radius-pill);
   }
@@ -457,7 +381,7 @@ function openViewMenu(e: MouseEvent) {
     max-width: 4rem;
   }
 
-  .filter-seg .seg {
+  :deep(.filter-seg .seg) {
     padding: 0.18rem 0.35rem;
     font-size: 0.74rem;
   }
@@ -508,27 +432,5 @@ function openViewMenu(e: MouseEvent) {
   color: var(--text-tertiary);
   gap: 0.55rem;
   font-size: 0.92rem;
-}
-
-.empty-icon-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 4rem;
-  height: 4rem;
-  border-radius: 50%;
-  background: var(--bg-track);
-  margin-bottom: 0.35rem;
-}
-
-.empty-title {
-  font-weight: 600;
-  color: var(--text-secondary);
-  font-size: 1rem;
-}
-
-.state .sub {
-  font-size: 0.8rem;
-  color: var(--text-tertiary);
 }
 </style>

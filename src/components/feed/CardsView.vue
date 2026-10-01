@@ -5,7 +5,7 @@ import { useAppStore } from '../../stores/app'
 import { formatTime } from '../../lib/time'
 import { highlightText } from '../../lib/highlight'
 import type { Item } from '../../types'
-import Icon from '../ui/Icon.vue'
+import StarButton from '../ui/StarButton.vue'
 
 defineProps<{ items: Item[] }>()
 const emit = defineEmits<{ select: [Item]; context: [MouseEvent, Item] }>()
@@ -55,14 +55,12 @@ const app = useAppStore()
         <div class="card-footer">
           <span class="author">{{ item.author || '' }}</span>
           <div class="spacer"></div>
-          <button
-            class="f-icon-btn star-btn"
-            :class="{ 'active-star': item.starred }"
+          <StarButton
+            :starred="item.starred"
+            :size="15"
             :title="t(item.starred ? 'item.unstar' : 'item.star')"
             @click.stop="data.toggleStar(item)"
-          >
-            <Icon :name="item.starred ? 'star-fill' : 'star'" :size="15" />
-          </button>
+          />
         </div>
       </div>
     </article>
@@ -202,17 +200,5 @@ const app = useAppStore()
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 9rem;
-}
-
-.star-btn {
-  width: 1.8rem;
-  height: 1.8rem;
-  border-radius: 6px;
-  color: var(--text-tertiary);
-}
-
-.star-btn:hover {
-  color: var(--star);
-  background: var(--bg-hover);
 }
 </style>
