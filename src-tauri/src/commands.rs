@@ -17,27 +17,20 @@ pub(crate) fn favicon_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 截取错误消息的第一行：原因描述中绝不包含文件路径、
-/// URL、令牌或文章文本。
-fn short_reason(msg: &str) -> String {
-    const MAX_CHARS: usize = 160;
-    let first = msg.lines().next().unwrap_or("").trim();
-    if first.chars().count() > MAX_CHARS {
-        first.chars().take(MAX_CHARS).collect()
-    } else {
-        first.to_string()
+/// 有同步账户时将条目操作入队待推送；纯本地模式直接跳过。
+/// 收敛 `mark_read` / `star` 两处的 `if acct.is_some()` 内联分支，语义不变。
+/// 保持为同步函数：`&Connection` 非 `Sync`，跨 `await` 持有会使命令 future 非 `Send`。
+fn enqueue_sync_action(
+    conn: &rusqlite::Connection,
+    account: &Option<crate::models::SyncAccount>,
+    ids: &[i64],
+    action: SyncAction,
+) -> Result<(), String> {
+    if account.is_some() {
+        db::enqueue_item_actions(conn, ids, action)?;
     }
+    Ok(())
 }
-
-/// 仅保留文件名（基础名称）：完整文件路径绝不写入日志。
-fn file_base(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("?")
-        .to_string()
-}
-
 
 #[tauri::command]
 pub async fn get_sources(state: State<'_, AppState>) -> Result<Vec<crate::models::Source>, String> {
@@ -86,10 +79,7 @@ pub async fn add_source(
     url: String,
     group_id: Option<i64>,
 ) -> Result<crate::models::Source, String> {
-    let mut url = url.trim().to_string();
-    if !url.contains("://") {
-        url = format!("https://{url}");
-    }
+    let url = crate::utils::ensure_https_scheme(&url);
     // 仅记录主机名：完整 URL 可能包含令牌或查询参数等机密信息。
     let (host, _) = crate::net::sanitize_url(&url);
     log::info!("[CMD] action=add_source host={host}");
@@ -104,35 +94,42 @@ pub async fn add_source(
 
     // 探测而不立即持久化：先解析远端订阅源进行验证。
     let parsed = feed::fetch_and_parse(&client, &url).await.inspect_err(|e| {
-        log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
+        log::warn!("[CMD] action=add_source host={host} failed reason={}", crate::utils::short_reason(e));
     })?;
     let title = if parsed.title.is_empty() { url.clone() } else { parsed.title.clone() };
 
-    let source = {
+    let source_id = {
         let conn = state.db.lock().await;
         let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id).inspect_err(|e| {
-            log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
+            log::warn!("[CMD] action=add_source host={host} failed reason={}", crate::utils::short_reason(e));
         })?;
-        let ctx = feed::SourceCtx { id: s.id, group_id: s.group_id, url: url.clone() };
-        feed::store(&conn, &ctx, &parsed, None).inspect_err(|e| {
-            log::warn!("[CMD] action=add_source host={host} failed reason={}", short_reason(e));
-        })?;
-        db::mark_source_fetched(&conn, s.id, true, None)?;
-        db::get_source(&conn, s.id)?
+        s.id
     };
-    if source.favicon.is_none() {
-        let dir = favicon_dir(&app)?;
-        let third_party =
-            settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
-        let icon_url = parsed.icon_url.as_deref();
-        let site_url = parsed.site_url.as_deref();
-        if let Some(fav) =
-            feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, source.id, third_party).await
-        {
-            let conn = state.db.lock().await;
-            db::set_source_favicon(&conn, source.id, fav.to_string_lossy().as_ref())?;
-        }
+    // 委托服务完成抓取→存库→标状态→补图标（与后台刷新一致）。
+    // 标题/描述沿用首次探测结果建行；条目与图标由服务内的二次抓取幂等写入。
+    // 服务内部短暂加锁，网络阶段不持有锁（传 `&state.db` 而非 `&conn`，保持命令 future `Send`）。
+    let fav_dir = favicon_dir(&app)?;
+    let third_party =
+        settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
+    {
+        let ctx = crate::services::source::RefreshSingleSourceContext {
+            client: &client,
+            db: &state.db,
+            engine: None,
+            source_id,
+            group_id,
+            url: &url,
+            favicon: None,
+            favicon_dir: Some(&fav_dir),
+            allow_third_party: third_party,
+            cycle: "",
+        };
+        crate::services::source::refresh_single_source(ctx).await?;
     }
+    let source = {
+        let conn = state.db.lock().await;
+        db::get_source(&conn, source_id)?
+    };
     log::info!("[CMD] action=add_source ok id={} host={host}", source.id);
     Ok(source)
 }
@@ -264,10 +261,8 @@ pub async fn mark_read(
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_items_read(&conn, &ids, read)?;
-    if acct.is_some() {
-        let action = if read { SyncAction::MarkRead } else { SyncAction::MarkUnread };
-        db::enqueue_item_actions(&conn, &ids, action)?;
-    }
+    let action = if read { SyncAction::MarkRead } else { SyncAction::MarkUnread };
+    enqueue_sync_action(&conn, &acct, &ids, action)?;
     drop(conn);
     crate::tray::update_tray(&app).await;
     Ok(())
@@ -319,10 +314,8 @@ pub async fn star(
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_item_starred(&conn, id, starred)?;
-    if acct.is_some() {
-        let action = if starred { SyncAction::Star } else { SyncAction::Unstar };
-        db::enqueue_item_actions(&conn, &[id], action)?;
-    }
+    let action = if starred { SyncAction::Star } else { SyncAction::Unstar };
+    enqueue_sync_action(&conn, &acct, &[id], action)?;
     Ok(())
 }
 
@@ -346,7 +339,7 @@ pub async fn fetch_full_content(state: State<'_, AppState>, id: i64) -> Result<(
             Ok(())
         }
         Err(e) => {
-            log::warn!("[CMD] action=fetch_full_content failed id={id} reason={}", short_reason(&e));
+            log::warn!("[CMD] action=fetch_full_content failed id={id} reason={}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -413,7 +406,7 @@ pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<ser
             }))
         }
         Err(e) => {
-            log::warn!("[CMD] action=import_opml failed reason={}", short_reason(&e));
+            log::warn!("[CMD] action=import_opml failed reason={}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -429,7 +422,7 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
             Ok(xml)
         }
         Err(e) => {
-            log::error!("[CMD] action=export_opml failed reason={}", short_reason(&e));
+            log::error!("[CMD] action=export_opml failed reason={}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -445,7 +438,7 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
 pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
     log::debug!("[CMD] action=test_proxy");
     if let Err(e) = crate::net::validate_proxy(&settings) {
-        log::warn!("[CMD] action=test_proxy failed reason={}", short_reason(&e));
+        log::warn!("[CMD] action=test_proxy failed reason={}", crate::utils::short_reason(&e));
         return Err(e);
     }
     let url = target
@@ -456,18 +449,8 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     let client = crate::net::build_http_client(&settings);
     let start = std::time::Instant::now();
     let req = client.get(url).timeout(std::time::Duration::from_secs(10));
-    let resp = crate::net::send_logged("proxy", "GET", url, req).await;
-    let resp = match resp {
-        Ok(r) => r,
-        Err(e) => {
-            let msg = crate::net::http_err_reason("", &e);
-            log::warn!("[CMD] action=test_proxy failed reason={}", short_reason(&msg));
-            return Err(msg);
-        }
-    };
-    if let Err(e) = resp.error_for_status() {
-        let msg = crate::net::http_err_reason("", &e);
-        log::warn!("[CMD] action=test_proxy failed reason={}", short_reason(&msg));
+    if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req).await {
+        log::warn!("[CMD] action=test_proxy failed reason={}", crate::utils::short_reason(&msg));
         return Err(msg);
     }
     let ms = start.elapsed().as_millis() as u64;
@@ -504,7 +487,7 @@ pub async fn sync_login(
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            log::warn!("sync login subscriptions failed reason {}", short_reason(&msg));
+            log::warn!("sync login subscriptions failed reason {}", crate::utils::short_reason(&msg));
             msg
         })?;
 
@@ -558,19 +541,12 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
     let settings = settings_io::load(&settings_io::settings_path(&app)?);
     {
         let conn = state.db.lock().await;
-        match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
-            Ok(n) => {
-                if n > 200 {
-                    let _ = db::vacuum(&conn);
-                }
-                if n > 0 {
-                    log::info!("[CMD] action=sync_now retention deleted={n}");
-                }
-            }
-            Err(e) => {
-                log::warn!("[CMD] action=sync_now retention failed reason={}", short_reason(&e));
-            }
-        }
+        crate::services::storage::run_retention_policy(
+            &conn,
+            settings.retention_days,
+            settings.max_items_per_source,
+            200,
+        );
     }
     crate::tray::update_tray(&app).await;
     use tauri::Emitter;
@@ -659,7 +635,7 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
     let engine = match crate::rules::RuleEngine::load(&conn) {
         Ok(e) => e,
         Err(e) => {
-            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", short_reason(&e));
+            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", crate::utils::short_reason(&e));
             return Err(e);
         }
     };
@@ -680,7 +656,7 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
             }))
         }
         Err(e) => {
-            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", short_reason(&e));
+            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -693,12 +669,12 @@ pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result
     log::info!("[CMD] action=export_backup");
     match export_backup_inner(app, &state).await {
         Ok(Some(path)) => {
-            log::info!("[CMD] action=export_backup ok file={}", file_base(&path));
+            log::info!("[CMD] action=export_backup ok file={}", crate::utils::file_base(&path));
             Ok(Some(path))
         }
         Ok(None) => Ok(None),
         Err(e) => {
-            log::error!("[CMD] action=export_backup failed reason={}", short_reason(&e));
+            log::error!("[CMD] action=export_backup failed reason={}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -736,7 +712,7 @@ async fn export_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
         crate::backup::snapshot_live(&conn, &snapshot)?;
     }
     let settings_file = settings_io::settings_path(&app)?;
-    let favicon_dir = dir.join("favicons");
+    let favicon_dir = favicon_dir(&app)?;
     let result = crate::backup::write_archive(&snapshot, Some(&settings_file), Some(&favicon_dir), &out_path);
     let _ = std::fs::remove_file(&snapshot);
     result?;
@@ -748,12 +724,12 @@ pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result
     log::info!("[CMD] action=import_backup");
     match import_backup_inner(app, &state).await {
         Ok(Some(path)) => {
-            log::info!("[CMD] action=import_backup ok file={}", file_base(&path));
+            log::info!("[CMD] action=import_backup ok file={}", crate::utils::file_base(&path));
             Ok(Some(path))
         }
         Ok(None) => Ok(None),
         Err(e) => {
-            log::warn!("[CMD] action=import_backup failed reason={}", short_reason(&e));
+            log::warn!("[CMD] action=import_backup failed reason={}", crate::utils::short_reason(&e));
             Err(e)
         }
     }
@@ -823,7 +799,7 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
                 Err(reopen) => {
                     log::error!(
                         "[CMD] action=import_backup rollback reopen failed reason={}",
-                        short_reason(&reopen)
+                        crate::utils::short_reason(&reopen)
                     );
                 }
             }
@@ -831,8 +807,8 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
             let _ = std::fs::remove_dir_all(&tmp_dir);
             log::warn!(
                 "[CMD] action=import_backup rollback file={} reason={}",
-                file_base(&rollback.to_string_lossy()),
-                short_reason(&e)
+                crate::utils::file_base(&rollback.to_string_lossy()),
+                crate::utils::short_reason(&e)
             );
             return Err(e);
         }
@@ -848,8 +824,7 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     // 网站图标为普通文件；将其复制覆盖回现有文件。
     let restored_favicons = tmp_dir.join("favicons");
     if restored_favicons.is_dir() {
-        let fav_dir = dir.join("favicons");
-        std::fs::create_dir_all(&fav_dir).map_err(|e| e.to_string())?;
+        let fav_dir = favicon_dir(&app)?;
         if let Ok(entries) = std::fs::read_dir(&restored_favicons) {
             for entry in entries.flatten() {
                 let from = entry.path();
@@ -890,12 +865,13 @@ pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<u
     let s = settings_io::load(&settings_io::settings_path(&app)?);
     let deleted = {
         let conn = state.db.lock().await;
-        db::cleanup_retention(&conn, s.retention_days, s.max_items_per_source)?
+        crate::services::storage::run_retention_policy(
+            &conn,
+            s.retention_days,
+            s.max_items_per_source,
+            0,
+        )
     };
-    if deleted > 0 {
-        let conn = state.db.lock().await;
-        db::vacuum(&conn)?;
-    }
     crate::tray::update_tray(&app).await;
     log::info!("[CMD] action=cleanup_now ok deleted={deleted}");
     Ok(deleted)

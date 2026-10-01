@@ -1,5 +1,4 @@
 use crate::db;
-use crate::models::html_to_text;
 use feed_rs::parser;
 
 /// 规则评估与文章存储所需的最小订阅源标识信息。
@@ -53,18 +52,9 @@ pub async fn fetch_and_parse_with(
     let req = client
         .get(url)
         .timeout(std::time::Duration::from_secs(30));
-    let resp = crate::net::send_logged_with("feed", "GET", url, req, cycle, source_id)
-        .await
-        .map_err(|e| crate::net::http_err_reason("fetch failed", &e))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let final_url = resp.url().as_str().to_string();
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| crate::net::http_err_reason("body failed", &e))?;
-    parse_feed_data(&bytes[..], Some(&final_url), url)
+    let _ = (cycle, source_id);
+    let bytes = crate::net::send_and_check_bytes("feed", "GET", url, req).await?;
+    parse_feed_data(&bytes, Some(url), url)
 }
 
 pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str) -> Result<ParsedFeed, String> {
@@ -96,10 +86,8 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
             .unwrap_or_default();
         let content = ammonia::clean(&raw_html);
         let summary = entry.summary.as_ref().map(|s| ammonia::clean(&s.content));
-        let snippet = {
-            let text = html_to_text(summary.as_deref().unwrap_or(&content));
-            text.trim().chars().take(200).collect::<String>()
-        };
+        let snippet =
+            crate::services::article::snippet_of(summary.as_deref().unwrap_or(&content));
         let entry_title = entry
             .title
             .as_ref()
@@ -160,29 +148,22 @@ pub fn store(
 ) -> Result<StoreOutcome, String> {
     let mut out = StoreOutcome { inserted: 0, notified: Vec::new() };
     for e in &parsed.entries {
-        let mut has_been_read = false;
-        let mut starred = false;
-        let mut hidden = false;
-        if let Some(engine) = engine.filter(|eng| !eng.is_empty()) {
-            let content_text = html_to_text(&e.content);
-            let summary_text = e.summary.as_deref().map(html_to_text).unwrap_or_default();
-            let full_text = format!("{content_text} {summary_text}");
-            let ctx = crate::rules::ArticleEvalContext {
-                source_id: source.id,
-                group_id: source.group_id,
-                source_url: &source.url,
-                title: &e.title,
-                content_text: &full_text,
-                author: e.author.as_deref(),
-                url: e.url.as_deref(),
-            };
-            let outcome = engine.evaluate(&ctx);
-            has_been_read = outcome.mark_read || outcome.hide;
-            starred = outcome.star;
-            hidden = outcome.hide;
-            if outcome.notify {
-                out.notified.push(e.title.clone());
-            }
+        let outcome = crate::services::article::evaluate_article_rules_opt(
+            engine,
+            source.id,
+            source.group_id,
+            &source.url,
+            &e.title,
+            Some(&e.content),
+            e.summary.as_deref(),
+            e.author.as_deref(),
+            e.url.as_deref(),
+        );
+        let has_been_read = outcome.mark_read || outcome.hide;
+        let starred = outcome.star;
+        let hidden = outcome.hide;
+        if outcome.notify {
+            out.notified.push(e.title.clone());
         }
         if db::insert_item(
             conn,

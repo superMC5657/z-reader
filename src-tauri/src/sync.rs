@@ -6,7 +6,7 @@
 
 use crate::db;
 use crate::greader::{self, GReaderError};
-use crate::models::{html_to_text, SyncAccount, SyncAction};
+use crate::models::{SyncAccount, SyncAction};
 use crate::AppState;
 use tauri::{AppHandle, Manager};
 
@@ -38,17 +38,6 @@ pub struct Session {
     pub auth: String,
 }
 
-/// 错误消息的首行（截断后）：错误原因绝不包含令牌、请求体或完整 URL（服务端文本留在服务端，令牌仅保留在内存中）。
-fn short_reason(msg: &str) -> String {
-    const MAX_CHARS: usize = 160;
-    let first = msg.lines().next().unwrap_or("").trim();
-    if first.chars().count() > MAX_CHARS {
-        first.chars().take(MAX_CHARS).collect()
-    } else {
-        first.to_string()
-    }
-}
-
 /// 将 greader 错误映射到稳定的 `error_kind`（认证错误特殊处理，其他消息通过通用的网络分类器处理）。
 fn greader_err_kind(e: &GReaderError) -> &'static str {
     match e {
@@ -64,17 +53,6 @@ fn sync_host(acct: &SyncAccount) -> String {
 
 fn record_fail(report: &mut SyncReport, kind: &str) {
     *report.fail_kinds.entry(kind.to_string()).or_insert(0) += 1;
-}
-
-/// 渲染排序后的 ` fail_kinds={timeout:2,auth:1}`；无失败时为空字符串。
-fn format_fail_kinds(report: &SyncReport) -> String {
-    if report.fail_kinds.is_empty() {
-        return String::new();
-    }
-    let mut pairs: Vec<(&String, &usize)> = report.fail_kinds.iter().collect();
-    pairs.sort_by(|a, b| a.0.cmp(b.0));
-    let inner: Vec<String> = pairs.into_iter().map(|(k, v)| format!("{k}:{v}")).collect();
-    format!(" fail_kinds={{{}}}", inner.join(","))
 }
 
 pub fn clear_session(state: &AppState) {
@@ -123,7 +101,7 @@ pub async fn ensure_session_with(
         Ok(a) => a,
         Err(e) => {
             let error_kind = greader_err_kind(&e);
-            log::warn!("sync login failed{cycle_disp} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
+            log::warn!("sync login failed{cycle_disp} host={host} error_kind={error_kind} reason {}", crate::utils::short_reason(&e.to_string()));
             return Err(e);
         }
     };
@@ -135,6 +113,60 @@ pub async fn ensure_session_with(
 async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount, cycle: &str) -> Result<String, GReaderError> {
     clear_session(state);
     ensure_session_with(state, http, acct, cycle).await
+}
+
+/// 同步失败记账 + warn 日志（原因经 `utils::short_reason` 收敛为单行）。
+fn log_sync_fail(report: &mut SyncReport, op_name: &str, cycle: &str, host: &str, e: &GReaderError) {
+    let error_kind = greader_err_kind(e);
+    report.failures += 1;
+    record_fail(report, error_kind);
+    log::warn!(
+        "{op_name} failed cycle={cycle} host={host} error_kind={error_kind} reason {}",
+        crate::utils::short_reason(&e.to_string())
+    );
+}
+
+/// 统一鉴权重试：执行 `op` 一次，401/403（`GReaderError::Auth`）时重登录一次再试，语义与旧 `retry_auth!` 宏一致。
+/// 成功返回 `Some(val)`；失败时经 [`log_sync_fail`] 记账并返回 `None`。
+#[allow(clippy::too_many_arguments)]
+async fn with_auth_retry<T, F, Fut>(
+    state: &AppState,
+    http: &reqwest::Client,
+    acct: &SyncAccount,
+    auth: &mut String,
+    cycle: &str,
+    host: &str,
+    op_name: &str,
+    report: &mut SyncReport,
+    op: F,
+) -> Option<T>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, GReaderError>>,
+{
+    match op(auth.clone()).await {
+        Ok(val) => Some(val),
+        Err(GReaderError::Auth(_)) => match relogin(state, http, acct, cycle).await {
+            Ok(new_auth) => {
+                *auth = new_auth;
+                match op(auth.clone()).await {
+                    Ok(val) => Some(val),
+                    Err(e) => {
+                        log_sync_fail(report, op_name, cycle, host, &e);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log_sync_fail(report, op_name, cycle, host, &e);
+                None
+            }
+        },
+        Err(e) => {
+            log_sync_fail(report, op_name, cycle, host, &e);
+            None
+        }
+    }
 }
 
 /// 运行一次完整的同步周期：
@@ -160,92 +192,76 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
 
     let mut report = SyncReport::default();
 
-    macro_rules! retry_auth {
-        ($op_name:expr, $expr:expr) => {
-            match $expr {
-                Ok(val) => Some(val),
-                Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct, cycle).await {
-                    Ok(new_auth) => {
-                        auth = new_auth;
-                        match $expr {
-                            Ok(val) => Some(val),
-                            Err(e) => {
-                                let error_kind = greader_err_kind(&e);
-                                report.failures += 1;
-                                record_fail(&mut report, error_kind);
-                                log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
-                                None
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error_kind = greader_err_kind(&e);
-                        report.failures += 1;
-                        record_fail(&mut report, error_kind);
-                        log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
-                        None
-                    }
-                },
-                Err(e) => {
-                    let error_kind = greader_err_kind(&e);
-                    report.failures += 1;
-                    record_fail(&mut report, error_kind);
-                    log::warn!("{} failed cycle={cycle} host={host} error_kind={error_kind} reason {}", $op_name, short_reason(&e.to_string()));
-                    None
-                }
-            }
-        };
-    }
-
-    // 1. 推送队列中的本地操作
-    if let Some(n) = retry_auth!("sync push", push_queue(&state, &http, &acct, &auth).await) {
+    // 1. 推送队列中的本地操作（优先推送，以便后续拉取感知自身变更）
+    if let Some(n) = with_auth_retry(
+        &state,
+        &http,
+        &acct,
+        &mut auth,
+        cycle,
+        &host,
+        "sync push",
+        &mut report,
+        |auth_owned: String| {
+            let s = state.clone();
+            let h = http.clone();
+            let a = acct.clone();
+            async move { push_queue(&s, &h, &a, &auth_owned).await }
+        },
+    )
+    .await
+    {
         report.pushed = n;
     }
 
     // 2. 同步订阅源列表
-    if let Some(n) = retry_auth!("sync subscriptions", sync_subscriptions(&state, &http, &acct, &auth).await) {
+    if let Some(n) = with_auth_retry(
+        &state,
+        &http,
+        &acct,
+        &mut auth,
+        cycle,
+        &host,
+        "sync subscriptions",
+        &mut report,
+        |auth_owned: String| {
+            let s = state.clone();
+            let h = http.clone();
+            let a = acct.clone();
+            async move { sync_subscriptions(&s, &h, &a, &auth_owned).await }
+        },
+    )
+    .await
+    {
         report.subscription_count = n;
     }
 
-    // 3. 增量拉取条目（内联重试认证，使最终失败原因可记录在警告日志中）。
-    match pull_items(&state, &http, &acct, &auth, cycle).await {
-        Ok((n, notified)) => {
-            report.new_items = n;
-            report.notified = notified;
-        }
-        Err(GReaderError::Auth(_)) => match relogin(&state, &http, &acct, cycle).await {
-            Ok(new_auth) => {
-                auth = new_auth;
-                match pull_items(&state, &http, &acct, &auth, cycle).await {
-                    Ok((n, notified)) => {
-                        report.new_items = n;
-                        report.notified = notified;
-                    }
-                    Err(e) => {
-                        let error_kind = greader_err_kind(&e);
-                        report.failures += 1;
-                        record_fail(&mut report, error_kind);
-                        log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
-                    }
-                }
-            }
-            Err(e) => {
-                let error_kind = greader_err_kind(&e);
-                report.failures += 1;
-                record_fail(&mut report, error_kind);
-                log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
-            }
+    // 3. 增量拉取条目
+    if let Some((n, notified)) = with_auth_retry(
+        &state,
+        &http,
+        &acct,
+        &mut auth,
+        cycle,
+        &host,
+        "sync pull",
+        &mut report,
+        |auth_owned: String| {
+            let s = state.clone();
+            let h = http.clone();
+            let a = acct.clone();
+            let c = cycle;
+            async move { pull_items(&s, &h, &a, &auth_owned, c).await }
         },
-        Err(e) => {
-            let error_kind = greader_err_kind(&e);
-            report.failures += 1;
-            record_fail(&mut report, error_kind);
-            log::warn!("sync pull failed cycle={cycle} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
-        }
+    )
+    .await
+    {
+        report.new_items = n;
+        report.notified = notified;
     }
 
     // 单行汇总同步摘要：在单行中输出推送 + 订阅 + 拉取数量（不输出分阶段详情，通知仅输出数量，仅在存在失败时细分失败类型）。
-    let fail_suffix = format_fail_kinds(&report);
+    let fail_suffix = crate::utils::format_fail_kinds(&report.fail_kinds);
     log::info!(
         "sync done cycle={cycle} host={host} pushed={} subs={} new={} failures={}{} notified={}",
         report.pushed,
@@ -458,27 +474,23 @@ async fn pull_items(
                 continue; // 订阅源尚未在本地关联
             };
             let content = ammonia::clean(&item.content);
-            let snippet: String = html_to_text(&content).trim().chars().take(200).collect();
-            let (has_been_read, starred, hidden) = if engine.is_empty() {
-                (item.read, item.starred, false)
-            } else {
-                let content_text = html_to_text(&content);
-                let ctx = crate::rules::ArticleEvalContext {
-                    source_id: *source_id,
-                    group_id: *group_id,
-                    source_url,
-                    title: &item.title,
-                    content_text: &content_text,
-                    author: item.author.as_deref(),
-                    url: item.url.as_deref(),
-                };
-                let outcome = engine.evaluate(&ctx);
-                let flags = apply_rules_to_remote(item.read, item.starred, &outcome);
-                if outcome.notify {
-                    notified.push(item.title.clone());
-                }
-                flags
-            };
+            let snippet: String = crate::services::article::snippet_of(&content);
+            let outcome = crate::services::article::evaluate_article_rules(
+                &engine,
+                *source_id,
+                *group_id,
+                source_url,
+                &item.title,
+                Some(&content),
+                None,
+                item.author.as_deref(),
+                item.url.as_deref(),
+            );
+            let (has_been_read, starred, hidden) =
+                apply_rules_to_remote(item.read, item.starred, &outcome);
+            if outcome.notify {
+                notified.push(item.title.clone());
+            }
             let inserted = db::upsert_remote_item(
                 &conn,
                 &db::RemoteItemUpsert {

@@ -8,13 +8,17 @@ mod models;
 mod net;
 mod opml_io;
 mod rules;
+mod services;
 mod settings;
 mod sync;
 mod tray;
+mod utils;
 mod z_log;
 
 use std::sync::RwLock;
 use tokio::sync::Mutex;
+
+use crate::services::source::SourceRefreshOutcome;
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
@@ -64,7 +68,7 @@ pub fn run() {
             });
 
             if let Err(e) = tray::create_tray(app.handle()) {
-                log::error!("tray create failed reason {}", short_reason(&e.to_string()));
+                log::error!("tray create failed reason {}", crate::utils::short_reason(&e.to_string()));
             }
 
             let handle = app.handle().clone();
@@ -148,25 +152,13 @@ async fn background_refresh(app: tauri::AppHandle) {
 /// 刷新周期中允许的最大并发订阅源抓取数。
 const REFRESH_CONCURRENCY: usize = 6;
 
-/// 错误消息的首行（截断后）：日志中的错误原因绝不跨行，且绝不包含请求体/URL/令牌（这些仅保留在数据库或内存中）。
-fn short_reason(msg: &str) -> String {
-    const MAX_CHARS: usize = 160;
-    let first = msg.lines().next().unwrap_or("").trim();
-    if first.chars().count() > MAX_CHARS {
-        first.chars().take(MAX_CHARS).collect()
-    } else {
-        first.to_string()
-    }
-}
-
-
-/// 单个订阅源刷新任务的执行结果。
-struct SourceRefreshOutcome {
-    inserted: usize,
-    notified: Vec<String>,
-    failed: bool,
-    /// 用于 `fail_kinds` 汇总的稳定失败类别（成功时为 None）。
-    error_kind: Option<String>,
+/// 后台刷新链路的站点图标目录解析。
+///
+/// 与新增订阅源（`commands::add_source`）、手动刷新图标（`commands::refresh_favicon`）
+/// 共用 `commands::favicon_dir` 作为唯一的目录拼接点，本模块内统一经由此辅助函数
+/// 获取，避免各处重复手写 `join("favicons")`。
+fn refresh_favicon_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    crate::commands::favicon_dir(app)
 }
 
 /// 单个刷新任务所需的所有数据；具有所有权以保证任务为 `'static`。
@@ -185,7 +177,10 @@ struct RefreshTask {
     cycle: String,
 }
 
-/// 刷新单个订阅源：抓取 + 解析（网络）、存储 + 标记（短暂的数据库临界区）、延迟获取站点图标。绝不向上抛出错误；错误会记录在该源的数据行并通过结果返回。
+/// 刷新单个订阅源：委托 `services::source::refresh_single_source` 执行业务流程
+///（抓取 + 解析、存储 + 标记、缺失站点图标回退补全，含分段耗时日志）。
+/// 本函数仅负责前端 `fetch-progress` 事件收发；业务错误绝不向上抛出，
+/// 错误会记录在该源的数据行并通过结果返回。
 async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
     let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon, cycle } = task;
@@ -193,82 +188,25 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
     let state = app.state::<AppState>();
-    let mut out = SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: false, error_kind: None };
-    let ctx = feed::SourceCtx { id, group_id, url: url.clone() };
-    // release 模式可见的单源耗时统计：仅主机名（不含原始 URL/查询令牌），
-    // 拆分为 fetch / store / favicon 分段及总耗时。
-    let total_start = std::time::Instant::now();
-    let (host, _) = crate::net::sanitize_url(&url);
-    let fetch_start = std::time::Instant::now();
-    match feed::fetch_and_parse_with(&client, &url, &cycle, Some(id)).await {
-        Ok(parsed) => {
-            let fetch_ms = fetch_start.elapsed().as_millis();
-            let store_start = std::time::Instant::now();
-            let stored = {
-                let conn = state.db.lock().await;
-                feed::store(&conn, &ctx, &parsed, Some(&engine))
-            };
-            let store_ms = store_start.elapsed().as_millis();
-            match stored {
-                Ok(stored) => {
-                    out.inserted = stored.inserted;
-                    out.notified = stored.notified;
-                }
-                Err(e) => {
-                    out.failed = true;
-                    let error_kind = crate::net::classify_error(&e);
-                    out.error_kind = Some(error_kind.to_string());
-                    log::warn!("feed store failed cycle={cycle} id={id} host={host} error_kind={error_kind} reason {}", short_reason(&e.to_string()));
-                    let conn = state.db.lock().await;
-                    let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
-                }
-            }
-            let favicon_start = std::time::Instant::now();
-            if favicon.is_none() {
-                let icon_url = parsed.icon_url.as_deref();
-                let site_url = parsed.site_url.as_deref();
-                if let Some(fav) = feed::fetch_favicon_with(
-                    &client,
-                    feed::FaviconFetchOptions {
-                        feed_url: &url,
-                        icon_url,
-                        site_url,
-                        favicon_dir: &favicon_dir,
-                        source_id: id,
-                        allow_third_party,
-                        cycle: &cycle,
-                    },
-                )
-                .await
-                {
-                    let conn = state.db.lock().await;
-                    let _ = db::set_source_favicon(&conn, id, fav.to_string_lossy().as_ref());
-                }
-            }
-            let favicon_ms = favicon_start.elapsed().as_millis();
-            if !out.failed {
-                let conn = state.db.lock().await;
-                let _ = db::mark_source_fetched(&conn, id, true, None);
-                // 单源成功日志保持为 INFO（全量）：主机名 + 新增数量 + 分段耗时 + 周期 ID。键名小写，`_ms` 为纯数字。
-                let elapsed_ms = total_start.elapsed().as_millis();
-                if out.inserted > 0 {
-                    log::info!("feed refreshed cycle={cycle} id={id} host={host} new={} fetch_ms={fetch_ms} store_ms={store_ms} favicon_ms={favicon_ms} elapsed_ms={elapsed_ms}", out.inserted);
-                } else {
-                    log::info!("feed up to date cycle={cycle} id={id} host={host} fetch_ms={fetch_ms} store_ms={store_ms} favicon_ms={favicon_ms} elapsed_ms={elapsed_ms}");
-                }
-            }
-        }
-        Err(e) => {
-            out.failed = true;
-            let fetch_ms = fetch_start.elapsed().as_millis();
-            let error_kind = crate::net::classify_error(&e);
-            out.error_kind = Some(error_kind.to_string());
-            // 失败保持为 warn（便于诊断），仅包含 cycle + id + host + error_kind + fetch 耗时 + 首行原因。
-            log::warn!("feed fetch failed cycle={cycle} id={id} host={host} error_kind={error_kind} fetch_ms={fetch_ms} reason {}", short_reason(&e));
-            let conn = state.db.lock().await;
-            let _ = db::mark_source_fetched(&conn, id, false, Some(&e));
-        }
-    }
+    let out = crate::services::source::refresh_single_source(
+        crate::services::source::RefreshSingleSourceContext {
+            client: &client,
+            db: &state.db,
+            engine: Some(engine.as_ref()),
+            source_id: id,
+            group_id,
+            url: &url,
+            favicon: favicon.as_deref(),
+            favicon_dir: Some(favicon_dir.as_path()),
+            allow_third_party,
+            cycle: &cycle,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| {
+        log::warn!("feed refresh failed id={id} reason {}", crate::utils::short_reason(&e));
+        SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: true, error_kind: Some("other".to_string()) }
+    });
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
     }
@@ -290,17 +228,6 @@ fn merge_outcome(
         *fail_kinds.entry(kind).or_insert(0) += 1;
     }
     notified.extend(out.notified);
-}
-
-/// 按键名排序渲染 `fail_kinds={timeout:2,http_5xx:1}`；为空时不输出。
-fn format_fail_kinds(fail_kinds: &std::collections::HashMap<String, usize>) -> String {
-    if fail_kinds.is_empty() {
-        return String::new();
-    }
-    let mut pairs: Vec<(&String, &usize)> = fail_kinds.iter().collect();
-    pairs.sort_by(|a, b| a.0.cmp(b.0));
-    let inner: Vec<String> = pairs.into_iter().map(|(k, v)| format!("{k}:{v}")).collect();
-    format!(" fail_kinds={{{}}}", inner.join(","))
 }
 
 /// 抓取所有（或选定的）订阅源，将新条目送入规则引擎处理、
@@ -334,7 +261,7 @@ pub async fn refresh_all_sources(
                 Ok(e) => e,
                 Err(e) => {
                     let error_kind = crate::net::classify_error(&e);
-                    log::warn!("refresh rules load failed cycle={cycle} error_kind={error_kind} reason {}", short_reason(&e));
+                    log::warn!("refresh rules load failed cycle={cycle} error_kind={error_kind} reason {}", crate::utils::short_reason(&e));
                     return Err(e);
                 }
             }
@@ -353,7 +280,7 @@ pub async fn refresh_all_sources(
                     .collect(),
             }
         };
-        let dir = commands::favicon_dir(&app)?;
+        let dir = refresh_favicon_dir(&app)?;
         let feed_count = targets.len();
         log::info!("refresh start cycle={cycle} mode={mode} sync=false feeds={feed_count}");
 
@@ -396,32 +323,23 @@ pub async fn refresh_all_sources(
                 Err(e) => {
                     failures += 1;
                     *fail_kinds.entry("other".to_string()).or_insert(0) += 1;
-                    log::debug!("refresh task join failed cycle={cycle} reason {}", short_reason(&e.to_string()));
+                    log::debug!("refresh task join failed cycle={cycle} reason {}", crate::utils::short_reason(&e.to_string()));
                 }
             }
         }
         (total_new, failures, notified, feed_count, fail_kinds)
     };
 
-    // 保留策略清理；仅在大量删除后执行 VACUUM 以避免不必要的开销。
-    // 计数收敛为单行输出：仅在确实有行被删除时输出 info 级别日志。
+    // 保留策略清理委托存储服务；阈值语义不变：删除数严格大于 200 时执行 VACUUM。
+    // 计数收敛为单行输出：仅在确实有行被删除时输出 info 级别日志（均由服务内部完成）。
     {
         let conn = state.db.lock().await;
-        match db::cleanup_retention(&conn, settings.retention_days, settings.max_items_per_source) {
-            Ok(n) => {
-                if n > 200 {
-                    let _ = db::vacuum(&conn);
-                }
-                if n > 0 {
-                    log::info!("retention done deleted={n}");
-                } else {
-                    log::debug!("retention done deleted=0");
-                }
-            }
-            Err(e) => {
-                log::warn!("retention failed reason {}", short_reason(&e));
-            }
-        }
+        crate::services::storage::run_retention_policy(
+            &conn,
+            settings.retention_days,
+            settings.max_items_per_source,
+            200,
+        );
     }
 
     tray::update_tray(&app).await;
@@ -442,7 +360,7 @@ pub async fn refresh_all_sources(
         );
     }
     // 单行汇总周期摘要，附带 fail_kinds 失败分类明细（仅在存在失败时输出；通知仅输出数量，不输出文章标题）。
-    let fail_suffix = format_fail_kinds(&fail_kinds);
+    let fail_suffix = crate::utils::format_fail_kinds(&fail_kinds);
     log::info!(
         "refresh done cycle={cycle} mode={mode} sync={is_sync} feeds={feed_count} new={total_new} failures={failures}{fail_suffix} notified={} elapsed_ms={}",
         notified.len(),
@@ -458,7 +376,7 @@ fn notify_new_articles(
     rule_titles: &[String],
 ) {
     use tauri_plugin_notification::NotificationExt;
-    let zh = settings.locale.starts_with("zh");
+    let zh = crate::utils::is_zh_locale(&settings.locale);
     let mut body = if zh {
         format!("获取到 {new_count} 篇新文章")
     } else {

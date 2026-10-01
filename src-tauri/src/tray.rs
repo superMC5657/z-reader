@@ -27,9 +27,9 @@ fn label(zh: bool, zh_text: &str, en_text: &str) -> String {
 }
 
 fn locale_is_zh(app: &AppHandle) -> bool {
-    crate::settings::load(&crate::settings::settings_path(app).unwrap_or_default())
-        .locale
-        .starts_with("zh")
+    crate::utils::is_zh_locale(
+        &crate::settings::load(&crate::settings::settings_path(app).unwrap_or_default()).locale,
+    )
 }
 
 pub fn create_tray(app: &AppHandle) -> Result<(), tauri::Error> {
@@ -109,17 +109,6 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// 错误消息的首行（截断后）：错误原因不包含文件路径、令牌或文章正文。
-fn short_reason(msg: &str) -> String {
-    const MAX_CHARS: usize = 160;
-    let first = msg.lines().next().unwrap_or("").trim();
-    if first.chars().count() > MAX_CHARS {
-        first.chars().take(MAX_CHARS).collect()
-    } else {
-        first.to_string()
-    }
-}
-
 /// 重新计算未读文章数并刷新托盘标签与徽标红点。
 pub async fn update_tray(app: &AppHandle) {
     let Some(guard) = app.try_state::<TrayState>() else {
@@ -131,7 +120,7 @@ pub async fn update_tray(app: &AppHandle) {
         match crate::db::total_unread(&conn) {
             Ok(n) => n,
             Err(e) => {
-                log::warn!("tray unread query failed reason {}", short_reason(&e));
+                log::warn!("tray unread query failed reason {}", crate::utils::short_reason(&e));
                 0
             }
         }
@@ -144,7 +133,7 @@ pub async fn update_tray(app: &AppHandle) {
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),
     )) {
-        log::warn!("tray label update failed reason {}", short_reason(&e.to_string()));
+        log::warn!("tray label update failed reason {}", crate::utils::short_reason(&e.to_string()));
     }
     // 菜单标签在创建时已固定；重新设置它们以便语言切换（通过 save_settings 触发）能传播到托盘菜单。
     for (item, text) in [
@@ -154,12 +143,12 @@ pub async fn update_tray(app: &AppHandle) {
         (&handles.quit_item, label(zh, "退出", "Quit")),
     ] {
         if let Err(e) = item.set_text(text) {
-            log::warn!("tray label update failed reason {}", short_reason(&e.to_string()));
+            log::warn!("tray label update failed reason {}", crate::utils::short_reason(&e.to_string()));
         }
     }
     if let Some(base) = &handles.base_icon {
         if let Err(e) = handles.icon.set_icon(Some(with_badge(base, unread > 0))) {
-            log::warn!("tray icon update failed reason {}", short_reason(&e.to_string()));
+            log::warn!("tray icon update failed reason {}", crate::utils::short_reason(&e.to_string()));
         }
     }
 }

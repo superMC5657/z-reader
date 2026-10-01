@@ -26,32 +26,45 @@ struct SecretStore {
     proxy_password: String,
 }
 
-fn read_secrets(settings_path: &Path) -> SecretStore {
-    let path = secrets_path(settings_path);
-    match std::fs::read_to_string(&path) {
+/// 读取 JSON 文件并在失败时回退为默认值：文件缺失视为首次运行保持静默，
+/// 解析失败则记录脱敏警告后回退。`label` 为日志前缀（如 "secrets corrupt"）。
+fn read_json_safe<T>(path: &Path, label: &str) -> T
+where
+    T: Default + serde::de::DeserializeOwned,
+{
+    match std::fs::read_to_string(path) {
         // 文件不存在是首次运行的正常状态：保持静默。
-        Err(_) => SecretStore::default(),
-        Ok(t) => match serde_json::from_str(&t) {
-            Ok(s) => s,
+        Err(_) => T::default(),
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(v) => v,
             Err(e) => {
                 log::warn!(
-                    "secrets corrupt file={} reason={}",
-                    file_base(&path.to_string_lossy()),
-                    short_reason(&e.to_string())
+                    "{label} file={} reason={}",
+                    crate::utils::file_base(&path.to_string_lossy()),
+                    crate::utils::short_reason(&e.to_string())
                 );
-                SecretStore::default()
+                T::default()
             }
         },
     }
 }
 
-fn write_secrets(settings_path: &Path, store: &SecretStore) -> Result<(), String> {
-    let path = secrets_path(settings_path);
+/// 将值序列化为易读 JSON 并写入文件，写入前确保父目录存在。
+fn write_json_safe<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let text = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+fn read_secrets(settings_path: &Path) -> SecretStore {
+    read_json_safe(&secrets_path(settings_path), "secrets corrupt")
+}
+
+fn write_secrets(settings_path: &Path, store: &SecretStore) -> Result<(), String> {
+    let path = secrets_path(settings_path);
+    write_json_safe(&path, store)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -70,21 +83,7 @@ pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
 }
 
 pub fn load(path: &PathBuf) -> Settings {
-    let mut s = match std::fs::read_to_string(path) {
-        // 文件不存在是首次运行的正常状态：保持静默。
-        Err(_) => Settings::default(),
-        Ok(text) => match serde_json::from_str::<Settings>(&text) {
-            Ok(s) => s,
-            Err(e) => {
-                log::warn!(
-                    "settings corrupt file={} reason={}",
-                    file_base(&path.to_string_lossy()),
-                    short_reason(&e.to_string())
-                );
-                Settings::default()
-            }
-        },
-    };
+    let mut s: Settings = read_json_safe(path, "settings corrupt");
     let secrets = read_secrets(path);
     if let Some(acct) = s.sync_account.as_mut() {
         acct.password = secrets.sync_password;
@@ -95,9 +94,6 @@ pub fn load(path: &PathBuf) -> Settings {
 }
 
 pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
     let mut s = settings.clone();
     let store = SecretStore {
         sync_password: s
@@ -113,28 +109,7 @@ pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
     }
     s.proxy_password.clear();
     s.version = env!("CARGO_PKG_VERSION").to_string();
-    let text = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
-    std::fs::write(path, text).map_err(|e| e.to_string())
-}
-
-/// 截取错误消息的第一行：原因描述中绝不包含文件路径、令牌或文章文本。
-fn short_reason(msg: &str) -> String {
-    const MAX_CHARS: usize = 160;
-    let first = msg.lines().next().unwrap_or("").trim();
-    if first.chars().count() > MAX_CHARS {
-        first.chars().take(MAX_CHARS).collect()
-    } else {
-        first.to_string()
-    }
-}
-
-/// 仅获取文件名（基础名称）：完整文件路径绝不写入日志。
-fn file_base(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("?")
-        .to_string()
+    write_json_safe(path, &s)
 }
 
 #[cfg(test)]

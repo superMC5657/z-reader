@@ -13,11 +13,7 @@ pub struct ImportResult {
 /// 移除末尾斜杠。无法解析的输入回退至去空格后的原字符串。
 pub fn normalize_feed_url(raw: &str) -> String {
     let trimmed = raw.trim();
-    let with_scheme = if trimmed.contains("://") {
-        trimmed.to_string()
-    } else {
-        format!("https://{trimmed}")
-    };
+    let with_scheme = crate::utils::ensure_https_scheme(raw);
     let Ok(mut url) = url::Url::parse(&with_scheme) else {
         return trimmed.to_string();
     };
@@ -73,14 +69,13 @@ fn walk_outline(
     let group_id = if name.is_empty() {
         parent_group
     } else {
-        match existing_group(conn, name)? {
-            Some(id) => Some(id),
-            None => {
-                let g = db::create_group(conn, name)?;
-                result.groups_added += 1;
-                Some(g.id)
-            }
+        // 复用共享的建组辅助：已存在则直接复用，仅在新建时计数（排重语义不变）。
+        let already_exists = db::get_groups(conn)?.iter().any(|g| g.name.as_str() == name);
+        let g = db::find_or_create_group(conn, name)?;
+        if !already_exists {
+            result.groups_added += 1;
         }
+        Some(g.id)
     };
     for child in &outline.outlines {
         walk_outline(conn, child, group_id, seen, result)?;
@@ -105,17 +100,6 @@ fn import_source(
     db::insert_source(conn, xml_url.trim(), title, None, group_id)?;
     result.sources_added += 1;
     Ok(())
-}
-
-fn existing_group(conn: &rusqlite::Connection, name: &str) -> Result<Option<i64>, String> {
-    let mut stmt = conn
-        .prepare("SELECT id FROM groups WHERE name = ?1")
-        .map_err(|e| e.to_string())?;
-    let mut rows = stmt.query([name]).map_err(|e| e.to_string())?;
-    match rows.next().map_err(|e| e.to_string())? {
-        Some(row) => Ok(Some(row.get(0).map_err(|e| e.to_string())?)),
-        None => Ok(None),
-    }
 }
 
 pub fn export(conn: &rusqlite::Connection) -> Result<String, String> {

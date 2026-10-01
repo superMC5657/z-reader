@@ -1,5 +1,5 @@
 use crate::db;
-use crate::models::{html_to_text, Rule, RuleActionType, RuleSourceScope, RuleTargetField};
+use crate::models::{Rule, RuleActionType, RuleSourceScope, RuleTargetField};
 use regex::{Regex, RegexSet};
 use rusqlite::{params, Connection};
 
@@ -266,19 +266,17 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
         last_id = rows.last().map(|r| r.id).unwrap_or(last_id);
 
         for r in &rows {
-            let content_text = html_to_text(r.content.as_deref().unwrap_or(""));
-            let summary_text = html_to_text(r.summary.as_deref().unwrap_or(""));
-            let full_text = format!("{content_text} {summary_text}");
-            let ctx = ArticleEvalContext {
-                source_id: r.source_id,
-                group_id: r.group_id,
-                source_url: &r.source_url,
-                title: &r.title,
-                content_text: &full_text,
-                author: r.author.as_deref(),
-                url: r.url.as_deref(),
-            };
-            let out = engine.evaluate(&ctx);
+            let out = crate::services::article::evaluate_article_rules(
+                engine,
+                r.source_id,
+                r.group_id,
+                &r.source_url,
+                &r.title,
+                r.content.as_deref(),
+                r.summary.as_deref(),
+                r.author.as_deref(),
+                r.url.as_deref(),
+            );
             if out.mark_read {
                 to_read.push(r.id);
             }

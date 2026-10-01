@@ -235,21 +235,15 @@ async fn read_authed(
     let req = client
         .get(url)
         .header("Authorization", format!("GoogleLogin auth={auth}"));
-    let resp = crate::net::send_logged("sync", "GET", url, req)
+    crate::net::send_and_check_text("sync", "GET", url, req)
         .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(GReaderError::Auth(text));
-    }
-    if !status.is_success() {
-        return Err(GReaderError::Other(format!("HTTP {status}")));
-    }
-    Ok(text)
+        .map_err(|e| {
+            if e.starts_with("auth failed:") {
+                GReaderError::Auth(e)
+            } else {
+                GReaderError::Other(e)
+            }
+        })
 }
 
 pub async fn login(
@@ -263,20 +257,15 @@ pub async fn login(
         .post(&url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(login_body(email, passwd));
-    let resp = crate::net::send_logged("sync", "POST", &url, req)
+    let text = crate::net::send_and_check_text("sync", "POST", &url, req)
         .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(GReaderError::Auth(text));
-    }
-    if !status.is_success() {
-        return Err(GReaderError::Other(format!("HTTP {status}")));
-    }
+        .map_err(|e| {
+            if e.starts_with("auth failed:") {
+                GReaderError::Auth(e)
+            } else {
+                GReaderError::Other(e)
+            }
+        })?;
     parse_login(&text).ok_or_else(|| GReaderError::Other("no Auth in ClientLogin response".into()))
 }
 
@@ -352,20 +341,15 @@ pub async fn contents(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body);
-    let resp = crate::net::send_logged("sync", "POST", &url, req)
+    let text = crate::net::send_and_check_text("sync", "POST", &url, req)
         .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(GReaderError::Auth(text));
-    }
-    if !status.is_success() {
-        return Err(GReaderError::Other(format!("HTTP {status}")));
-    }
+        .map_err(|e| {
+            if e.starts_with("auth failed:") {
+                GReaderError::Auth(e)
+            } else {
+                GReaderError::Other(e)
+            }
+        })?;
     parse_contents(&text).map_err(GReaderError::Other)
 }
 
@@ -431,18 +415,16 @@ async fn post_authed(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.to_string());
-    let resp = crate::net::send_logged("sync", "POST", url, req)
+    crate::net::send_and_check_text("sync", "POST", url, req)
         .await
-        .map_err(|e| GReaderError::Other(crate::net::http_err_reason("", &e)))?;
-    let status = resp.status();
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(GReaderError::Auth(text));
-    }
-    if !status.is_success() {
-        return Err(GReaderError::Other(format!("HTTP {status}")));
-    }
-    Ok(())
+        .map(|_| ())
+        .map_err(|e| {
+            if e.starts_with("auth failed:") {
+                GReaderError::Auth(e)
+            } else {
+                GReaderError::Other(e)
+            }
+        })
 }
 
 #[cfg(test)]

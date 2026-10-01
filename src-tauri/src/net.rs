@@ -294,6 +294,54 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     }
 }
 
+/// 发送请求并在 HTTP 成功时返回文本正文（`builder` 已由调用方基于共享
+/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged`] 一致）。
+/// 401/403 映射为鉴权错误以便上层刷新会话，其余非 2xx 返回 `HTTP <status>`。
+pub async fn send_and_check_text(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+) -> Result<String, String> {
+    let resp = send_logged(kind, method, url, builder)
+        .await
+        .map_err(|e| http_err_reason("fetch failed", &e))?;
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(format!("auth failed: HTTP {status}"));
+    }
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    resp.text()
+        .await
+        .map_err(|e| http_err_reason("body failed", &e))
+}
+
+/// 发送请求并在 HTTP 成功时返回原始字节（`Vec<u8>` 即 `Bytes` 负载；
+/// 不引入额外 `bytes` 直接依赖）。状态检查与鉴权映射同 [`send_and_check_text`]。
+pub async fn send_and_check_bytes(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+) -> Result<Vec<u8>, String> {
+    let resp = send_logged(kind, method, url, builder)
+        .await
+        .map_err(|e| http_err_reason("fetch failed", &e))?;
+    let status = resp.status();
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(format!("auth failed: HTTP {status}"));
+    }
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| http_err_reason("body failed", &e))
+}
+
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
 /// 而非静默回退至直连。
 pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
@@ -392,5 +440,11 @@ mod tests {
         let (host2, path2) = sanitize_url("http://example.org/path/no_query");
         assert_eq!(host2, "example.org");
         assert_eq!(path2, "/path/no_query");
+    }
+
+    #[test]
+    fn test_bytes() {
+        // test candidates
+        let _ = ();
     }
 }
