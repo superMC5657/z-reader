@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
 import { isFullContentCached } from '../../lib/content'
+import { createArticleAutoFetch } from './articleAutoFetch'
 import { formatFullTime } from '../../lib/time'
 import { decodeHtmlEntities } from '../../lib/highlight'
 import Icon from '../ui/Icon.vue'
@@ -20,8 +21,19 @@ const props = defineProps<{
 const { t } = useI18n()
 const data = useDataStore()
 const app = useAppStore()
-const fetchingFull = ref(false)
-const extractError = ref('')
+
+// 自动抓取控制器：失败集合只活在当前视图实例里，不进 store、不持久化。
+const autoFetch = createArticleAutoFetch({
+  fetchFullContent,
+  getSelectedId: () => data.selectedId,
+  reloadItem: (id: number) => data.selectItem(id),
+  reloadList: () => {
+    data.loadItems().catch(() => {})
+  },
+})
+const fetchingFull = autoFetch.fetching
+const extractError = autoFetch.error
+const failedFetchIds = autoFetch.failedIds
 
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))
@@ -182,54 +194,18 @@ const docHtml = computed(() => {
 // 当本地缓存中未找到全文时自动抓取。
 // 若已缓存，则直接从本地缓存渲染，零延迟。
 // 按文章 ID 记录失败状态，防止抓取失败时陷入无限重试循环（仍保留手动重试入口）。
-const failedFetchIds = ref(new Set<number>())
-
+// 云端行（remoteId 非空）只走手动触发，绝不后台自动抓取。
 watch(
   item,
   (next) => {
-    extractError.value = ''
-    if (!next || !next.url) return
-
-    // 1. 缓存命中：本地 SQLite 中已缓存该文章全文！
-    if (isFullContentCached(next)) {
-      return
-    }
-
-    // 2. 缓存未命中：本地无全文缓存，后台自动抓取全文！
-    if (!failedFetchIds.value.has(next.id) && !fetchingFull.value) {
-      executeFetch(next.id, false)
-    }
+    void autoFetch.onItemChange(next ?? null)
   },
   { immediate: true },
 )
 
 async function onManualFetchFull() {
   if (!item.value) return
-  await executeFetch(item.value.id, true)
-}
-
-async function executeFetch(id: number, isManual: boolean) {
-  if (isManual) {
-    failedFetchIds.value.delete(id)
-  }
-  fetchingFull.value = true
-  extractError.value = ''
-  try {
-    await fetchFullContent(id)
-    // 若用户在抓取期间已切换到其它文章，丢弃陈旧结果。
-    if (data.selectedId !== id) return
-    await data.selectItem(id)
-    data.loadItems().catch(() => {})
-  } catch (e) {
-    if (data.selectedId === id) {
-      extractError.value = String(e)
-      failedFetchIds.value.add(id)
-    }
-  } finally {
-    if (data.selectedId === id) {
-      fetchingFull.value = false
-    }
-  }
+  await autoFetch.execute(item.value.id, true)
 }
 
 function onIframeLoad(e: Event) {

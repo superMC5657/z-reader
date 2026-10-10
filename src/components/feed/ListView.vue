@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useDataStore } from '../../stores/data'
+import { useAppStore } from '../../stores/app'
 import { formatTime } from '../../lib/time'
 import { highlightText } from '../../lib/highlight'
 import type { Item } from '../../types'
@@ -8,6 +9,7 @@ import StarButton from '../ui/StarButton.vue'
 defineProps<{ items: Item[] }>()
 const emit = defineEmits<{ select: [Item]; context: [MouseEvent, Item] }>()
 const data = useDataStore()
+const app = useAppStore()
 </script>
 
 <template>
@@ -17,7 +19,7 @@ const data = useDataStore()
       :key="item.id"
       class="row"
       :class="{
-        faded: item.hasBeenRead,
+        faded: app.fadeRead && item.hasBeenRead,
         selected: data.selectedId === item.id,
       }"
       @click="emit('select', item)"
