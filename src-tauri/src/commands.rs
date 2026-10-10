@@ -105,26 +105,32 @@ pub async fn add_source(
         })?;
         s.id
     };
-    // 委托服务完成抓取→存库→标状态→补图标（与后台刷新一致）。
-    // 标题/描述沿用首次探测结果建行；条目与图标由服务内的二次抓取幂等写入。
-    // 服务内部短暂加锁，网络阶段不持有锁（传 `&state.db` 而非 `&conn`，保持命令 future `Send`）。
+    // 委托存库段完成存库→标状态→补图标（复用首次探测的 ParsedFeed，无第二跳抓取）。
+    // engine 保持 None（不引入规则预设）。
     let fav_dir = favicon_dir(&app)?;
     let third_party =
         settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
     {
-        let ctx = crate::services::source::RefreshSingleSourceContext {
-            client: &client,
-            db: &state.db,
-            engine: None,
-            source_id,
-            group_id,
-            url: &url,
-            favicon: None,
-            favicon_dir: Some(&fav_dir),
-            allow_third_party: third_party,
-            cycle: "",
-        };
-        crate::services::source::refresh_single_source(ctx).await?;
+        crate::services::source::store_parsed(
+            crate::services::source::StoreSpec {
+                db: &state.db,
+                engine: None,
+                source_id,
+                group_id,
+                favicon: None,
+                favicon_dir: Some(&fav_dir),
+                allow_third_party: third_party,
+            },
+            crate::services::source::FetchSpec {
+                client: &client,
+                url: &url,
+                cycle: "",
+                source_id,
+            },
+            &parsed,
+            0,
+        )
+        .await?;
     }
     let source = {
         let conn = state.db.lock().await;

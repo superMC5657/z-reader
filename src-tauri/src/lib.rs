@@ -161,29 +161,31 @@ fn refresh_favicon_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Str
     crate::commands::favicon_dir(app)
 }
 
-/// 单个刷新任务所需的所有数据；具有所有权以保证任务为 `'static`。
-/// 注意：此处不包含标题/URL —— 日志仅输出 ID 和首行错误原因。
+/// 单个刷新任务的数据（事件所需最小字段 + 业务输入）；不携带 `AppHandle`/`background`，
+/// 生命周期渗漏由调用方显式参数承担。
 struct RefreshTask {
-    app: tauri::AppHandle,
-    client: reqwest::Client,
-    engine: std::sync::Arc<rules::RuleEngine>,
-    favicon_dir: std::path::PathBuf,
-    background: bool,
-    allow_third_party: bool,
     id: i64,
     group_id: Option<i64>,
     url: String,
     favicon: Option<String>,
     cycle: String,
+    client: reqwest::Client,
+    engine: std::sync::Arc<rules::RuleEngine>,
+    favicon_dir: std::path::PathBuf,
+    allow_third_party: bool,
 }
 
-/// 刷新单个订阅源：委托 `services::source::refresh_single_source` 执行业务流程
-///（抓取 + 解析、存储 + 标记、缺失站点图标回退补全，含分段耗时日志）。
+/// 刷新单个订阅源：委托 `services::source` 两段式业务流程
+///（抓取段 + 存库段，含分段耗时日志）。
 /// 本函数仅负责前端 `fetch-progress` 事件收发；业务错误绝不向上抛出，
 /// 错误会记录在该源的数据行并通过结果返回。
-async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
+async fn refresh_one_source(
+    app: tauri::AppHandle,
+    task: RefreshTask,
+    background: bool,
+) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { app, client, engine, favicon_dir, background, allow_third_party, id, group_id, url, favicon, cycle } = task;
+    let RefreshTask { id, group_id, url, favicon, cycle, client, engine, favicon_dir, allow_third_party } = task;
     if !background {
         let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
     }
@@ -213,6 +215,56 @@ async fn refresh_one_source(task: RefreshTask) -> SourceRefreshOutcome {
     out
 }
 
+/// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务元组。
+fn build_targets(
+    sources: &[crate::models::Source],
+    ids: Option<&[i64]>,
+) -> Vec<(i64, Option<i64>, String, Option<String>)> {
+    match ids {
+        Some(v) => sources
+            .iter()
+            .filter(|s| v.contains(&s.id))
+            .map(|s| (s.id, s.group_id, s.url.clone(), s.favicon.clone()))
+            .collect(),
+        None => sources
+            .iter()
+            .map(|s| (s.id, s.group_id, s.url.clone(), s.favicon.clone()))
+            .collect(),
+    }
+}
+
+/// 是否弹出聚合桌面通知（纯）：仅后台周期且（新文章命中开关或规则通知非空）时为真。
+fn should_notify(
+    background: bool,
+    notify_on_new: bool,
+    new_count: usize,
+    notified: &[String],
+) -> bool {
+    background && ((notify_on_new && new_count > 0) || !notified.is_empty())
+}
+
+/// 通知正文（纯，沿用既有 zh/en 文案）：空标题时为聚合计数，非空时取前 3 预览 + 余数。
+fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String {
+    let zh = crate::utils::is_zh_locale(locale);
+    let mut body = if zh {
+        format!("获取到 {new_count} 篇新文章")
+    } else {
+        format!("Fetched {new_count} new articles")
+    };
+    if !titles.is_empty() {
+        let preview: Vec<String> = titles.iter().take(3).cloned().collect();
+        let rest = titles.len() - preview.len();
+        let list = if zh { preview.join("、") } else { preview.join(", ") };
+        body = if zh {
+            let more = if rest > 0 { format!(" 等 {rest} 篇") } else { String::new() };
+            format!("命中通知规则：{list}{more}")
+        } else {
+            let more = if rest > 0 { format!(" and {rest} more") } else { String::new() };
+            format!("Notify rules matched: {list}{more}")
+        };
+    }
+    body
+}
 /// 将单个订阅源的刷新结果累加到刷新周期总计中。
 fn merge_outcome(
     total_new: &mut usize,
@@ -268,24 +320,14 @@ pub async fn refresh_all_sources(
         });
         let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
             let conn = state.db.lock().await;
-            match ids {
-                Some(v) => db::get_sources(&conn)?
-                    .into_iter()
-                    .filter(|s| v.contains(&s.id))
-                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
-                    .collect(),
-                None => db::get_sources(&conn)?
-                    .into_iter()
-                    .map(|s| (s.id, s.group_id, s.url, s.favicon))
-                    .collect(),
-            }
+            let all = db::get_sources(&conn)?;
+            build_targets(&all, ids.as_deref())
         };
         let dir = refresh_favicon_dir(&app)?;
         let feed_count = targets.len();
         log::info!("refresh start cycle={cycle} mode={mode} sync=false feeds={feed_count}");
 
-        // 有界并发刷新：慢速订阅源不再阻塞其余源。
-        // 每个任务独占其网络 I/O，仅在存储/标记条目的极短临界区内获取数据库锁。
+        // 有界并发刷新：bound=6 semaphore + JoinSet fan-out/fan-in。
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
         let mut set = tokio::task::JoinSet::new();
         for (id, group_id, url, favicon) in targets {
@@ -295,21 +337,20 @@ pub async fn refresh_all_sources(
                 .await
                 .map_err(|e| e.to_string())?;
             let task = RefreshTask {
-                app: app.clone(),
-                client: client.clone(),
-                engine: engine.clone(),
-                favicon_dir: dir.clone(),
-                background,
-                allow_third_party: settings.favicon_third_party,
                 id,
                 group_id,
                 url,
                 favicon,
                 cycle: cycle.clone(),
+                client: client.clone(),
+                engine: engine.clone(),
+                favicon_dir: dir.clone(),
+                allow_third_party: settings.favicon_third_party,
             };
+            let app_clone = app.clone();
             set.spawn(async move {
                 let _permit = permit;
-                refresh_one_source(task).await
+                refresh_one_source(app_clone, task, background).await
             });
         }
 
@@ -350,7 +391,7 @@ pub async fn refresh_all_sources(
             "fetch-done",
             serde_json::json!({ "newItems": total_new, "failures": failures, "background": true, "sync": is_sync }),
         );
-        if (settings.notify_on_new && total_new > 0) || !notified.is_empty() {
+        if should_notify(background, settings.notify_on_new, total_new, &notified) {
             notify_new_articles(&app, &settings, total_new, &notified);
         }
     } else {
@@ -376,24 +417,7 @@ fn notify_new_articles(
     rule_titles: &[String],
 ) {
     use tauri_plugin_notification::NotificationExt;
-    let zh = crate::utils::is_zh_locale(&settings.locale);
-    let mut body = if zh {
-        format!("获取到 {new_count} 篇新文章")
-    } else {
-        format!("Fetched {new_count} new articles")
-    };
-    if !rule_titles.is_empty() {
-        let preview: Vec<String> = rule_titles.iter().take(3).cloned().collect();
-        let rest = rule_titles.len() - preview.len();
-        let list = if zh { preview.join("、") } else { preview.join(", ") };
-        body = if zh {
-            let more = if rest > 0 { format!(" 等 {rest} 篇") } else { String::new() };
-            format!("命中通知规则：{list}{more}")
-        } else {
-            let more = if rest > 0 { format!(" and {rest} more") } else { String::new() };
-            format!("Notify rules matched: {list}{more}")
-        };
-    }
+    let body = notify_body(&settings.locale, new_count, rule_titles);
     let _ = app
         .notification()
         .builder()
@@ -425,5 +449,112 @@ mod tests {
         assert_eq!(failures, 1);
         assert_eq!(notified, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
         assert_eq!(fail_kinds.get("timeout"), Some(&1));
+    }
+
+    #[test]
+    fn merge_outcome_mixes_fail_kinds() {
+        // 给定：多类失败混合（含缺省 other）
+        let outcomes = vec![
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("auth".into()) },
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: None },
+            SourceRefreshOutcome { inserted: 1, notified: vec!["x".into()], failed: false, error_kind: None },
+            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
+        ];
+        // 当：折叠时
+        let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
+        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for out in outcomes {
+            merge_outcome(&mut total, &mut failures, &mut notified, &mut fail_kinds, out);
+        }
+        // 那么：计数与分类明细正确
+        assert_eq!(total, 1);
+        assert_eq!(failures, 4);
+        assert_eq!(notified, vec!["x".to_string()]);
+        assert_eq!(fail_kinds.get("timeout"), Some(&2));
+        assert_eq!(fail_kinds.get("auth"), Some(&1));
+        assert_eq!(fail_kinds.get("other"), Some(&1));
+    }
+
+    fn mock_source(id: i64, group_id: Option<i64>, url: &str, favicon: Option<&str>) -> crate::models::Source {
+        crate::models::Source {
+            id,
+            url: url.into(),
+            title: format!("S{id}"),
+            description: None,
+            favicon: favicon.map(String::from),
+            group_id,
+            last_fetched: None,
+            error_count: 0,
+            unread: 0,
+            remote_id: None,
+            last_error: None,
+        }
+    }
+
+    #[test]
+    fn build_targets_maps_all_and_subset() {
+        // 给定：三源
+        let all = vec![
+            mock_source(1, None, "https://a.example/feed", None),
+            mock_source(2, Some(7), "https://b.example/feed", Some("/f.png")),
+            mock_source(3, None, "https://c.example/feed", None),
+        ];
+        // 当：全量时
+        let full = build_targets(&all, None);
+        // 那么：保持输入顺序全映射
+        assert_eq!(full, vec![
+            (1, None, "https://a.example/feed".to_string(), None),
+            (2, Some(7), "https://b.example/feed".to_string(), Some("/f.png".to_string())),
+            (3, None, "https://c.example/feed".to_string(), None),
+        ]);
+        // 当：ids 子集时
+        let sub = build_targets(&all, Some(&[3, 1]));
+        // 那么：仅命中子集并保持源顺序
+        assert_eq!(sub, vec![
+            (1, None, "https://a.example/feed".to_string(), None),
+            (3, None, "https://c.example/feed".to_string(), None),
+        ]);
+        // 当：空子集时
+        assert!(build_targets(&all, Some(&[])).is_empty());
+    }
+
+    #[test]
+    fn should_notify_matrix() {
+        let empty: Vec<String> = vec![];
+        let some = vec!["a".to_string()];
+        // 手动周期一律不弹
+        assert!(!should_notify(false, true, 5, &empty));
+        assert!(!should_notify(false, true, 5, &some));
+        // 后台 + 开关开 + 有新文章 → 弹
+        assert!(should_notify(true, true, 1, &empty));
+        // 后台 + 开关关 + 有新文章但无规则通知 → 不弹
+        assert!(!should_notify(true, false, 3, &empty));
+        // 后台 + 无新文章但规则通知非空 → 弹（开关无关）
+        assert!(should_notify(true, false, 0, &some));
+        assert!(should_notify(true, true, 0, &some));
+        // 后台 + 无新无通知 → 不弹
+        assert!(!should_notify(true, true, 0, &empty));
+        assert!(!should_notify(true, false, 0, &empty));
+    }
+
+    #[test]
+    fn notify_body_matrix() {
+        // 空标题：聚合计数（zh/en）
+        assert_eq!(notify_body("zh-CN", 5, &[]), "获取到 5 篇新文章");
+        assert_eq!(notify_body("en-US", 5, &[]), "Fetched 5 new articles");
+        // 1 标题：无余数后缀
+        assert_eq!(notify_body("zh-CN", 2, &["a".to_string()]), "命中通知规则：a");
+        assert_eq!(notify_body("en-US", 2, &["a".to_string()]), "Notify rules matched: a");
+        // 3 标题：恰好取满，无余数
+        let three = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        assert_eq!(notify_body("zh-CN", 3, &three), "命中通知规则：a、b、c");
+        assert_eq!(notify_body("en-US", 3, &three), "Notify rules matched: a, b, c");
+        // 5 标题：前3预览 + 余数 2
+        let five = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string(), "e".to_string()];
+        assert_eq!(notify_body("zh-CN", 5, &five), "命中通知规则：a、b、c 等 2 篇");
+        assert_eq!(notify_body("en-US", 5, &five), "Notify rules matched: a, b, c and 2 more");
+        // 非空标题忽略 new_count（沿用既有语义）
+        assert_eq!(notify_body("zh-CN", 0, &["x".to_string()]), "命中通知规则：x");
     }
 }
