@@ -116,7 +116,7 @@ pub async fn add_source(
     }
 
     // 探测而不立即持久化：先解析远端订阅源进行验证。
-    let parsed = feed::fetch_and_parse(&client, &url).await.inspect_err(|e| {
+    let parsed = feed::fetch_and_parse_with(&client, &url, "", None).await.inspect_err(|e| {
         log::warn!("[CMD] action=add_source host={host} failed reason={}", crate::utils::short_reason(e));
     })?;
     let title = if parsed.title.is_empty() { url.clone() } else { parsed.title.clone() };
@@ -231,7 +231,7 @@ pub async fn refresh_favicon(
         (s.url, None)
     };
     let client = state.http_client();
-    if let Ok(p) = feed::fetch_and_parse(&client, &url).await {
+    if let Ok(p) = feed::fetch_and_parse_with(&client, &url, "", None).await {
         parsed = Some(p);
     }
     let dir = favicon_dir(&app)?;
@@ -239,7 +239,7 @@ pub async fn refresh_favicon(
     let icon_url = parsed.as_ref().and_then(|p| p.icon_url.as_deref());
     let site_url = parsed.as_ref().and_then(|p| p.site_url.as_deref());
     if let Some(fav) =
-        feed::fetch_favicon(&client, &url, icon_url, site_url, &dir, id, third_party).await
+        feed::fetch_favicon_with(&client, crate::feed::FaviconFetchOptions { feed_url: &url, icon_url, site_url, favicon_dir: &dir, source_id: id, allow_third_party: third_party, cycle: "" }).await
     {
         let path_str = fav.to_string_lossy().to_string();
         let conn = state.db.lock().await;
@@ -486,7 +486,7 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     let client = crate::net::build_http_client(&settings);
     let start = std::time::Instant::now();
     let req = client.get(url).timeout(std::time::Duration::from_secs(10));
-    if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req).await {
+    if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req, "", None).await {
         log::warn!("[CMD] action=test_proxy failed reason={}", crate::utils::short_reason(&msg));
         return Err(msg);
     }
@@ -517,7 +517,7 @@ pub async fn sync_login(
         return Err("server URL, username and password are required".into());
     }
     let http = state.http_client();
-    let auth = crate::sync::ensure_session(&state, &http, &acct)
+    let auth = crate::sync::ensure_session_with(&state, &http, &acct, "")
         .await
         .map_err(|e| e.to_string())?;
     let subs = crate::greader::subscriptions(&http, &acct.server_url, &auth)
@@ -568,7 +568,8 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
 #[tauri::command]
 pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     log::info!("[CMD] action=sync_now");
-    let r = crate::sync::run(&app, false).await?;
+    let cycle = crate::net::new_cycle();
+    let r = crate::sync::run_with_cycle(&app, false, &cycle).await?;
     let settings = settings_io::load(&settings_io::settings_path(&app)?);
     {
         let conn = state.db.lock().await;

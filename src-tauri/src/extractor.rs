@@ -3,7 +3,7 @@ pub async fn extract_from_url(client: &reqwest::Client, link: &str) -> Result<St
     let req = client
         .get(link)
         .timeout(std::time::Duration::from_secs(30));
-    let html = crate::net::send_and_check_text("extractor", "GET", link, req).await?;
+    let html = crate::net::send_and_check_text("extractor", "GET", link, req, "", None).await?;
 
     let mut readability = dom_smoothie::Readability::new(html.as_str(), Some(link), None)
         .map_err(|e| format!("extract failed: {e}"))?;

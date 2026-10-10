@@ -69,11 +69,11 @@ pub fn classify_error(msg: &str) -> &'static str {
     {
         return "dns";
     }
-    if s.contains("auth")
-        || s.contains("unauthorized")
+    if s.contains("unauthorized")
         || s.contains("forbidden")
         || s.contains("401")
         || s.contains("403")
+        || has_auth_token(&s)
     {
         return "auth";
     }
@@ -104,6 +104,13 @@ pub fn classify_error(msg: &str) -> &'static str {
         return "db";
     }
     "other"
+}
+
+/// 裸 `auth` 仅在独立 token/词边界命中时才归为鉴权类（`split` 按非字母数字切分后全等比较），
+/// 避免 `author` 等含子串的词被误伤；`unauthorized`/`forbidden`/401/403 仍按子串匹配。
+fn has_auth_token(s: &str) -> bool {
+    s.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|tok| tok == "auth")
 }
 
 pub struct RequestLog {
@@ -245,15 +252,6 @@ impl RequestLog {
     }
 }
 
-pub async fn send_logged(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-) -> Result<reqwest::Response, reqwest::Error> {
-    send_logged_with(kind, method, url, builder, "", None).await
-}
-
 pub async fn send_logged_with(
     kind: &'static str,
     method: &'static str,
@@ -295,38 +293,48 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
 }
 
 /// 发送请求并在 HTTP 成功时返回文本正文（`builder` 已由调用方基于共享
-/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged`] 一致）。
+/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged_with`] 一致）。
 /// 401/403 映射为鉴权错误以便上层刷新会话，其余非 2xx 返回 `HTTP <status>`。
+/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容）。
 pub async fn send_and_check_text(
     kind: &'static str,
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
 ) -> Result<String, String> {
-    let resp = send_logged(kind, method, url, builder)
-        .await
-        .map_err(|e| http_err_reason("fetch failed", &e))?;
-    let status = resp.status();
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(format!("auth failed: HTTP {status}"));
-    }
-    if !status.is_success() {
-        return Err(format!("HTTP {status}"));
-    }
-    resp.text()
-        .await
-        .map_err(|e| http_err_reason("body failed", &e))
+    let bytes = send_and_check_core(kind, method, url, builder, cycle, source_id).await?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// 发送请求并在 HTTP 成功时返回原始字节（`Vec<u8>` 即 `Bytes` 负载；
 /// 不引入额外 `bytes` 直接依赖）。状态检查与鉴权映射同 [`send_and_check_text`]。
+/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容）。
 pub async fn send_and_check_bytes(
     kind: &'static str,
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
 ) -> Result<Vec<u8>, String> {
-    let resp = send_logged(kind, method, url, builder)
+    send_and_check_core(kind, method, url, builder, cycle, source_id).await
+}
+
+/// `send_and_check_text` / `send_and_check_bytes` 的共享 core：全程携带
+/// `cycle`/`source_id` 经 [`send_logged_with`] 发送（不再掉进无 cycle 的旧入口），
+/// 返回原始字节；text 侧由调用方 `from_utf8_lossy`。抓取阶段错误前缀为
+/// `fetch failed`，正文流式错误前缀为 `body failed`。
+async fn send_and_check_core(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<Vec<u8>, String> {
+    let resp = send_logged_with(kind, method, url, builder, cycle, source_id)
         .await
         .map_err(|e| http_err_reason("fetch failed", &e))?;
     let status = resp.status();
@@ -443,8 +451,49 @@ mod tests {
     }
 
     #[test]
-    fn test_bytes() {
-        // test candidates
-        let _ = ();
+    fn classify_error_auth_token_boundary() {
+        // 给定：独立 token 的鉴权信号
+        // 当/那么：归为 auth（fail_kinds 汇总语义不变）
+        assert_eq!(classify_error("auth failed: HTTP 401"), "auth");
+        assert_eq!(classify_error("Auth=BadAuthentication"), "auth");
+        assert_eq!(classify_error("HTTP 403"), "auth");
+        assert_eq!(classify_error("unauthorized"), "auth");
+        assert_eq!(classify_error("Forbidden"), "auth");
+        // 给定：含 auth 子串但非独立 token 的词
+        // 当/那么：不再误伤为 auth
+        assert_eq!(classify_error("author Alice not found"), "other");
+        assert_eq!(classify_error("oauth handshake timed out"), "timeout");
+        // 其他分支保持原样
+        assert_eq!(classify_error("connection reset by peer"), "connect");
+        assert_eq!(classify_error("HTTP 503"), "http_5xx");
+        assert_eq!(classify_error("HTTP 404"), "http_4xx");
+        assert_eq!(classify_error("parse failed: bad rss"), "parse");
+        assert_eq!(classify_error("something unexpected"), "other");
+    }
+
+    #[test]
+    fn request_log_shape_and_fields() {
+        // 给定：带周期与源 ID 的请求起始
+        // 当：构造 RequestLog 时（不断言网络，只测形状/字段）
+        let log = RequestLog::start_with(
+            "feed",
+            "GET",
+            "https://user:pw@example.com/feed?token=secret&limit=20",
+            "abc12345",
+            Some(7),
+        );
+        // 那么：字段齐备且脱敏（绝不含凭据原文）
+        assert_eq!(log.kind, "feed");
+        assert_eq!(log.method, "GET");
+        assert_eq!(log.host, "example.com");
+        assert!(!log.path.contains("secret") && !log.path.contains("pw"));
+        assert!(log.path.contains("token=***"));
+        assert_eq!(log.cycle, "abc12345");
+        assert_eq!(log.source_id, Some(7));
+        // 给定：无周期上下文（旧调用方兼容形状）
+        let bare = RequestLog::start_with("sync", "POST", "https://x.example/api", "", None);
+        assert_eq!(bare.cycle, "");
+        assert_eq!(bare.source_id, None);
+        assert_eq!(bare.host, "x.example");
     }
 }

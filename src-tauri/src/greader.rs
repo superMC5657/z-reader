@@ -235,7 +235,7 @@ async fn read_authed(
     let req = client
         .get(url)
         .header("Authorization", format!("GoogleLogin auth={auth}"));
-    crate::net::send_and_check_text("sync", "GET", url, req)
+    crate::net::send_and_check_text("sync", "GET", url, req, "", None)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -257,7 +257,7 @@ pub async fn login(
         .post(&url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(login_body(email, passwd));
-    let text = crate::net::send_and_check_text("sync", "POST", &url, req)
+    let text = crate::net::send_and_check_text("sync", "POST", &url, req, "", None)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -341,7 +341,7 @@ pub async fn contents(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body);
-    let text = crate::net::send_and_check_text("sync", "POST", &url, req)
+    let text = crate::net::send_and_check_text("sync", "POST", &url, req, "", None)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -415,7 +415,7 @@ async fn post_authed(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.to_string());
-    crate::net::send_and_check_text("sync", "POST", url, req)
+    crate::net::send_and_check_text("sync", "POST", url, req, "", None)
         .await
         .map(|_| ())
         .map_err(|e| {

@@ -37,12 +37,7 @@ pub struct ParsedFeed {
 }
 
 /// 仅网络阶段：下载并解析订阅源。不持有任何数据库连接引用。
-pub async fn fetch_and_parse(client: &reqwest::Client, url: &str) -> Result<ParsedFeed, String> {
-    fetch_and_parse_with(client, url, "", None).await
-}
-
-/// 功能同 [`fetch_and_parse`]，但在网络日志行上标记 `cycle=` / `id=`。
-/// 周期为空且订阅源 ID 为 None 时与旧调用方（命令层）保持行为一致。
+/// 网络日志行上标记 `cycle=` / `id=`（无周期上下文时传 `""` / `None`）。
 pub async fn fetch_and_parse_with(
     client: &reqwest::Client,
     url: &str,
@@ -52,8 +47,7 @@ pub async fn fetch_and_parse_with(
     let req = client
         .get(url)
         .timeout(std::time::Duration::from_secs(30));
-    let _ = (cycle, source_id);
-    let bytes = crate::net::send_and_check_bytes("feed", "GET", url, req).await?;
+    let bytes = crate::net::send_and_check_bytes("feed", "GET", url, req, cycle, source_id).await?;
     parse_feed_data(&bytes, Some(url), url)
 }
 
@@ -207,7 +201,7 @@ pub fn sniff_image_ext(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// [`fetch_favicon`] / [`fetch_favicon_with`] 的参数包。
+/// 网站图标抓取的参数包。
 /// 聚合后调用参数不超过 clippy `too_many_arguments` 上限(7 个)。
 pub struct FaviconFetchOptions<'a> {
     pub feed_url: &'a str,
@@ -219,32 +213,8 @@ pub struct FaviconFetchOptions<'a> {
     pub cycle: &'a str,
 }
 
-pub async fn fetch_favicon(
-    client: &reqwest::Client,
-    feed_url: &str,
-    icon_url: Option<&str>,
-    site_url: Option<&str>,
-    favicon_dir: &std::path::Path,
-    source_id: i64,
-    allow_third_party: bool,
-) -> Option<std::path::PathBuf> {
-    fetch_favicon_with(
-        client,
-        FaviconFetchOptions {
-            feed_url,
-            icon_url,
-            site_url,
-            favicon_dir,
-            source_id,
-            allow_third_party,
-            cycle: "",
-        },
-    )
-    .await
-}
-
-/// 功能同 [`fetch_favicon`]，但在网络日志行上标记 `cycle=`（网站图标
-/// 候选请求保持 debug 级别，绝不升为 INFO）。
+/// 抓取网站图标并在网络日志行上标记 `cycle=`（无周期上下文时传 `""`）。
+/// 网站图标候选请求保持 debug 级别，绝不升为 INFO。
 pub async fn fetch_favicon_with(
     client: &reqwest::Client,
     opts: FaviconFetchOptions<'_>,

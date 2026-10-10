@@ -68,15 +68,7 @@ fn store_session(state: &AppState, acct: &SyncAccount, auth: &str) {
 }
 
 /// 当缓存的 Auth 令牌与当前账户匹配时返回该令牌，否则执行登录。
-pub async fn ensure_session(
-    state: &AppState,
-    http: &reqwest::Client,
-    acct: &SyncAccount,
-) -> Result<String, GReaderError> {
-    ensure_session_with(state, http, acct, "").await
-}
-
-/// 与 [`ensure_session`] 相同，但在日志中标记 `cycle=`（为空时省略）。
+/// 日志中标记 `cycle=`（为空时省略）。
 pub async fn ensure_session_with(
     state: &AppState,
     http: &reqwest::Client,
@@ -169,16 +161,11 @@ where
     }
 }
 
-/// 运行一次完整的同步周期：
+/// 运行一次完整的同步周期（调用方传入显式周期 ID，由 lib.rs 生成，使刷新开始与完成共享同一个 `cycle=`；
+/// 手动同步时调用方现场生成 `new_cycle()`）：
 /// 1. 将本地队列中的操作推送到服务端（优先推送队列）
 /// 2. 同步订阅列表（创建/更新订阅源与分组）
 /// 3. 增量拉取新增/更新条目
-pub async fn run(app: &AppHandle, _background: bool) -> Result<SyncReport, String> {
-    let cycle = crate::net::new_cycle();
-    run_with_cycle(app, _background, &cycle).await
-}
-
-/// 与 [`run`] 相同，但接收来自刷新调用方的显式周期 ID（由 lib.rs 生成，使刷新开始与完成共享同一个 `cycle=`）。
 pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
