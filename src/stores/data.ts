@@ -50,6 +50,37 @@ function listParams(scope: Scope, filter: number, search: string, offset: number
   }
 }
 
+/**
+ * 把同一篇文章散落在三处的引用收拢到一处写标记：
+ * 入参对象、selectedItem、items 列表项。先做乐观更新，
+ * 失败时用返回的回滚函数恢复，保证三处引用一致。
+ */
+function paintItemFlag<K extends 'hasBeenRead' | 'starred'>(
+  items: Item[],
+  selectedItem: Item | null,
+  item: Item,
+  key: K,
+  value: boolean,
+): () => void {
+  const prev = item[key]
+  const targets: Item[] = [item]
+  if (selectedItem && selectedItem.id === item.id && selectedItem !== item) {
+    targets.push(selectedItem)
+  }
+  const listed = items.find((i) => i.id === item.id)
+  if (listed && listed !== item && listed !== selectedItem) {
+    targets.push(listed)
+  }
+  for (const t of targets) {
+    t[key] = value
+  }
+  return () => {
+    for (const t of targets) {
+      t[key] = prev
+    }
+  }
+}
+
 export const useDataStore = defineStore('data', {
   state: () => ({
     sources: [] as Source[],
@@ -187,17 +218,11 @@ export const useDataStore = defineStore('data', {
     },
     async setItemRead(item: Item, read: boolean) {
       zlog.ui(`${read ? 'Mark as read' : 'Mark as unread'}: "${truncate(item.title, 60)}"`)
-      const prev = item.hasBeenRead
-      item.hasBeenRead = read
-      if (this.selectedItem?.id === item.id) this.selectedItem.hasBeenRead = read
-      const idx = this.items.findIndex((i) => i.id === item.id)
-      if (idx >= 0) this.items[idx].hasBeenRead = read
+      const rollback = paintItemFlag(this.items, this.selectedItem, item, 'hasBeenRead', read)
       try {
         await api.markRead([item.id], read)
       } catch (e) {
-        item.hasBeenRead = prev
-        if (this.selectedItem?.id === item.id) this.selectedItem.hasBeenRead = prev
-        if (idx >= 0) this.items[idx].hasBeenRead = prev
+        rollback()
         throw e
       }
       await this.loadSources()
@@ -205,17 +230,11 @@ export const useDataStore = defineStore('data', {
     async toggleStar(item: Item) {
       const starred = !item.starred
       zlog.ui(`${starred ? 'Star article' : 'Unstar article'}: "${truncate(item.title, 60)}"`)
-      item.starred = starred
-      if (this.selectedItem?.id === item.id) this.selectedItem.starred = starred
-      const idx = this.items.findIndex((i) => i.id === item.id)
-      if (idx >= 0) this.items[idx].starred = starred
+      const rollback = paintItemFlag(this.items, this.selectedItem, item, 'starred', starred)
       try {
         await api.star(item.id, starred)
       } catch (e) {
-        const prev = !starred
-        item.starred = prev
-        if (this.selectedItem?.id === item.id) this.selectedItem.starred = prev
-        if (idx >= 0) this.items[idx].starred = prev
+        rollback()
         throw e
       }
     },
