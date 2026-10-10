@@ -390,16 +390,16 @@ async fn sync_subscriptions(
 type SourceIdentity = (i64, Option<i64>, String);
 
 /// 将服务端状态与本地规则执行结果合并：服务端已读/加星状态优先（LWW），规则标记在其基础上叠加。返回 (has_been_read, starred, hidden)。
+///
+/// 唯一折叠点在 `services::article::merge_outcome_with_server`，此处仅为薄委托以收编旧调用。
+#[allow(dead_code)]
 fn apply_rules_to_remote(
     server_read: bool,
     server_starred: bool,
     outcome: &crate::rules::Outcome,
 ) -> (bool, bool, bool) {
-    (
-        server_read || outcome.mark_read || outcome.hide,
-        server_starred || outcome.star,
-        outcome.hide,
-    )
+    let v = crate::services::article::merge_outcome_with_server(outcome, server_read, server_starred);
+    (v.has_been_read, v.starred, v.hidden)
 }
 
 /// 拉取自上次同步游标以来发生变更的条目，以服务端的已读/加星状态进行更新或插入，并像本地刷新路径一样通过规则引擎处理新条目（标记已读 / 加星 / 隐藏 / 通知）。
@@ -473,22 +473,23 @@ async fn pull_items(
             let Some((source_id, group_id, source_url)) = stream_map.get(&item.stream_id) else {
                 continue; // 订阅源尚未在本地关联
             };
-            let content = ammonia::clean(&item.content);
-            let snippet: String = crate::services::article::snippet_of(&content);
-            let outcome = crate::services::article::evaluate_article_rules(
-                &engine,
+            let stored_content = ammonia::clean(&item.content);
+            let snippet: String = crate::services::article::snippet_for(&stored_content, None);
+            // 远端路由经 Verdict 模块一次裁决：合并体原文交模块统一清洗匹配，直接收 Verdict。
+            let verdict = crate::services::article::verdict_for_remote(
+                Some(&engine),
                 *source_id,
                 *group_id,
                 source_url,
                 &item.title,
-                Some(&content),
-                None,
+                &item.content,
                 item.author.as_deref(),
                 item.url.as_deref(),
+                item.read,
+                item.starred,
             );
-            let (has_been_read, starred, hidden) =
-                apply_rules_to_remote(item.read, item.starred, &outcome);
-            if outcome.notify {
+            let (has_been_read, starred, hidden) = (verdict.has_been_read, verdict.starred, verdict.hidden);
+            if verdict.notify {
                 notified.push(item.title.clone());
             }
             let inserted = db::upsert_remote_item(
@@ -500,7 +501,7 @@ async fn pull_items(
                     url: item.url.as_deref(),
                     author: item.author.as_deref(),
                     published_at: item.published_at,
-                    content: Some(&content),
+                    content: Some(&stored_content),
                     summary: None,
                     snippet: Some(&snippet),
                     has_been_read,

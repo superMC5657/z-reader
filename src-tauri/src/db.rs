@@ -934,7 +934,8 @@ pub fn set_source_remote(conn: &Connection, source_id: i64, remote_id: Option<&s
 /// 插入或对齐单篇远端文章。匹配顺序：优先按远端 ID，其次按 (source, url)
 /// 匹配在绑定同步前已从本地抓取的数据行。匹配成功时远端已读/加星状态
 /// 将覆盖本地（服务端优先 / LWW 规则），并与调用方的规则引擎标志位进行逻辑或
-/// （本地规则的标记已读/加星/隐藏叠加生效）；若未匹配则插入新数据行。
+/// （本地规则的标记已读/加星/隐藏叠加生效）；隐藏单调只置1不清0
+///（`hidden = hidden OR verdict.hide`，quiet 重放不回清）；若未匹配则插入新数据行。
 /// 若创建了新数据行则返回 true。
 pub struct RemoteItemUpsert<'a> {
     pub remote_id: &'a str,
@@ -975,8 +976,9 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
     }
     match existing {
         Some(id) => {
+            // hidden 单调：只置1不清0；read/star 保持 LWW 覆盖。
             conn.execute(
-                "UPDATE items SET has_been_read=?1, starred=?2, hidden=?3, remote_id=?4 WHERE id=?5",
+                "UPDATE items SET has_been_read=?1, starred=?2, hidden=CASE WHEN ?3 <> 0 THEN 1 ELSE hidden END, remote_id=?4 WHERE id=?5",
                 params![r.has_been_read as i64, r.starred as i64, r.hidden as i64, r.remote_id, id],
             )
             .map_err(|e| e.to_string())?;

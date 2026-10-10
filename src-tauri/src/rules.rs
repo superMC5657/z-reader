@@ -266,8 +266,9 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
         last_id = rows.last().map(|r| r.id).unwrap_or(last_id);
 
         for r in &rows {
-            let out = crate::services::article::evaluate_article_rules(
-                engine,
+            // 历史回溯直调 Verdict 模块本地路由：DB 行双源一次裁决，直接收 Verdict，无手写折叠。
+            let verdict = crate::services::article::verdict_for_local(
+                Some(engine),
                 r.source_id,
                 r.group_id,
                 &r.source_url,
@@ -277,20 +278,16 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
                 r.author.as_deref(),
                 r.url.as_deref(),
             );
-            if out.mark_read {
+            if verdict.has_been_read {
                 to_read.push(r.id);
             }
-            if out.star {
+            if verdict.starred {
                 to_star.push(r.id);
             }
-            if out.hide {
+            if verdict.hidden {
                 to_hide.push(r.id);
-                // 隐藏文章完全脱离阅读流（同时标记为已读）。
-                if !out.mark_read {
-                    to_read.push(r.id);
-                }
             }
-            if out.notify {
+            if verdict.notify {
                 stats.notified += 1;
             }
         }

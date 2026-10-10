@@ -86,8 +86,7 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
             .unwrap_or_default();
         let content = ammonia::clean(&raw_html);
         let summary = entry.summary.as_ref().map(|s| ammonia::clean(&s.content));
-        let snippet =
-            crate::services::article::snippet_of(summary.as_deref().unwrap_or(&content));
+        let snippet = crate::services::article::snippet_for(&content, summary.as_deref());
         let entry_title = entry
             .title
             .as_ref()
@@ -148,7 +147,8 @@ pub fn store(
 ) -> Result<StoreOutcome, String> {
     let mut out = StoreOutcome { inserted: 0, notified: Vec::new() };
     for e in &parsed.entries {
-        let outcome = crate::services::article::evaluate_article_rules_opt(
+        // 双路共用 Interface：本地路由经 Verdict 模块一次裁决，直接收 has_been_read。
+        let verdict = crate::services::article::verdict_for_local(
             engine,
             source.id,
             source.group_id,
@@ -159,10 +159,10 @@ pub fn store(
             e.author.as_deref(),
             e.url.as_deref(),
         );
-        let has_been_read = outcome.mark_read || outcome.hide;
-        let starred = outcome.star;
-        let hidden = outcome.hide;
-        if outcome.notify {
+        let has_been_read = verdict.has_been_read;
+        let starred = verdict.starred;
+        let hidden = verdict.hidden;
+        if verdict.notify {
             out.notified.push(e.title.clone());
         }
         if db::insert_item(
