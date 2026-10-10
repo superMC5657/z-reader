@@ -518,7 +518,7 @@ input[type='range']:focus {
   font-size: 15px;
 }
 
-.modal-card {
+.modal-card:not(.acrylic) {
   background: var(--bg);
   border-radius: var(--radius-sheet);
   box-shadow: var(--shadow-pop);

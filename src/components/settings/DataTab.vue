@@ -138,7 +138,7 @@ async function doImportBackup() {
 
     <!-- 恢复确认弹窗 -->
     <ConfirmModal
-      :show="restoreConfirmVisible"
+      v-if="restoreConfirmVisible"
       :title="t('settings.data.restore')"
       :message="t('settings.data.confirmRestore')"
       :confirm-text="t('settings.data.restore')"

@@ -11,7 +11,6 @@ withDefaults(
     cancelText?: string
     danger?: boolean
     loading?: boolean
-    show?: boolean
   }>(),
   {
     title: '',
@@ -20,7 +19,6 @@ withDefaults(
     cancelText: '',
     danger: false,
     loading: false,
-    show: undefined,
   }
 )
 
@@ -43,7 +41,7 @@ function handleConfirm() {
 </script>
 
 <template>
-  <Modal :title="title" :show="show" @close="handleClose">
+  <Modal :title="title" @close="handleClose">
     <div class="confirm-content">
       <slot>
         <p class="confirm-message">{{ message }}</p>

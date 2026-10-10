@@ -164,7 +164,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'blur-bg': data.selectedItem && app.isFocusMode, 'no-sidebar': !app.s.menuOn }">
+  <div class="app-shell" :class="{ 'no-sidebar': !app.s.menuOn }">
     <SideNav
       v-if="app.s.menuOn"
       @add-source="showAdd = true"
@@ -276,18 +276,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 亚克力专注模式样式 */
-.focus-backdrop {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  z-index: 1200;
-  padding: 1.25rem 1.5rem;
-}
-
+/* 专注模式左右切换按钮 */
 .focus-nav-btn {
   display: inline-flex;
   align-items: center;
@@ -343,48 +332,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1040px) {
-  .focus-backdrop {
-    padding: 1rem 0.5rem;
-    gap: 0.5rem;
-  }
-
   .focus-nav-btn {
     width: 2.6rem;
     height: 2.6rem;
   }
-}
-
-.focus-modal-card {
-  width: 780px;
-  max-width: 94vw;
-  height: 90vh;
-  max-height: 92vh;
-  background: var(--bg);
-  border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.focus-sheet-enter-active,
-.focus-sheet-leave-active {
-  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.focus-sheet-enter-active .focus-modal-card,
-.focus-sheet-leave-active .focus-modal-card {
-  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
-}
-
-.focus-sheet-enter-from,
-.focus-sheet-leave-to {
-  opacity: 0;
-}
-
-.focus-sheet-enter-from .focus-modal-card,
-.focus-sheet-leave-to .focus-modal-card {
-  opacity: 0;
-  transform: scale(0.95) translateY(12px);
 }
 </style>

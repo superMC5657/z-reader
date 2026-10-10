@@ -126,7 +126,7 @@ const currentTabLabel = computed(() => {
   </Modal>
 
   <ConfirmModal
-    :show="confirmState.show"
+    v-if="confirmState.show"
     :title="confirmState.title"
     :message="confirmState.message"
     :confirm-text="confirmState.confirmText"

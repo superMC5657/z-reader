@@ -390,11 +390,17 @@ function onIframeLoad(e: Event) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-card);
 }
 
 .article-view.in-focus-modal {
   --reader-pad-x: 2.25rem;
+  /* 绝对定位铺满卡片，绕开 flex 百分比高度链。 */
+  position: absolute;
+  inset: 0;
+  height: auto;
+  overflow: hidden;
 }
 
 .reader-head {
@@ -487,7 +493,9 @@ function onIframeLoad(e: Event) {
 }
 
 .reader-frame {
+  /* flex:1 + min-height:0 只占剩余空间，超长正文走 iframe 内部滚动。 */
   flex: 1;
+  min-height: 0;
   border: none;
   width: 100%;
   user-select: text;
@@ -497,10 +505,12 @@ function onIframeLoad(e: Event) {
 .article-error-banner {
   border-radius: 0;
   padding: 0.65rem var(--reader-pad-x);
+  flex-shrink: 0;
 }
 
 .loading-reader {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -537,6 +547,7 @@ function onIframeLoad(e: Event) {
 
 .empty-reader {
   flex: 1;
+  min-height: 0;
 }
 
 .mobile-back-btn {

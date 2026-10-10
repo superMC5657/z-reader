@@ -9,7 +9,6 @@ const props = withDefaults(
     extraWide?: boolean
     customLayout?: boolean
     preset?: 'default' | 'sheet' | 'acrylic'
-    show?: boolean
     transition?: string
   }>(),
   {
@@ -47,12 +46,10 @@ const transitionName = computed(() => {
   <Teleport to="body">
     <Transition :name="transitionName" appear>
       <div
-        v-if="show ?? true"
         class="modal-mask"
         :class="[
           `preset-${preset}`,
           {
-            'focus-backdrop': preset === 'acrylic',
             acrylic: preset === 'acrylic',
             sheet: preset === 'sheet',
           },
@@ -70,7 +67,6 @@ const transitionName = computed(() => {
               wide,
               'extra-wide': extraWide,
               'custom-modal': isCustomLayout,
-              'focus-modal-card': preset === 'acrylic',
               acrylic: preset === 'acrylic',
               sheet: preset === 'sheet',
             },
@@ -151,17 +147,16 @@ const transitionName = computed(() => {
 
 .modal-card.acrylic {
   width: 780px;
-  min-width: 0;
   max-width: 94vw;
   height: 90vh;
   max-height: 92vh;
-  background: var(--bg);
-  border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
+  position: relative;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: none;
+  background: var(--bg);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border);
 }
 
 /* Acrylic / focus-sheet 过渡动效 */
@@ -170,8 +165,6 @@ const transitionName = computed(() => {
   transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.focus-sheet-enter-active .focus-modal-card,
-.focus-sheet-leave-active .focus-modal-card,
 .focus-sheet-enter-active .modal-card.acrylic,
 .focus-sheet-leave-active .modal-card.acrylic {
   transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
@@ -182,8 +175,6 @@ const transitionName = computed(() => {
   opacity: 0;
 }
 
-.focus-sheet-enter-from .focus-modal-card,
-.focus-sheet-leave-to .focus-modal-card,
 .focus-sheet-enter-from .modal-card.acrylic,
 .focus-sheet-leave-to .modal-card.acrylic {
   opacity: 0;

@@ -178,7 +178,7 @@ onMounted(() => {
       <AlertBanner v-if="syncResultMsg" type="success" :message="syncResultMsg" />
 
       <ConfirmModal
-        :show="syncDisconnectVisible"
+        v-if="syncDisconnectVisible"
         :title="t('settings.sync.disconnect')"
         :message="t('settings.sync.confirmDisconnect')"
         :confirm-text="t('settings.sync.disconnect')"
