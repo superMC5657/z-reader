@@ -184,6 +184,149 @@ pub fn validate_db(db_file: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// WAL/SHM 旁路文件路径（与活跃库同目录）。
+fn wal_path(live: &Path) -> std::path::PathBuf {
+    live.with_extension("db-wal")
+}
+
+/// SHM 旁路文件路径（与活跃库同目录）。
+fn shm_path(live: &Path) -> std::path::PathBuf {
+    live.with_extension("db-shm")
+}
+
+/// swap 临界段内步骤：WAL/SHM 删除与 `replace_live`→`reopen` 包在一起（调用方持有排他锁）。
+fn swap_live(
+    staged: &Path,
+    live: &Path,
+    live_conn: &mut Connection,
+) -> Result<(), String> {
+    let _ = std::fs::remove_file(wal_path(live));
+    let _ = std::fs::remove_file(shm_path(live));
+    // 同目录重命名/复制是原子操作的关键点；参见 replace_live。
+    replace_live(staged, live)?;
+    *live_conn = crate::db::open(live)?;
+    Ok(())
+}
+
+/// 回滚：rollback→live 拷贝 + reopen + 清 staged/tmp，返回原错误（次生错误均吞掉）。
+fn rollback_live(
+    rollback: &Path,
+    live: &Path,
+    staged: &Path,
+    tmp_dir: &Path,
+    live_conn: &mut Connection,
+    original: String,
+) -> String {
+    let _ = std::fs::copy(rollback, live);
+    match crate::db::open(live) {
+        Ok(conn) => *live_conn = conn,
+        Err(reopen) => {
+            log::error!(
+                "restore rollback reopen failed reason={}",
+                crate::utils::short_reason(&reopen)
+            );
+        }
+    }
+    let _ = std::fs::remove_file(staged);
+    let _ = std::fs::remove_dir_all(tmp_dir);
+    log::warn!(
+        "restore rollback file={} reason={}",
+        crate::utils::file_base(&rollback.to_string_lossy()),
+        crate::utils::short_reason(&original)
+    );
+    original
+}
+
+/// 无 AppHandle 的 restore 全序 Module：
+/// stage→validate(staged)→snapshot-live→swap→rollback→settings→favicons。
+///
+/// - stage 为 `restored_db→staged` 拷贝（锁外）随后重验 staged 副本；
+/// - snapshot-live 失败尽力继续（不阻断恢复）；
+/// - WAL/SHM 删除与 replace→reopen 包进 swap 临界段内；
+/// - 仅 swap 成功才拷 settings 与 favicons；
+/// - swap 失败走 rollback（rollback→live 拷贝 + reopen + 清 staged/tmp + 返回原 Err）；
+/// - 成功/失败均清理 tmp。
+pub async fn restore_from_archive(
+    archive: &Path,
+    db_path: &Path,
+    db: &tokio::sync::Mutex<Connection>,
+    settings_file: &Path,
+    favicon_dir: &Path,
+) -> Result<String, String> {
+    let data_dir = db_path.parent().ok_or("live db path has no parent")?;
+    let tmp_dir = data_dir.join("restore-tmp");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    if let Err(e) = extract_archive(archive, &tmp_dir) {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(e);
+    }
+
+    let restored_db = tmp_dir.join(DB_ENTRY);
+    if !restored_db.exists() {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err("backup archive does not contain zreader.db".into());
+    }
+    if let Err(e) = validate_db(&restored_db) {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(e);
+    }
+
+    // 将验证通过的数据库暂存到活跃文件旁（锁外拷贝），并重验暂存副本。
+    let staged = db_path.with_extension("db.restoring");
+    if let Err(e) = std::fs::copy(&restored_db, &staged).map_err(|e| e.to_string()) {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(e);
+    }
+    if let Err(e) = validate_db(&staged) {
+        let _ = std::fs::remove_file(&staged);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(e);
+    }
+
+    // 为当前活跃数据库创建快照以备回滚（尽力而为；即使快照失败仍继续恢复）。
+    let rollback = db_path.with_extension("db.pre-restore-bak");
+    {
+        let conn = db.lock().await;
+        let _ = snapshot_live(&conn, &rollback);
+    }
+
+    // 切换数据库：释放活跃连接、替换文件并重新打开
+    // （db::open 会执行迁移，因此旧版本备份会原地升级）。
+    // 发生任何失败均会回滚至恢复前的快照，保证活跃数据绝不会处于替换一半的状态。
+    {
+        let mut guard = db.lock().await;
+        *guard = Connection::open_in_memory().map_err(|e| e.to_string())?;
+        if let Err(e) = swap_live(&staged, db_path, &mut guard) {
+            let err = rollback_live(&rollback, db_path, &staged, &tmp_dir, &mut guard, e);
+            return Err(err);
+        }
+    }
+
+    // 仅在数据库切换成功后，才应用设置和网站图标。
+    let restored_settings = tmp_dir.join(SETTINGS_ENTRY);
+    if restored_settings.exists() {
+        std::fs::copy(&restored_settings, settings_file).map_err(|e| e.to_string())?;
+    }
+
+    // 网站图标为普通文件；将其复制覆盖回现有文件。
+    let restored_favicons = tmp_dir.join("favicons");
+    if restored_favicons.is_dir() {
+        std::fs::create_dir_all(favicon_dir).map_err(|e| e.to_string())?;
+        if let Ok(entries) = std::fs::read_dir(&restored_favicons) {
+            for entry in entries.flatten() {
+                let from = entry.path();
+                if let Some(name) = from.file_name() {
+                    let _ = std::fs::copy(&from, favicon_dir.join(name));
+                }
+            }
+        }
+    }
+
+    let _ = std::fs::remove_file(&staged);
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    Ok(archive.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +462,204 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dest.join("ok.txt")).unwrap(), "fine");
         assert!(!dir.join("evil.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_full_order_tmp_fixture() {
+        // 给定：live 库（建源/条目）+ 目的地设置/图标目录
+        let base = temp_dir("restore-order");
+        let live_dir = base.join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_path = live_dir.join("zreader.db");
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let src = crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None).unwrap();
+        crate::db::insert_item(
+            &live_conn,
+            src.id,
+            &crate::db::UpsertEntry {
+                guid: "live-g1",
+                title: "live article",
+                url: None,
+                author: None,
+                published_at: 100,
+                content: Some("live body"),
+                summary: None,
+                snippet: Some("live"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        drop(live_conn);
+        let settings_file = base.join("settings.json");
+        std::fs::write(&settings_file, r#"{"marker":"live"}"#).unwrap();
+        let favicon_dir = base.join("favicons");
+        std::fs::create_dir_all(&favicon_dir).unwrap();
+
+        // 那么：validate 拒绝垃圾库、缺表库、新版 user_version 库
+        let bad = base.join("bad.db");
+        std::fs::write(&bad, b"not a database at all").unwrap();
+        assert!(validate_db(&bad).is_err());
+        let no_table = base.join("notable.db");
+        {
+            let _empty = Connection::open(&no_table).unwrap();
+        }
+        assert!(validate_db(&no_table).is_err());
+        let newer = base.join("newer.db");
+        {
+            let c = crate::db::open(&newer).unwrap();
+            c.execute("PRAGMA user_version = 9999", []).unwrap();
+        }
+        assert!(validate_db(&newer).is_err());
+
+        // 当：用垃圾库归档恢复时（失败路径）
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let db = tokio::sync::Mutex::new(live_conn);
+        let bad_archive = base.join("bad.zreader.bak");
+        write_archive(&bad, None, None, &bad_archive).unwrap();
+        let err = tauri::async_runtime::block_on(restore_from_archive(
+            &bad_archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ));
+        // 那么：失败、live 不变、tmp 清理
+        assert!(err.is_err());
+        {
+            let guard = db.try_lock().expect("lock");
+            let items = crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].guid, "live-g1");
+        }
+        assert!(!live_dir.join("restore-tmp").exists());
+
+        // 给定：成功归档（异构内容 + 设置标记 + 图标）与 WAL/SHM 残留
+        let staged_src = base.join("staged.db");
+        {
+            let c = crate::db::open(&staged_src).unwrap();
+            let s = crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None).unwrap();
+            crate::db::insert_item(
+                &c,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: "new-g1",
+                    title: "restored article",
+                    url: None,
+                    author: None,
+                    published_at: 200,
+                    content: Some("new body"),
+                    summary: None,
+                    snippet: Some("new"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        let arc_settings = base.join("arc-settings.json");
+        std::fs::write(&arc_settings, r#"{"marker":"restored-123"}"#).unwrap();
+        let arc_fav = base.join("arc-favicons");
+        std::fs::create_dir_all(&arc_fav).unwrap();
+        std::fs::write(arc_fav.join("7.png"), b"fakepng-bytes-123").unwrap();
+        let good_archive = base.join("good.zreader.bak");
+        write_archive(&staged_src, Some(&arc_settings), Some(&arc_fav), &good_archive).unwrap();
+
+        // 当：成功恢复时
+        let ok = tauri::async_runtime::block_on(restore_from_archive(
+            &good_archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ))
+        .unwrap();
+        assert!(ok.ends_with("good.zreader.bak"));
+        // 那么：live 为新内容、设置/图标落盘、tmp/staged 清理
+        {
+            let guard = db.try_lock().expect("lock");
+            let items = crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].guid, "new-g1");
+        }
+        let settings_text = std::fs::read_to_string(&settings_file).unwrap();
+        assert!(settings_text.contains("restored-123"));
+        assert_eq!(std::fs::read(favicon_dir.join("7.png")).unwrap(), b"fakepng-bytes-123");
+        assert!(!live_dir.join("restore-tmp").exists());
+        assert!(!live_path.with_extension("db.restoring").exists());
+
+        // WAL/SHM 清理（helper 级别：直驱 swap_live，避免与已打开库的映射冲突）
+        let sw_dir = base.join("swap-clean");
+        std::fs::create_dir_all(&sw_dir).unwrap();
+        let sw_live = sw_dir.join("zreader.db");
+        std::fs::write(&sw_live, b"old-live-bytes").unwrap();
+        std::fs::write(sw_live.with_extension("db-wal"), b"wal-junk").unwrap();
+        std::fs::write(sw_live.with_extension("db-shm"), b"shm-junk").unwrap();
+        let sw_staged = sw_dir.join("staged.db");
+        std::fs::copy(&staged_src, &sw_staged).unwrap();
+        let mut sw_conn = Connection::open_in_memory().unwrap();
+        swap_live(&sw_staged, &sw_live, &mut sw_conn).unwrap();
+        // WAL/SHM 残留必须被清掉（db::open 切 WAL 模式后 SQLite 自建的旁路文件不算残留，
+        // 故断言内容不再是预置 junk，而非文件不存在）。
+        match std::fs::read(sw_live.with_extension("db-wal")) {
+            Ok(bytes) => assert_ne!(bytes, b"wal-junk", "junk wal must be gone"),
+            Err(_) => {}
+        }
+        match std::fs::read(sw_live.with_extension("db-shm")) {
+            Ok(bytes) => assert_ne!(bytes, b"shm-junk", "junk shm must be gone"),
+            Err(_) => {}
+        }
+        let sw_items = crate::db::get_items(&sw_conn, &crate::models::GetItemsParams::default()).unwrap();
+        assert_eq!(sw_items.len(), 1);
+        assert_eq!(sw_items[0].guid, "new-g1");
+
+        // 当：swap 失败触发回滚时（以缺失 staged 直接驱动回滚 helper）
+        let rb_live = base.join("rb-live.db");
+        let rb_conn = crate::db::open(&rb_live).unwrap();
+        let rb_src = crate::db::insert_source(&rb_conn, "https://rb.example", "RB", None, None).unwrap();
+        crate::db::insert_item(
+            &rb_conn,
+            rb_src.id,
+            &crate::db::UpsertEntry {
+                guid: "rb-g1",
+                title: "rb article",
+                url: None,
+                author: None,
+                published_at: 300,
+                content: Some("rb"),
+                summary: None,
+                snippet: Some("rb"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        let rb_file = base.join("rb-snap.db");
+        snapshot_live(&rb_conn, &rb_file).unwrap();
+        drop(rb_conn);
+        let mut doomed = Connection::open_in_memory().unwrap();
+        std::fs::write(&rb_live, b"corrupted-live-bytes").unwrap();
+        let rb_tmp = base.join("rb-tmp");
+        std::fs::create_dir_all(&rb_tmp).unwrap();
+        let rb_staged = base.join("rb-staged.db");
+        std::fs::write(&rb_staged, b"staged-junk").unwrap();
+        // swap 必然失败（staged 缺失）
+        assert!(swap_live(&base.join("no-such-staged.db"), &rb_live, &mut doomed).is_err());
+        // 回滚后 live 恢复
+        let ret = rollback_live(&rb_file, &rb_live, &rb_staged, &rb_tmp, &mut doomed, "boom".into());
+        assert_eq!(ret, "boom");
+        let items = crate::db::get_items(&doomed, &crate::models::GetItemsParams::default()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].guid, "rb-g1");
+        assert!(!rb_staged.exists() && !rb_tmp.exists());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub(crate) fn favicon_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// 有同步账户时将条目操作入队待推送；纯本地模式直接跳过。
 /// 收敛 `mark_read` / `star` 两处的 `if acct.is_some()` 内联分支，语义不变。
+/// 缺 remote_id 的条目由 `db::enqueue_item_actions` 静默跳过（计数返回）；
+/// 部分跳过时仅记 debug，不阻断主流程。
 /// 保持为同步函数：`&Connection` 非 `Sync`，跨 `await` 持有会使命令 future 非 `Send`。
 fn enqueue_sync_action(
     conn: &rusqlite::Connection,
@@ -27,9 +29,30 @@ fn enqueue_sync_action(
     action: SyncAction,
 ) -> Result<(), String> {
     if account.is_some() {
-        db::enqueue_item_actions(conn, ids, action)?;
+        let n = db::enqueue_item_actions(conn, ids, action)?;
+        if n < ids.len() {
+            log::debug!("[CMD] action=enqueue skipped={} total={}", ids.len() - n, ids.len());
+        }
     }
     Ok(())
+}
+
+/// 将 mark_all_read 作用域解析为远端数据流（纯，无 DB/锁；remote 查询留 Adapter）。
+/// all/缺省 → reading-list；source/group 取对应非空 remote；缺失/空/未知 → None 跳过入队。
+/// 从未同步的分组（无 remote）与空 remote_id 皆为 None。
+fn resolve_mark_all_stream(
+    scope: Option<&str>,
+    scope_id: Option<i64>,
+    source_remote: Option<&str>,
+    group_remote: Option<&str>,
+) -> Option<String> {
+    let _ = scope_id;
+    match scope {
+        Some("source") => source_remote.filter(|t| !t.is_empty()).map(String::from),
+        Some("group") => group_remote.filter(|t| !t.is_empty()).map(String::from),
+        Some("all") | None => Some(crate::greader::STREAM_READING_LIST.to_string()),
+        _ => None,
+    }
 }
 
 #[tauri::command]
@@ -291,16 +314,24 @@ pub async fn mark_all_read(
     let conn = state.db.lock().await;
     db::mark_all_read(&conn, scope.as_deref(), scope_id)?;
     if acct.as_ref().is_some_and(|a| a.provider == "greader") {
-        // 将作用域映射到远端数据流，并将服务端“全部标记已读”操作入队。
+        // DB 查 remote_id 留 Adapter；纯解析交 resolve_mark_all_stream。
         // 仅上报服务端已知的数据流（remote_id）；
         // 为从未同步过的分组伪造标签流会导致推送无效目标。
-        let stream = match scope.as_deref() {
+        let source_remote = match scope.as_deref() {
             Some("source") => db::get_source(&conn, scope_id.unwrap_or(-1))?.remote_id,
+            _ => None,
+        };
+        let group_remote = match scope.as_deref() {
             Some("group") => db::get_group(&conn, scope_id.unwrap_or(-1))?
                 .and_then(|g| g.remote_id),
-            _ => Some(crate::greader::STREAM_READING_LIST.to_string()),
+            _ => None,
         };
-        if let Some(target) = stream.filter(|t| !t.is_empty()) {
+        if let Some(target) = resolve_mark_all_stream(
+            scope.as_deref(),
+            scope_id,
+            source_remote.as_deref(),
+            group_remote.as_deref(),
+        ) {
             db::enqueue_stream_action(&conn, SyncAction::MarkAllRead, &target)?;
         }
     }
@@ -498,9 +529,8 @@ pub async fn sync_login(
         })?;
 
     let path = settings_io::settings_path(&app)?;
-    let mut s = settings_io::load(&path);
-    s.sync_account = Some(acct);
-    settings_io::save(&path, &s)?;
+    // subscriptions 成功后才 save（顺序收 Module）。
+    crate::services::sync_auth::complete_login(&path, acct)?;
     Ok(subs.len())
 }
 
@@ -509,15 +539,10 @@ pub async fn sync_login(
 #[tauri::command]
 pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let path = settings_io::settings_path(&app)?;
-    let mut s = settings_io::load(&path);
-    s.sync_account = None;
-    settings_io::save(&path, &s)?;
-    // 尽力而为：退出登录后绝不能残留过期的账户密码。
-    let _ = settings_io::clear_sync_secret(&path);
-    crate::sync::clear_session(&state);
+    // 全序收 Module：save(None)→clear_sync_secret→clear_session→queue_clear。
     {
         let conn = state.db.lock().await;
-        db::queue_clear(&conn)?;
+        crate::services::sync_auth::apply_logout(&path, &conn, || crate::sync::clear_session(&state))?;
     }
     log::info!("[CMD] action=sync_logout provider=greader");
     Ok(())
@@ -759,89 +784,11 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     };
     let archive_path = picked.into_path().map_err(|e| e.to_string())?;
 
-    let dir = data_dir(&app)?;
-    let tmp_dir = dir.join("restore-tmp");
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-    crate::backup::extract_archive(&archive_path, &tmp_dir)?;
-
-    let restored_db = tmp_dir.join(crate::backup::DB_ENTRY);
-    if !restored_db.exists() {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err("backup archive does not contain zreader.db".into());
-    }
-    crate::backup::validate_db(&restored_db)?;
-
-    // 将验证通过的数据库暂存到活跃文件旁（在锁外执行，避免耗时的文件拷贝阻塞读者），并重新验证暂存副本。
+    // 全序收 backup Module（无 AppHandle）：stage→validate→snapshot→swap→rollback→settings→favicons。
     let db_path = state.db_path.clone();
-    let staged = db_path.with_extension("db.restoring");
-    std::fs::copy(&restored_db, &staged).map_err(|e| e.to_string())?;
-    crate::backup::validate_db(&staged)?;
-
-    // 为当前活跃数据库创建快照以备回滚（尽力而为；即使快照失败仍继续恢复）。
-    let rollback = db_path.with_extension("db.pre-restore-bak");
-    {
-        let conn = state.db.lock().await;
-        let _ = crate::backup::snapshot_live(&conn, &rollback);
-    }
-
-    // 切换数据库：释放活跃数据库连接、替换文件并重新打开
-    // （db::open 会执行迁移，因此旧版本备份会原地升级）。
-    // 发生任何失败均会回滚至恢复前的快照，保证活跃数据绝不会处于替换一半的状态。
-    {
-        let mut guard = state.db.lock().await;
-        *guard = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
-        let swapped: Result<(), String> = (|| {
-            let _ = std::fs::remove_file(db_path.with_extension("db-wal"));
-            let _ = std::fs::remove_file(db_path.with_extension("db-shm"));
-            // 同目录重命名/复制是原子操作的关键点；参见 replace_live。
-            crate::backup::replace_live(&staged, &db_path)?;
-            *guard = crate::db::open(&db_path)?;
-            Ok(())
-        })();
-        if let Err(e) = swapped {
-            let _ = std::fs::copy(&rollback, &db_path);
-            match crate::db::open(&db_path) {
-                Ok(conn) => *guard = conn,
-                Err(reopen) => {
-                    log::error!(
-                        "[CMD] action=import_backup rollback reopen failed reason={}",
-                        crate::utils::short_reason(&reopen)
-                    );
-                }
-            }
-            let _ = std::fs::remove_file(&staged);
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            log::warn!(
-                "[CMD] action=import_backup rollback file={} reason={}",
-                crate::utils::file_base(&rollback.to_string_lossy()),
-                crate::utils::short_reason(&e)
-            );
-            return Err(e);
-        }
-    }
-
-    // 仅在数据库切换成功后，才应用设置和网站图标。
-    let restored_settings = tmp_dir.join(crate::backup::SETTINGS_ENTRY);
-    if restored_settings.exists() {
-        let settings_file = settings_io::settings_path(&app)?;
-        std::fs::copy(&restored_settings, &settings_file).map_err(|e| e.to_string())?;
-    }
-
-    // 网站图标为普通文件；将其复制覆盖回现有文件。
-    let restored_favicons = tmp_dir.join("favicons");
-    if restored_favicons.is_dir() {
-        let fav_dir = favicon_dir(&app)?;
-        if let Ok(entries) = std::fs::read_dir(&restored_favicons) {
-            for entry in entries.flatten() {
-                let from = entry.path();
-                if let Some(name) = from.file_name() {
-                    let _ = std::fs::copy(&from, fav_dir.join(name));
-                }
-            }
-        }
-    }
-
-    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let settings_file = settings_io::settings_path(&app)?;
+    let fav_dir = favicon_dir(&app)?;
+    crate::backup::restore_from_archive(&archive_path, &db_path, &state.db, &settings_file, &fav_dir).await?;
 
     crate::tray::update_tray(&app).await;
     use tauri::Emitter;
@@ -881,4 +828,126 @@ pub async fn cleanup_now(app: AppHandle, state: State<'_, AppState>) -> Result<u
     crate::tray::update_tray(&app).await;
     log::info!("[CMD] action=cleanup_now ok deleted={deleted}");
     Ok(deleted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_mark_all_stream_matrix() {
+        let reading = crate::greader::STREAM_READING_LIST;
+        // 缺省与 all → reading-list
+        assert_eq!(resolve_mark_all_stream(None, None, None, None).as_deref(), Some(reading));
+        assert_eq!(resolve_mark_all_stream(Some("all"), None, None, None).as_deref(), Some(reading));
+        // 未知 scope → None
+        assert_eq!(resolve_mark_all_stream(Some("bogus"), Some(1), Some("feed/1"), Some("g")), None);
+        // source：有/无/空
+        assert_eq!(
+            resolve_mark_all_stream(Some("source"), Some(7), Some("feed/7"), None).as_deref(),
+            Some("feed/7")
+        );
+        assert_eq!(resolve_mark_all_stream(Some("source"), Some(7), None, None), None);
+        assert_eq!(resolve_mark_all_stream(Some("source"), Some(7), Some(""), None), None);
+        // group：有/无/空（从未同步组无 remote → None 跳过入队）
+        assert_eq!(
+            resolve_mark_all_stream(Some("group"), Some(9), None, Some("user/-/label/G")).as_deref(),
+            Some("user/-/label/G")
+        );
+        assert_eq!(resolve_mark_all_stream(Some("group"), Some(9), None, None), None);
+        assert_eq!(resolve_mark_all_stream(Some("group"), Some(9), None, Some("")), None);
+        // source 忽略 group 侧，group 忽略 source 侧
+        assert_eq!(
+            resolve_mark_all_stream(Some("source"), Some(7), Some("feed/7"), Some("user/-/label/G")).as_deref(),
+            Some("feed/7")
+        );
+        assert_eq!(
+            resolve_mark_all_stream(Some("group"), Some(9), Some("feed/7"), Some("user/-/label/G")).as_deref(),
+            Some("user/-/label/G")
+        );
+    }
+
+    #[test]
+    fn enqueue_skips_missing_remote_and_counts() {
+        // 给定：内存库，本地源（无 remote）+ 远端条目
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&conn).unwrap();
+        let local = crate::db::insert_source(&conn, "https://local.example", "L", None, None).unwrap();
+        crate::db::insert_item(
+            &conn,
+            local.id,
+            &crate::db::UpsertEntry {
+                guid: "plain",
+                title: "never synced",
+                url: None,
+                author: None,
+                published_at: 40,
+                content: Some("x"),
+                summary: None,
+                snippet: Some("x"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        let no_remote: i64 = conn
+            .query_row("SELECT id FROM items WHERE guid='plain'", [], |r| r.get(0))
+            .unwrap();
+        let remote_src = crate::db::insert_source(&conn, "https://e.example", "E", None, None).unwrap();
+        crate::db::upsert_remote_item(
+            &conn,
+            &crate::db::RemoteItemUpsert {
+                remote_id: "00000000175c6d3b",
+                source_id: remote_src.id,
+                title: "t",
+                url: Some("https://e.example/a"),
+                author: None,
+                published_at: 100,
+                content: Some("x"),
+                summary: None,
+                snippet: Some("x"),
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        let with_remote: i64 = conn
+            .query_row("SELECT id FROM items WHERE guid='00000000175c6d3b'", [], |r| r.get(0))
+            .unwrap();
+        let acct = Some(crate::models::SyncAccount {
+            provider: "greader".into(),
+            server_url: "https://x.example".into(),
+            username: "u".into(),
+            password: "p".into(),
+        });
+        // 当：批量入队时
+        enqueue_sync_action(&conn, &acct, &[no_remote, with_remote], SyncAction::MarkRead).unwrap();
+        // 那么：仅远端计入，主流程 Ok（静默跳过本地）
+        assert_eq!(crate::db::queue_len(&conn).unwrap(), 1);
+        let q = crate::db::queue_fetch(&conn, 10).unwrap();
+        assert_eq!(q[0].target, "00000000175c6d3b");
+        // 纯本地模式直接跳过
+        enqueue_sync_action(&conn, &None, &[with_remote], SyncAction::Star).unwrap();
+        assert_eq!(crate::db::queue_len(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn scope_display_fromstr_roundtrip() {
+        use crate::models::RuleSourceScope;
+        use std::str::FromStr;
+        // 往返：all / source:7 / group:9（线上传形不变）
+        assert_eq!(RuleSourceScope::from_str("all").unwrap(), RuleSourceScope::All);
+        assert_eq!(RuleSourceScope::All.to_string(), "all");
+        assert_eq!(RuleSourceScope::from_str("source:7").unwrap(), RuleSourceScope::Source(7));
+        assert_eq!(RuleSourceScope::Source(7).to_string(), "source:7");
+        assert_eq!(RuleSourceScope::from_str("group:9").unwrap(), RuleSourceScope::Group(9));
+        assert_eq!(RuleSourceScope::Group(9).to_string(), "group:9");
+        // 非法串 Err
+        assert!(RuleSourceScope::from_str("bogus").is_err());
+        assert!(RuleSourceScope::from_str("source:x").is_err());
+        assert!(RuleSourceScope::from_str("").is_err());
+    }
 }

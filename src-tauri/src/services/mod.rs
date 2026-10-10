@@ -7,3 +7,4 @@
 pub mod article;
 pub mod source;
 pub mod storage;
+pub mod sync_auth;
