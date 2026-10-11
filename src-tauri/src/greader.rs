@@ -248,19 +248,8 @@ async fn read_authed(
         })
 }
 
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn login(
-    client: &reqwest::Client,
-    base: &str,
-    email: &str,
-    passwd: &str,
-) -> Result<String, GReaderError> {
-    login_with(client, base, email, passwd, RequestContext::bare("sync")).await
-}
-
 /// Context-carrying login: `ctx` carries the sync cycle for log correlation
-/// (payload/auth/header logic unchanged; legacy [`login`] passes bare context).
+/// (payload/auth/header logic unchanged).
 pub async fn login_with(
     client: &reqwest::Client,
     base: &str,
@@ -286,12 +275,6 @@ pub async fn login_with(
 }
 
 /// edit-tag 调用所需的短期 CSRF "T" 令牌。
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn get_token(client: &reqwest::Client, base: &str, auth: &str) -> Result<String, GReaderError> {
-    get_token_with(client, base, auth, RequestContext::bare("sync")).await
-}
-
 /// Context-carrying token fetch (see [`login_with`]).
 pub async fn get_token_with(
     client: &reqwest::Client,
@@ -330,20 +313,6 @@ pub async fn subscriptions_with(
 
 /// 获取 reading-list 流的单页数据，仅限于 `ot`（Unix 秒）之后变更的条目。
 /// 持续沿用 `continuation` 直至返回 None。
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn stream_ids(
-    client: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    stream: &str,
-    ot: i64,
-    n: u32,
-    continuation: Option<&str>,
-) -> Result<(Vec<String>, Option<String>), GReaderError> {
-    stream_ids_with(client, base, auth, stream, ot, n, continuation, RequestContext::bare("sync")).await
-}
-
 /// Context-carrying ids page fetch (see [`login_with`]).
 pub async fn stream_ids_with(
     client: &reqwest::Client,
@@ -369,17 +338,6 @@ pub async fn stream_ids_with(
     }
     let text = read_authed(client, auth, url.as_str(), ctx).await?;
     parse_item_ids(&text).map_err(GReaderError::Other)
-}
-
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn contents(
-    client: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    ids: &[String],
-) -> Result<Vec<GItem>, GReaderError> {
-    contents_with(client, base, auth, ids, RequestContext::bare("sync")).await
 }
 
 /// Context-carrying contents fetch (see [`login_with`]).
@@ -421,20 +379,6 @@ pub async fn contents_with(
 }
 
 /// 推送指定条目的状态变更。`add`/`remove` 为通过表单字段 `a`/`r` 应用的状态流 ID（例如 STATE_READ）。
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn edit_tag(
-    client: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    token: &str,
-    ids: &[String],
-    add: &[&str],
-    remove: &[&str],
-) -> Result<(), GReaderError> {
-    edit_tag_with(client, base, auth, token, ids, add, remove, RequestContext::bare("sync")).await
-}
-
 /// Context-carrying edit-tag push (see [`login_with`]).
 pub async fn edit_tag_with(
     client: &reqwest::Client,
@@ -468,19 +412,6 @@ pub async fn edit_tag_with(
 }
 
 /// 流级别的 edit-tag，用于全部标记已读（s = feed/label/reading-list）。
-/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
-#[allow(dead_code)]
-pub async fn edit_tag_stream(
-    client: &reqwest::Client,
-    base: &str,
-    auth: &str,
-    token: &str,
-    stream: &str,
-    add: &str,
-) -> Result<(), GReaderError> {
-    edit_tag_stream_with(client, base, auth, token, stream, add, RequestContext::bare("sync")).await
-}
-
 /// Context-carrying stream edit-tag push (see [`login_with`]).
 pub async fn edit_tag_stream_with(
     client: &reqwest::Client,

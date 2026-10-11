@@ -44,7 +44,7 @@ pub struct RuleEngine {
 
 /// 规则评估后针对单篇文章应用的动作结果。
 #[derive(Default, Clone, Copy, Debug)]
-pub struct Outcome {
+pub(crate) struct Outcome {
     pub mark_read: bool,
     pub star: bool,
     pub hide: bool,
@@ -143,7 +143,7 @@ impl RuleEngine {
     }
 
     /// 针对单篇文章上下文评估所有适用的规则。
-    pub fn evaluate(&self, ctx: &ArticleEvalContext<'_>) -> Outcome {
+    pub(crate) fn evaluate(&self, ctx: &ArticleEvalContext<'_>) -> Outcome {
         let mut out = Outcome::default();
         if self.total_rules == 0 {
             return out;

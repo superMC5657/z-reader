@@ -2,7 +2,7 @@
 /// Legacy wrapper keeps the old `(client, link)` signature for callers without
 /// cycle correlation (bare extractor context; log shape unchanged).
 pub async fn extract_from_url(client: &reqwest::Client, link: &str) -> Result<String, String> {
-    extract_from_url_with(client, link, crate::net::RequestContext::bare("extractor")).await
+    extract_from_url_with(client, link, crate::net::RequestContext::extractor("")).await
 }
 
 /// Context-carrying extractor fetch: `ctx` carries the refresh cycle for log

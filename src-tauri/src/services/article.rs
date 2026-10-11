@@ -16,7 +16,6 @@
 //!   read/star 保持服务端 LWW 覆盖）。quiet 重放永不回清 hidden，详见本模块
 //!   `verdict_parity_hidden_monotonic_upsert` 测试。
 
-#![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 
 use crate::models::html_to_text;

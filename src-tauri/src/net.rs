@@ -145,10 +145,8 @@ impl<'a> RequestContext<'a> {
         Self { kind: "favicon", cycle, source_id: Some(source_id) }
     }
 
-    /// Full-text extractor requests.
-    /// (Kept as the canonical constructor; the no-cycle `extract_from_url`
-    /// wrapper currently uses `bare("extractor")` which is shape-identical.)
-    #[allow(dead_code)]
+    /// Full-text extractor requests (canonical constructor; the no-cycle
+    /// `extract_from_url` wrapper passes `""`, shape-identical to `bare`).
     pub fn extractor(cycle: &'a str) -> Self {
         Self { kind: "extractor", cycle, source_id: None }
     }
@@ -156,6 +154,7 @@ impl<'a> RequestContext<'a> {
     /// Proxy probe requests.
     /// (Kept for future context callers; `commands::test_proxy` still uses the
     /// legacy `send_and_check_text("proxy", .., "", None)` wrapper — out of scope.)
+    /// Tracking: no in-tree caller; kept until `test_proxy` migrates to `fetch_text`.
     #[allow(dead_code)]
     pub fn proxy() -> RequestContext<'static> {
         RequestContext { kind: "proxy", cycle: "", source_id: None }
@@ -338,20 +337,6 @@ pub async fn send_logged(
     }
 }
 
-/// Legacy 6-arg logged send: thin wrapper over [`send_logged`] for callers
-/// outside the context-migrated scope (log/payload-identical).
-#[allow(dead_code)]
-pub async fn send_logged_with(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
-) -> Result<reqwest::Response, reqwest::Error> {
-    send_logged(RequestContext::new(kind, cycle, source_id), method, url, builder).await
-}
-
 /// 生成单行 reqwest 失败原因，并将回显的请求 URL 精简为主机名：reqwest 的
 /// `Error` Display 实现会追加 `for url (<full>)`，否则会将完整 URL（查询参数/用户信息）
 /// 泄漏到日志中。调用方在记录日志时仍应使用 `short_reason` 处理返回值。
@@ -418,22 +403,6 @@ pub async fn send_and_check_text(
     source_id: Option<i64>,
 ) -> Result<String, String> {
     fetch_text(RequestContext::new(kind, cycle, source_id), method, url, builder).await
-}
-
-/// 发送请求并在 HTTP 成功时返回原始字节（`Vec<u8>` 即 `Bytes` 负载；
-/// 不引入额外 `bytes` 直接依赖）。状态检查与鉴权映射同 [`send_and_check_text`]。
-/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容：经 context 薄包装）。
-/// (In-crate sends now use [`fetch_bytes`]; kept for out-of-scope callers.)
-#[allow(dead_code)]
-pub async fn send_and_check_bytes(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
-) -> Result<Vec<u8>, String> {
-    fetch_bytes(RequestContext::new(kind, cycle, source_id), method, url, builder).await
 }
 
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，

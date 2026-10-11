@@ -442,6 +442,7 @@ export const useDataStore = defineStore('data', {
       zlog.ui(`Request full content for "${truncate(title, 60)}"`)
       await api.fetchFullContent(id)
       await this.selectItem(id)
+      // Unmarked list reload funnelling through reconcile; races ArticleView's own reloadList.
       this.loadItems().catch(() => {})
     },
   },

@@ -219,17 +219,14 @@ async fn refresh_one_source(
     out
 }
 
-/// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务元组。
-/// 唯一实现收归刷新 Module 的 `build_targets` Interface；此处仅做
-/// `RefreshTarget`→元组的薄适配，保持调用方与单测签名不变。
+/// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务单元。
+/// 唯一实现收归刷新 Module 的 `build_targets` Interface；此处为薄委托，
+/// 直接消费 `RefreshTarget`（不再经元组适配）。
 fn build_targets(
     sources: &[crate::models::Source],
     ids: Option<&[i64]>,
-) -> Vec<(i64, Option<i64>, String, Option<String>)> {
+) -> Vec<crate::services::source::RefreshTarget> {
     crate::services::source::build_targets(sources, ids)
-        .into_iter()
-        .map(|t| (t.id, t.group_id, t.url, t.favicon))
-        .collect()
 }
 
 /// 是否弹出聚合桌面通知（纯）：仅后台周期且（新文章命中开关或规则通知非空）时为真。
@@ -298,7 +295,7 @@ pub async fn refresh_all_sources(
                 }
             }
         });
-        let targets: Vec<(i64, Option<i64>, String, Option<String>)> = {
+        let targets: Vec<crate::services::source::RefreshTarget> = {
             let conn = state.db.lock().await;
             let all = db::get_sources(&conn)?;
             build_targets(&all, ids.as_deref())
@@ -311,17 +308,17 @@ pub async fn refresh_all_sources(
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
         // Fan-out Adapter over refresh Module per-source Interface; bound canonical in Module.
         let mut set = tokio::task::JoinSet::new();
-        for (id, group_id, url, favicon) in targets {
+        for t in targets {
             let permit = sem
                 .clone()
                 .acquire_owned()
                 .await
                 .map_err(|e| e.to_string())?;
             let task = RefreshTask {
-                id,
-                group_id,
-                url,
-                favicon,
+                id: t.id,
+                group_id: t.group_id,
+                url: t.url,
+                favicon: t.favicon,
                 cycle: cycle.clone(),
                 client: client.clone(),
                 engine: engine.clone(),
@@ -483,18 +480,18 @@ mod tests {
         ];
         // 当：全量时
         let full = build_targets(&all, None);
-        // 那么：保持输入顺序全映射
+        // 那么：保持输入顺序全映射（直接消费 RefreshTarget，不再经元组）
         assert_eq!(full, vec![
-            (1, None, "https://a.example/feed".to_string(), None),
-            (2, Some(7), "https://b.example/feed".to_string(), Some("/f.png".to_string())),
-            (3, None, "https://c.example/feed".to_string(), None),
+            crate::services::source::RefreshTarget { id: 1, group_id: None, url: "https://a.example/feed".to_string(), favicon: None },
+            crate::services::source::RefreshTarget { id: 2, group_id: Some(7), url: "https://b.example/feed".to_string(), favicon: Some("/f.png".to_string()) },
+            crate::services::source::RefreshTarget { id: 3, group_id: None, url: "https://c.example/feed".to_string(), favicon: None },
         ]);
         // 当：ids 子集时
         let sub = build_targets(&all, Some(&[3, 1]));
         // 那么：仅命中子集并保持源顺序
         assert_eq!(sub, vec![
-            (1, None, "https://a.example/feed".to_string(), None),
-            (3, None, "https://c.example/feed".to_string(), None),
+            crate::services::source::RefreshTarget { id: 1, group_id: None, url: "https://a.example/feed".to_string(), favicon: None },
+            crate::services::source::RefreshTarget { id: 3, group_id: None, url: "https://c.example/feed".to_string(), favicon: None },
         ]);
         // 当：空子集时
         assert!(build_targets(&all, Some(&[])).is_empty());
