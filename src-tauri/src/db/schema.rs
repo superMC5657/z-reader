@@ -1,6 +1,8 @@
 //! 数据库 schema 与迁移链（零行为变更：由 db.rs 按域拆分而来，SQL 逐字不变）。
 //!
 //! 另含 rusqlite 与规则/同步枚举之间的类型转换 plumbing。
+//! `open` 为唯一生产入口（私有的 `migrate` 在内部执行版本链）；
+//! `migrate_for_tests` 仅为测试建库 seam（`#[cfg(test)]`），生产绝不直调迁移。
 
 use crate::models::{RuleActionType, RuleSourceScope, RuleTargetField, SyncAction};
 use rusqlite::Connection;
@@ -17,7 +19,8 @@ pub fn open(path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
-pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
+/// 私有迁移链：仅经 `open`（生产）与 `migrate_for_tests`（测试）进入，SQL 逐字不变。
+fn migrate(conn: &Connection) -> Result<(), String> {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;

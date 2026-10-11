@@ -1,4 +1,12 @@
-//! 数据库访问层（按域拆分的外壳：零行为变更，SQL 逐字不变）。
+//! 数据库访问层（窄 re-export 壳：零行为、无 SQL、无逻辑）。
+//!
+//! 深度收敛于各域 Module，尤以 `items` 为条目 cohesive interface
+//!（查询/upsert/保留/vacuum：`get_items`/`insert_item`/`upsert_remote_item`/
+//! `cleanup_retention`/`vacuum`，含 Monotonic Hidden CASE 与 FTS/LIKE 回退；
+//! SQL 逐字不变，本地 SQLite 为 UI 唯一数据源 ADR-0002）。
+//! 本文件仅做 flat `crate::db::X` 重导出（`mod` 私有，深路径不再暴露；
+//! 后门（`fts_match_query`/`get_items_impl`/`migrate`）已移除，
+//! 测试一律经公共 `get_items`/`upsert_remote_item`/`cleanup_retention` 行为进入）。
 //!
 //! - `schema`：open/migrate/版本与 rusqlite 类型转换；
 //! - `catalog`：分组与订阅源目录（含远端对齐 lookup）；
@@ -8,14 +16,15 @@
 //!
 //! 调用方 `crate::db::X` / `db::X` 路径经由重导出保持可用。
 
-pub mod catalog;
-pub mod items;
-pub mod rules;
-pub mod schema;
-pub mod sync;
+mod catalog;
+mod items;
+mod rules;
+mod schema;
+mod sync;
 
 // 重导出兼容：调用方 `crate::db::X` / `db::X` 路径保持可用，SQL 语义逐字不变。
-// glob 形式避免私有模块内未使用重导出的告警；域名下无重名符号。
+// 窄壳：仅重导出各域公共 interface（glob 下无重名符号）；深 `db::items::X` 路径不再公开，
+// 内部实现（FTS MATCH 构造、FTS/LIKE 分支开关、私有 migrate）不再经此泄漏。
 pub use catalog::*;
 pub use items::*;
 pub use rules::*;
@@ -23,10 +32,6 @@ pub use schema::{open, CURRENT_VERSION};
 #[cfg(test)]
 pub use schema::migrate_for_tests;
 pub use sync::*;
-#[cfg(test)]
-pub(crate) use items::{fts_match_query, get_items_impl};
-#[cfg(test)]
-pub(crate) use schema::migrate;
 
 #[cfg(test)]
 mod tests {
@@ -37,7 +42,7 @@ mod tests {
     #[test]
     fn test_items_pagination_is_stable() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         for i in 1..=5 {
             insert_item(&conn, s.id, &item(&format!("g{i}"), "t", "x", i, false, false, false)).unwrap();
@@ -58,7 +63,7 @@ mod tests {
     #[test]
     fn test_like_fallback_covers_summary_and_author() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         insert_item(
             &conn,
@@ -80,13 +85,14 @@ mod tests {
         )
         .unwrap();
 
-        // 给定：FTS 路径不可用（模拟被拒绝的 MATCH 查询）
-        // 当/那么：通过 LIKE 回退仍然能匹配到作者和摘要
+        // 给定：FTS 路径不可用（缺失索引模拟 MATCH 真实拒绝）
+        // 当/那么：公共 get_items 经 warn 后回退到 LIKE，作者和摘要仍被匹配
+        //（行为经 items cohesive interface 进入；canonical 覆盖见 items::tests）
+        conn.execute("DROP TABLE items_fts", []).unwrap();
         for q in ["Austen", "unique-summary-xyz", "boring", "plain"] {
-            let found = get_items_impl(
+            let found = get_items(
                 &conn,
                 &GetItemsParams { search: Some(q.into()), ..Default::default() },
-                false,
             )
             .unwrap();
             assert_eq!(found.len(), 1, "fallback should match {q}");
@@ -96,7 +102,7 @@ mod tests {
     #[test]
     fn test_mark_source_fetched_records_error() {
         let conn = Connection::open_in_memory().expect("init in-memory db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
 
         let s = insert_source(&conn, "https://example.com/1", "Source 1", None, None).expect("insert");
 
@@ -118,7 +124,7 @@ mod tests {
     #[test]
     fn test_mark_all_read() {
         let conn = Connection::open_in_memory().expect("init in-memory db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
 
         let group = create_group(&conn, "Test Group").expect("create group");
         let source1 = insert_source(&conn, "https://example.com/1", "Source 1", None, Some(group.id)).expect("insert source 1");
@@ -176,7 +182,7 @@ mod tests {
     #[test]
     fn test_fts_search_and_hidden_filter() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
 
         insert_item(&conn, s.id, &item("g1", "Rust async guide", "<p>tokio runtime deep dive</p>", 100, false, false, false)).unwrap();
@@ -208,7 +214,7 @@ mod tests {
     #[test]
     fn test_retention_cleanup() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         let now = crate::models::now_ts();
         let day: i64 = 86_400;
@@ -244,7 +250,7 @@ mod tests {
     #[test]
     fn test_sync_upsert_queue_and_state() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let v: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
@@ -447,43 +453,44 @@ mod tests {
 
     #[test]
     fn fts_match_query_quotes_and_injection() {
+        // 行为版（经公共 get_items；后门 fts_match_query 已移除，
+        // canonical 断言见 items::tests::fts_quoting_is_literal_through_get_items）：
+        // 分词 AND + 引号转义 + 空白归一 + 注入中和，一律经查询行为验证。
+        let conn = Connection::open_in_memory().expect("init db");
+        migrate_for_tests(&conn).expect("migrate");
+        let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        insert_item(&conn, s.id, &item("g1", "hello world guide", "plain", 100, false, false, false)).unwrap();
+        insert_item(&conn, s.id, &item("q2", "say \"hi\" to me", "other", 200, false, false, false)).unwrap();
         // 分词以 AND 连接
-        assert_eq!(
-            fts_match_query("hello world").as_deref(),
-            Some("\"hello\" AND \"world\"")
-        );
+        let anded = get_items(&conn, &GetItemsParams { search: Some("hello world".into()), ..Default::default() }).unwrap();
+        assert_eq!(anded.len(), 1);
+        assert_eq!(anded[0].guid, "g1");
         // 双引号经加倍转义，注入被中和为字面短语
-        assert_eq!(fts_match_query("a\"b").as_deref(), Some("\"a\"\"b\""));
-        // 空/纯空白输入无表达式
-        assert_eq!(fts_match_query(""), None);
-        assert_eq!(fts_match_query("   "), None);
-        // 首尾与连续空白被归一
-        assert_eq!(
-            fts_match_query("  spaced   out ").as_deref(),
-            Some("\"spaced\" AND \"out\"")
-        );
-        // 裸引号分词整体转义（外层包裹 + 内层加倍）
-        assert_eq!(fts_match_query("\"").as_deref(), Some("\"\"\"\""));
+        let quoted = get_items(&conn, &GetItemsParams { search: Some("\"hi\"".into()), ..Default::default() }).unwrap();
+        assert_eq!(quoted.len(), 1);
+        assert_eq!(quoted[0].guid, "q2");
+        let inj = get_items(&conn, &GetItemsParams { search: Some("hello\" OR \"1\"=\"1".into()), ..Default::default() }).unwrap();
+        assert!(inj.is_empty(), "injection should be neutralized");
+        // 空/纯空白输入不报错、不注入
+        let empty = get_items(&conn, &GetItemsParams { search: Some("".into()), ..Default::default() }).unwrap();
+        assert_eq!(empty.len(), 2);
+        let blank = get_items(&conn, &GetItemsParams { search: Some("   ".into()), ..Default::default() }).unwrap();
+        assert!(blank.is_empty());
     }
 
     #[test]
     fn fts_match_rejection_falls_back_to_like() {
         let conn = Connection::open_in_memory().expect("init db");
-        migrate(&conn).expect("migrate");
+        migrate_for_tests(&conn).expect("migrate");
         let s = insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         insert_item(&conn, s.id, &item("q1", "tokio deep dive", "plain body", 100, false, false, false)).unwrap();
         insert_item(&conn, s.id, &item("q2", "say \"hi\" to me", "other", 200, false, false, false)).unwrap();
 
-        // 给定：FTS 引号转义使任何用户输入都无法破坏 MATCH（见 probe 实测），
-        // 以缺失索引模拟 MATCH 真实拒绝
+        // 给定：FTS 引号转义使任何用户输入都无法破坏 MATCH（见上），
+        // 以缺失索引模拟 MATCH 真实拒绝；拒绝本身为内部细节，不再经后门断言，
+        // 公共路径经 warn 后回退到 LIKE，结果正确
+        //（canonical 覆盖见 items::tests::fts_rejection_falls_back_to_like_through_get_items）
         conn.execute("DROP TABLE items_fts", []).unwrap();
-        // 当/那么：直接断言拒绝真实发生
-        assert!(get_items_impl(
-            &conn,
-            &GetItemsParams { search: Some("tokio".into()), ..Default::default() },
-            true,
-        )
-        .is_err());
 
         // 公共路径经 warn 后回退到 LIKE，结果正确
         let found = get_items(&conn, &GetItemsParams { search: Some("tokio".into()), ..Default::default() }).unwrap();

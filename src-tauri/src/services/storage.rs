@@ -15,6 +15,8 @@
 /// 3. 返回本次清理删除的文章总数；清理失败时记录 warn 并返回 `0`。
 /// Retention seam Adapter: refresh cycle enters via `services::source::apply_refresh_retention` (threshold 200);
 /// manual cleanup enters directly with threshold 0. Threshold semantics unchanged.
+/// 存储入口经窄壳 flat `crate::db::{cleanup_retention, vacuum}` 进入条目 cohesive interface
+///（`db::items` 拥有查询/upsert/保留/整理全部深度，SQL 逐字不变；ADR-0002 唯一源加强）。
 pub fn run_retention_policy(
     conn: &rusqlite::Connection,
     days: u32,
