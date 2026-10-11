@@ -7,7 +7,7 @@ import FeedIcon from '../ui/FeedIcon.vue'
 import AppleSelect from '../ui/AppleSelect.vue'
 import EmptyState from '../ui/EmptyState.vue'
 import Icon from '../ui/Icon.vue'
-import { requestConfirmKey } from './settingsConfirm'
+import { requestConfirmKey, requestDestructiveConfirm } from './settingsConfirm'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -26,11 +26,10 @@ function onSourceGroupChange(id: number, val: string) {
 }
 
 function removeSource(id: number) {
-  requestConfirm({
+  requestDestructiveConfirm(requestConfirm, {
     title: t('settings.sources.remove'),
     message: t('settings.sources.confirmRemove'),
     confirmText: t('settings.sources.remove'),
-    danger: true,
     onConfirm: () => {
       data.removeSource(id)
     },

@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../../stores/data'
-import { useAppStore } from '../../stores/app'
+import { useAppStore, validateSyncLoginInput } from '../../stores/app'
 import * as api from '../../lib/tauri'
 import type { SyncStatus } from '../../types'
 import { formatFullTime } from '../../lib/time'
 import AlertBanner from '../ui/AlertBanner.vue'
 import Badge from '../ui/Badge.vue'
 import Icon from '../ui/Icon.vue'
-import ConfirmModal from '../ui/ConfirmModal.vue'
+import { requestConfirmKey, requestDestructiveConfirm } from './settingsConfirm'
 
 const { t } = useI18n()
 const data = useDataStore()
 const app = useAppStore()
+const requestConfirm = inject(requestConfirmKey, (options) => {
+  console.warn('[settings] requestConfirm 未注入，危险确认被跳过:', options?.title)
+})
 
 const syncServerUrl = ref('')
 const syncUsername = ref('')
@@ -23,7 +26,6 @@ const syncErrorMsg = ref('')
 const syncStatusInfo = ref<SyncStatus | null>(null)
 const syncingNow = ref(false)
 const syncResultMsg = ref('')
-const syncDisconnectVisible = ref(false)
 
 async function loadSyncStatus() {
   if (!app.s.syncAccount) return
@@ -36,7 +38,8 @@ async function loadSyncStatus() {
 
 async function doSyncLogin() {
   syncErrorMsg.value = ''
-  if (!syncServerUrl.value.trim() || !syncUsername.value.trim() || !syncPassword.value) {
+  // 表单形状校验归 settings store 所有，tab 只做薄适配（文案 key 不变）。
+  if (!validateSyncLoginInput({ serverUrl: syncServerUrl.value, username: syncUsername.value, password: syncPassword.value })) {
     syncErrorMsg.value = t('settings.sync.errorRequired')
     return
   }
@@ -73,8 +76,17 @@ async function doSyncNow() {
   }
 }
 
+function askSyncDisconnect() {
+  // 断开确认走面板全局 ConfirmModal（面板内与删源/删规则同一确认面），不再自建弹框副本。
+  requestDestructiveConfirm(requestConfirm, {
+    title: t('settings.sync.disconnect'),
+    message: t('settings.sync.confirmDisconnect'),
+    confirmText: t('settings.sync.disconnect'),
+    onConfirm: doSyncLogout,
+  })
+}
+
 async function doSyncLogout() {
-  syncDisconnectVisible.value = false
   try {
     await api.syncLogout()
     await app.refresh()
@@ -169,24 +181,13 @@ onMounted(() => {
             <span class="label-title">{{ t('settings.sync.disconnect') }}</span>
             <span class="label-desc">{{ t('settings.sync.disconnectDesc') }}</span>
           </div>
-          <button class="f-btn" @click="syncDisconnectVisible = true">
+          <button class="f-btn" @click="askSyncDisconnect">
             {{ t('settings.sync.disconnect') }}
           </button>
         </div>
       </div>
 
       <AlertBanner v-if="syncResultMsg" type="success" :message="syncResultMsg" />
-
-      <ConfirmModal
-        v-if="syncDisconnectVisible"
-        :title="t('settings.sync.disconnect')"
-        :message="t('settings.sync.confirmDisconnect')"
-        :confirm-text="t('settings.sync.disconnect')"
-        danger
-        @confirm="doSyncLogout"
-        @cancel="syncDisconnectVisible = false"
-        @close="syncDisconnectVisible = false"
-      />
     </template>
   </div>
 </template>

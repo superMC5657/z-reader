@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDataStore } from '../../stores/data'
 import * as api from '../../lib/tauri'
 import { restartApp } from '../../lib/updater'
 import AlertBanner from '../ui/AlertBanner.vue'
 import Icon from '../ui/Icon.vue'
-import ConfirmModal from '../ui/ConfirmModal.vue'
+import { requestConfirmKey, requestDestructiveConfirm } from './settingsConfirm'
 
 const { t } = useI18n()
 const data = useDataStore()
+// 未被 SettingsPanel provide 时 warn 而不是静默吞掉危险确认。
+const requestConfirm = inject(requestConfirmKey, (options) => {
+  console.warn('[settings] requestConfirm 未注入，危险确认被跳过:', options?.title)
+})
 
 const dataMsg = ref('')
 const opmlInput = ref<HTMLInputElement | null>(null)
@@ -47,7 +51,16 @@ async function exportOpml() {
 // ---------- 完整备份与恢复 ----------
 
 const backingUp = ref(false)
-const restoreConfirmVisible = ref(false)
+
+function askRestore() {
+  // 恢复确认走面板全局 ConfirmModal（面板内与删源/删规则同一确认面），不再自建弹框副本。
+  requestDestructiveConfirm(requestConfirm, {
+    title: t('settings.data.restore'),
+    message: t('settings.data.confirmRestore'),
+    confirmText: t('settings.data.restore'),
+    onConfirm: doImportBackup,
+  })
+}
 
 async function doExportBackup() {
   backingUp.value = true
@@ -65,7 +78,6 @@ async function doExportBackup() {
 }
 
 async function doImportBackup() {
-  restoreConfirmVisible.value = false
   backingUp.value = true
   dataMsg.value = ''
   try {
@@ -127,7 +139,7 @@ async function doImportBackup() {
           <span class="label-title">{{ t('settings.data.restore') }}</span>
           <span class="label-desc">{{ t('settings.data.restoreDesc') }}</span>
         </div>
-        <button class="f-btn" :disabled="backingUp" @click="restoreConfirmVisible = true">
+        <button class="f-btn" :disabled="backingUp" @click="askRestore">
           <Icon name="import" :size="14" />
           {{ t('settings.data.restore') }}
         </button>
@@ -135,19 +147,6 @@ async function doImportBackup() {
     </div>
 
     <AlertBanner v-if="dataMsg" type="success" :message="dataMsg" />
-
-    <!-- 恢复确认弹窗 -->
-    <ConfirmModal
-      v-if="restoreConfirmVisible"
-      :title="t('settings.data.restore')"
-      :message="t('settings.data.confirmRestore')"
-      :confirm-text="t('settings.data.restore')"
-      danger
-      :loading="backingUp"
-      @confirm="doImportBackup"
-      @cancel="restoreConfirmVisible = false"
-      @close="restoreConfirmVisible = false"
-    />
   </div>
 </template>
 

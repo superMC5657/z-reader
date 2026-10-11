@@ -121,7 +121,7 @@ onMounted(() => {
             style="width: 220px"
             placeholder="http://127.0.0.1:7890"
             :value="app.s.proxyUrl"
-            @change="app.patch({ proxyUrl: ($event.target as HTMLInputElement).value.trim() })"
+            @change="app.patch({ proxyUrl: ($event.target as HTMLInputElement).value })"
           />
         </div>
         <div class="grouped-inset-row">

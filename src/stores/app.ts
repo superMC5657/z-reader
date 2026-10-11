@@ -65,6 +65,112 @@ function resolveTheme(theme: Settings['theme']): 'light' | 'dark' {
   return theme
 }
 
+/**
+ * settings validate+confirm+persist 的 validate 半区（纯函数，无 IO）。
+ *
+ * 不变式：任何 tab/调用方传进来的 patch 都先经此归一，非法值直接丢弃、
+ * 绝不落盘。tab 只做薄适配传原值（trim/clamp/枚举收敛一律在这里），
+ * 确认（confirm）由 SettingsPanel 的全局 ConfirmModal 拥有，
+ * 持久化（persist）由 patch 经 tauri 适配层完成。
+ * validate 在 store、confirm 在 panel、persist 经 adapter：三者各就其位。
+ */
+export const SETTINGS_RANGES = {
+  uiScale: { min: 80, max: 150 },
+  fontSize: { min: 12, max: 22 },
+} as const
+
+const THEMES: Settings['theme'][] = ['system', 'light', 'dark']
+const VIEWS: Settings['view'][] = ['cards', 'magazine', 'list']
+const READER_MODES: Settings['readerMode'][] = ['split', 'focus']
+const PROXY_MODES: Settings['proxyMode'][] = ['system', 'none', 'manual']
+const FILTER_TYPES = [0, 1, 2]
+const BOOLEAN_KEYS = ['menuOn', 'notifyOnNew', 'closeToTray', 'faviconThirdParty'] as const
+
+function clampInt(n: unknown, min: number, max: number): number | undefined {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return undefined
+  return Math.min(max, Math.max(min, Math.round(n)))
+}
+
+/** 与原 AppTab 内联语义逐值等价：空/NaN/0 回落 30，下限钳到 1。 */
+function normalizeFetchInterval(v: unknown): number {
+  const raw = Number(v)
+  if (!Number.isFinite(raw) || raw === 0) return 30
+  return Math.max(1, raw)
+}
+
+export function normalizeSettingsPatch(p: Partial<Settings>): Partial<Settings> {
+  const out: Partial<Settings> = {}
+  if (p.theme !== undefined && THEMES.includes(p.theme)) out.theme = p.theme
+  if (p.view !== undefined) {
+    if (VIEWS.includes(p.view)) out.view = p.view
+    else if ((p.view as string) === 'compact') out.view = 'cards'
+  }
+  if (p.locale !== undefined && typeof p.locale === 'string' && p.locale.trim()) {
+    out.locale = p.locale.trim()
+  }
+  if (p.uiScale !== undefined) {
+    const v = clampInt(p.uiScale, SETTINGS_RANGES.uiScale.min, SETTINGS_RANGES.uiScale.max)
+    if (v !== undefined) out.uiScale = v
+  }
+  if (p.fontSize !== undefined) {
+    const v = clampInt(p.fontSize, SETTINGS_RANGES.fontSize.min, SETTINGS_RANGES.fontSize.max)
+    if (v !== undefined) out.fontSize = v
+  }
+  if (p.fetchInterval !== undefined) out.fetchInterval = normalizeFetchInterval(p.fetchInterval)
+  if (p.filterType !== undefined && FILTER_TYPES.includes(p.filterType)) {
+    out.filterType = p.filterType
+  }
+  if (p.viewConfigs !== undefined && typeof p.viewConfigs === 'number' && Number.isFinite(p.viewConfigs)) {
+    out.viewConfigs = Math.trunc(p.viewConfigs)
+  }
+  for (const k of BOOLEAN_KEYS) {
+    if (p[k] !== undefined && typeof p[k] === 'boolean') {
+      ;(out as Record<string, boolean>)[k] = p[k] as boolean
+    }
+  }
+  if (p.readerMode !== undefined && READER_MODES.includes(p.readerMode)) {
+    out.readerMode = p.readerMode
+  }
+  if (p.shortcuts !== undefined && typeof p.shortcuts === 'object' && p.shortcuts !== null) {
+    const kept: Record<string, string> = {}
+    // 空字符串视为未设置：直接丢弃该键，读取时回落到 DEFAULT_SHORTCUTS。
+    for (const [k, v] of Object.entries(p.shortcuts)) {
+      if (typeof v === 'string' && v) kept[k] = v
+    }
+    out.shortcuts = kept
+  }
+  if (p.proxyMode !== undefined && PROXY_MODES.includes(p.proxyMode)) out.proxyMode = p.proxyMode
+  if (p.proxyUrl !== undefined && typeof p.proxyUrl === 'string') out.proxyUrl = p.proxyUrl.trim()
+  if (p.proxyUsername !== undefined && typeof p.proxyUsername === 'string') {
+    out.proxyUsername = p.proxyUsername
+  }
+  if (p.proxyPassword !== undefined && typeof p.proxyPassword === 'string') {
+    out.proxyPassword = p.proxyPassword
+  }
+  if (p.retentionDays !== undefined && typeof p.retentionDays === 'number' && Number.isFinite(p.retentionDays)) {
+    out.retentionDays = Math.max(0, Math.floor(p.retentionDays))
+  }
+  if (p.maxItemsPerSource !== undefined && typeof p.maxItemsPerSource === 'number' && Number.isFinite(p.maxItemsPerSource)) {
+    out.maxItemsPerSource = Math.max(0, Math.floor(p.maxItemsPerSource))
+  }
+  if (p.syncAccount !== undefined && (p.syncAccount === null || typeof p.syncAccount === 'object')) {
+    out.syncAccount = p.syncAccount
+  }
+  if (p.version !== undefined && typeof p.version === 'string' && p.version) {
+    out.version = p.version
+  }
+  return out
+}
+
+/** 同步登录表单的形状校验（与原 SyncTab 内联判定逐值等价，文案 key 不变）。 */
+export function validateSyncLoginInput(input: {
+  serverUrl: string
+  username: string
+  password: string
+}): boolean {
+  return Boolean(input.serverUrl.trim() && input.username.trim() && input.password)
+}
+
 function apply(s: Settings) {
   document.documentElement.dataset.theme = resolveTheme(s.theme)
   document.documentElement.style.setProperty('--app-font-size', `${s.fontSize}px`)
@@ -158,8 +264,11 @@ export const useAppStore = defineStore('app', {
       await this.patch({ shortcuts: { ...DEFAULT_SHORTCUTS } })
     },
     async patch(p: Partial<Settings>) {
-      zlog.ui(`Update settings: ${Object.keys(p).join(', ')}`)
-      this.settings = { ...this.s, ...p }
+      const clean = normalizeSettingsPatch(p)
+      // 全非法补丁直接丢弃：不变式要求非法值绝不触达 apply 与落盘。
+      if (Object.keys(clean).length === 0) return
+      zlog.ui(`Update settings: ${Object.keys(clean).join(', ')}`)
+      this.settings = { ...this.s, ...clean }
       apply(this.s)
       await saveSettings(this.settings)
     },

@@ -1,5 +1,11 @@
 import { ref } from 'vue'
 
+/**
+ * 快捷键录制的薄适配层：只拥有按键归一（normalize）与录制态，
+ * 提交一律经 app.setShortcut 进入 settings store 的 validate+confirm+persist，
+ * 空键等非法值由 store 的 normalize 丢弃，这里不自建校验副本。
+ */
+
 /** 录制时按键名的归一规则：空格记为 Space，单个字符统一小写，其余保持原样。 */
 export function normalizeRecordedKey(key: string): string {
   if (key === ' ') return 'Space'

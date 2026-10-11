@@ -1,6 +1,14 @@
 import type { Item } from '../types'
 
 /**
+ * 全文缓存阈值的纯函数核心（字节级判定，无 store、无 IO）。
+ * 阈值语义锁死：任何调参都必须同步更新 tests/content.spec.ts。
+ *
+ * 本模块是自动抓取守卫深度（articleAutoFetch.ts）的阈值下半：
+ * 组合语义（远端行/失败集合/在途抓取/选择纪元）由守卫拥有，
+ * 这里只回答“这段正文像不像已缓存的全文”。守卫经由唯一的
+ * `isFullContentCached` 入口取阈值，不允许各调用方自造副本。
+ *
  * 检查文章的全文内容是否已缓存在本地 SQLite 数据库中。
  *
  * 返回 true 的条件：

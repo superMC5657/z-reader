@@ -5,8 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { useDataStore } from '../../stores/data'
 import { useAppStore } from '../../stores/app'
 import { fetchFullContent } from '../../lib/tauri'
-import { isFullContentCached } from '../../lib/content'
-import { createArticleAutoFetch } from './articleAutoFetch'
+import { createArticleAutoFetch, isFullContentCached } from './articleAutoFetch'
 import { formatFullTime } from '../../lib/time'
 import { decodeHtmlEntities } from '../../lib/highlight'
 import Icon from '../ui/Icon.vue'
@@ -23,9 +22,11 @@ const data = useDataStore()
 const app = useAppStore()
 
 // 自动抓取控制器：失败集合只活在当前视图实例里，不进 store、不持久化。
+// 选择纪元令牌直连 data store：同 id 重选只推进纪元不换 id，陈旧在途抓取照样丢弃。
 const autoFetch = createArticleAutoFetch({
   fetchFullContent,
   getSelectedId: () => data.selectedId,
+  getSelectionToken: () => data.nextSelectionToken(),
   reloadItem: (id: number) => data.selectItem(id),
   reloadList: () => {
     data.loadItems().catch(() => {})

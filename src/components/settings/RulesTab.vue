@@ -10,7 +10,7 @@ import AlertBanner from '../ui/AlertBanner.vue'
 import Icon from '../ui/Icon.vue'
 import Badge from '../ui/Badge.vue'
 import RuleEditDialog from '../RuleEditDialog.vue'
-import { requestConfirmKey } from './settingsConfirm'
+import { requestConfirmKey, requestDestructiveConfirm } from './settingsConfirm'
 
 const { t } = useI18n()
 const data = useDataStore()
@@ -61,11 +61,10 @@ async function toggleRule(rule: Rule, enabled: boolean) {
 }
 
 function removeRule(id: number) {
-  requestConfirm({
+  requestDestructiveConfirm(requestConfirm, {
     title: t('settings.rules.delete'),
     message: t('settings.rules.confirmDelete'),
     confirmText: t('settings.rules.delete'),
-    danger: true,
     onConfirm: async () => {
       await api.deleteRule(id)
       await loadRulesTab()

@@ -32,6 +32,8 @@ const confirmState = ref<{
 })
 
 function requestConfirm(options: ConfirmOptions) {
+  // confirm 不变式的家：validate 归 settings store，persist 经 tauri 适配层，
+  // 这里只拥有确认形态（danger 默认 true + loading 由弹框持有）。
   confirmState.value = {
     show: true,
     title: options.title,

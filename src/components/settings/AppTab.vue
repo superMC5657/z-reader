@@ -39,16 +39,16 @@ function toggleViewConfig(bit: number, val: boolean) {
   }
 }
 
+// 取值范围（钳位/回落）由 settings store 的 validate 半区唯一拥有，
+// tab 只做薄适配传原值，不在模板与脚本里各备一份 clamp。
 function adjustUiScale(delta: number) {
   const cur = app.s.uiScale || 100
-  const next = Math.min(150, Math.max(80, cur + delta))
-  app.patch({ uiScale: next })
+  app.patch({ uiScale: cur + delta })
 }
 
 function adjustFontSize(delta: number) {
   const cur = app.s.fontSize || 16
-  const next = Math.min(22, Math.max(12, cur + delta))
-  app.patch({ fontSize: next })
+  app.patch({ fontSize: cur + delta })
 }
 </script>
 
@@ -149,7 +149,7 @@ function adjustFontSize(delta: number) {
           max="1440"
           style="width: 100px; text-align: center"
           :value="app.s.fetchInterval"
-          @change="app.patch({ fetchInterval: Math.max(1, Number(($event.target as HTMLInputElement).value) || 30) })"
+          @change="app.patch({ fetchInterval: Number(($event.target as HTMLInputElement).value) })"
         />
       </div>
     </div>

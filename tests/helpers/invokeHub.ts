@@ -34,3 +34,22 @@ export function lastCall(cmd: string): InvokeCall | undefined {
   }
   return undefined
 }
+
+/**
+ * fake-invoke 适配缝的统一断言入口：回滚/reload 交错断言一律经此取调用，
+ * 不直接数 mock 内部状态。
+ */
+export function callsFor(cmd: string): InvokeCall[] {
+  return invokeCalls.filter((c) => c.cmd === cmd)
+}
+
+/** 可控门闩：编排 optimistic→queue→reload 交错时序的唯一原语。 */
+export function gate<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
