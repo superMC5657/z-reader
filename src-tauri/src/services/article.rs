@@ -3,6 +3,18 @@
 //! 职责（独占）：规则匹配、hide→已读唯一折叠、服务端状态与规则结果的 OR 合并、
 //! 摘要选源（summary 优先回退 content）、HTML 清洗与单文本匹配。
 //! 调用方只做 wire→原文的翻译并交出归一化文本，清洗与匹配统一在本模块内完成。
+//!
+//! 单一推导契约（Single derivation）：
+//! - 唯一公开入口为 [`verdict_for_local`] / [`verdict_for_remote`]；内部推导链
+//!   `normalize_body → evaluate_normalized → merge_outcome_with_server → derive_verdict`
+//!   均为私有，调用方不得直接构造 `Outcome`（不再提供 `evaluate_*` 系列公开包装）。
+//! - 折叠 + OR 语义恒定：`has_been_read = server_read || mark_read || hide`
+//!   （hide→已读唯一折叠）；`starred = server_starred || star`（服务端 LWW 之上的叠加）。
+//! - Monotonic Hidden（与持久层同契约）：`verdict.hidden` 只反映本次规则命中；
+//!   行级单调由 `db::upsert_remote_item` 的 SQL CASE 保证
+//!  （`hidden = CASE WHEN ?3 <> 0 THEN 1 ELSE hidden END`，只置 1 不清 0；
+//!   read/star 保持服务端 LWW 覆盖）。quiet 重放永不回清 hidden，详见本模块
+//!   `verdict_parity_hidden_monotonic_upsert` 测试。
 
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
@@ -14,7 +26,7 @@ use crate::rules::{ArticleEvalContext, Outcome, RuleEngine};
 ///
 /// - `has_been_read` 已含 hide→已读折叠与服务端已读的 OR；
 /// - `starred` 为服务端加星与规则加星的 OR；
-/// - `hidden` 仅由规则决定（单调置位，不回清）；
+/// - `hidden` 仅由规则决定（单调置位，不回清；持久层单调见模块文档）；
 /// - `notify` 仅触发通知，不改变行状态。
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Verdict {
@@ -44,7 +56,7 @@ pub fn snippet_for(content: &str, summary: Option<&str>) -> String {
 ///
 /// Adapter 只做 wire→原文翻译并交出该文本，清洗（`html_to_text`）统一在模块内完成。
 /// 任一源缺失时退化为单源；双缺失为空串。不再区分 content-only 与 concat 两条老路。
-pub fn normalize_body(content: Option<&str>, summary: Option<&str>) -> String {
+fn normalize_body(content: Option<&str>, summary: Option<&str>) -> String {
     match (content, summary) {
         (Some(c), Some(s)) => format!("{c} {s}"),
         (Some(c), None) => c.to_string(),
@@ -57,7 +69,7 @@ pub fn normalize_body(content: Option<&str>, summary: Option<&str>) -> String {
 ///
 /// `body_raw` 为调用方按路由拼好的原文：feed 双源拼接、sync 合并体、backfill 行拼接。
 /// 规则为空时直接返回默认 `Outcome`，调用方无需预检 `is_empty`。
-pub fn evaluate_normalized(
+fn evaluate_normalized(
     engine: &RuleEngine,
     source_id: i64,
     group_id: Option<i64>,
@@ -87,9 +99,9 @@ pub fn evaluate_normalized(
 ///
 /// - `has_been_read = server_read || outcome.mark_read || outcome.hide`（hide→已读唯一折叠）；
 /// - `starred = server_starred || outcome.star`（服务端权威 LWW 之上的叠加）；
-/// - `hidden = outcome.hide`（只置位，清除路径不存在）；
+/// - `hidden = outcome.hide`（只置位，清除路径不存在；行级单调由 DB CASE 保证）；
 /// - `notify` 原样透出，不改变行状态。
-pub fn merge_outcome_with_server(
+fn merge_outcome_with_server(
     outcome: &Outcome,
     server_read: bool,
     server_starred: bool,
@@ -102,11 +114,11 @@ pub fn merge_outcome_with_server(
     }
 }
 
-/// 双路共用的唯一 Interface：归一化单文本评估 + 折叠 + 服务端 OR，一次得出 `Verdict`。
+/// 双路共用的唯一 Interface（私有）：归一化单文本评估 + 折叠 + 服务端 OR，一次得出 `Verdict`。
 ///
-/// `body_raw` 约定同 [`evaluate_normalized`]；本地路由传 `false/false` 作为服务端状态，
-/// 远端路由传入 `GItem` 的已读/加星。调用方只收 `Verdict`，不再手写 `||hide`。
-pub fn derive_verdict(
+/// `body_raw` 为已拼好的归一化原文；本地路由传 `false/false` 作为服务端状态，
+/// 远端路由传入 `GItem` 的已读/加星。公开入口只收 `Verdict`，不再手写 `||hide`。
+fn derive_verdict(
     engine: Option<&RuleEngine>,
     source_id: i64,
     group_id: Option<i64>,
@@ -119,23 +131,10 @@ pub fn derive_verdict(
     server_starred: bool,
 ) -> Verdict {
     let outcome = match engine {
-        Some(e) => evaluate_normalized_wrapper(e, source_id, group_id, source_url, title, body_raw, author, url),
+        Some(e) => evaluate_normalized(e, source_id, group_id, source_url, title, body_raw, author, url),
         None => Outcome::default(),
     };
     merge_outcome_with_server(&outcome, server_read, server_starred)
-}
-
-fn evaluate_normalized_wrapper(
-    engine: &RuleEngine,
-    source_id: i64,
-    group_id: Option<i64>,
-    source_url: &str,
-    title: &str,
-    body_raw: &str,
-    author: Option<&str>,
-    url: Option<&str>,
-) -> Outcome {
-    evaluate_normalized(engine, source_id, group_id, source_url, title, body_raw, author, url)
 }
 
 /// 本地路由 Adapter（feed 新条目 / backfill 历史行）：双源拼成归一化文本后走共用 Interface。
@@ -158,7 +157,8 @@ pub fn verdict_for_local(
 
 /// 远端路由 Adapter（sync 拉取）：上游已合并的 `GItem.content` 直接作为归一化文本。
 ///
-/// 服务端已读/加星在此与规则结果做 OR（LWW 权威之上的叠加）；隐藏仍只由规则置位。
+/// 服务端已读/加星在此与规则结果做 OR（LWW 权威之上的叠加）；隐藏仍只由规则置位，
+/// 行级单调（只置 1 不清 0）由 `db::upsert_remote_item` 的 SQL CASE 落盘时保证。
 pub fn verdict_for_remote(
     engine: Option<&RuleEngine>,
     source_id: i64,
@@ -172,57 +172,6 @@ pub fn verdict_for_remote(
     server_starred: bool,
 ) -> Verdict {
     derive_verdict(engine, source_id, group_id, source_url, title, merged_raw, author, url, server_read, server_starred)
-}
-
-/// 针对单篇文章组装 ArticleEvalContext 并执行规则匹配评估。
-///
-/// 统一 `feed.rs::store`（新条目入库前）、`sync.rs::pull_items`（远端拉取合并前）
-/// 与 `rules.rs::backfill`（历史回溯）三处的上下文组装语义：
-/// 双源先经 [`normalize_body`] 拼成单路原文，再由 [`evaluate_normalized`]
-/// 统一清洗匹配。规则为空时直接返回默认 `Outcome`（全 false），调用方无需预检 `is_empty`。
-pub fn evaluate_article_rules(
-    engine: &RuleEngine,
-    source_id: i64,
-    group_id: Option<i64>,
-    source_url: &str,
-    title: &str,
-    content: Option<&str>,
-    summary: Option<&str>,
-    author: Option<&str>,
-    url: Option<&str>,
-) -> Outcome {
-    let body = normalize_body(content, summary);
-    evaluate_normalized(engine, source_id, group_id, source_url, title, &body, author, url)
-}
-
-/// `evaluate_article_rules` 的 `Option` 引擎便捷封装：引擎缺失或为空时
-/// 直接返回默认 `Outcome`，供旧调用方过渡复用。新代码优先使用
-/// [`verdict_for_local`] / [`verdict_for_remote`] 直接拿 `Verdict`。
-pub fn evaluate_article_rules_opt(
-    engine: Option<&RuleEngine>,
-    source_id: i64,
-    group_id: Option<i64>,
-    source_url: &str,
-    title: &str,
-    content: Option<&str>,
-    summary: Option<&str>,
-    author: Option<&str>,
-    url: Option<&str>,
-) -> Outcome {
-    match engine {
-        Some(e) => evaluate_article_rules(
-            e,
-            source_id,
-            group_id,
-            source_url,
-            title,
-            content,
-            summary,
-            author,
-            url,
-        ),
-        None => Outcome::default(),
-    }
 }
 
 #[cfg(test)]
@@ -260,13 +209,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_engine_returns_default() {
+    fn empty_engine_yields_quiet_verdict() {
+        // 给定：空引擎（quiet）与缺失引擎
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
         let engine = RuleEngine::load(&conn).unwrap();
         assert!(engine.is_empty());
-        let out = evaluate_article_rules(
-            &engine,
+        // 当：本地路由以 quiet / None 求裁决
+        let quiet = verdict_for_local(
+            Some(&engine),
             1,
             None,
             "https://s.example",
@@ -276,8 +227,7 @@ mod tests {
             None,
             None,
         );
-        assert!(!out.mark_read && !out.star && !out.hide && !out.notify);
-        let out2 = evaluate_article_rules_opt(
+        let missing = verdict_for_local(
             None,
             1,
             None,
@@ -288,7 +238,14 @@ mod tests {
             None,
             None,
         );
-        assert!(!out2.mark_read && !out2.star && !out2.hide && !out2.notify);
+        // 那么：均为全 false（无行状态变更、无通知）
+        for v in [quiet, missing] {
+            assert!(!v.has_been_read && !v.starred && !v.hidden && !v.notify, "quiet verdict: {v:?}");
+        }
+        // 当：远端路由以 quiet 叠加服务端状态
+        let keep = verdict_for_remote(Some(&engine), 1, None, "https://s.example", "t", "plain", None, None, true, true);
+        // 那么：服务端状态原样保持
+        assert!(keep.has_been_read && keep.starred && !keep.hidden && !keep.notify);
     }
 
     #[test]
@@ -300,8 +257,8 @@ mod tests {
             RuleTargetField::Content,
             RuleActionType::MarkRead,
         );
-        let out = evaluate_article_rules(
-            &engine,
+        let v = verdict_for_local(
+            Some(&engine),
             1,
             None,
             "https://s.example",
@@ -311,13 +268,13 @@ mod tests {
             None,
             None,
         );
-        assert!(out.mark_read);
+        assert!(v.has_been_read);
 
         // HTML 标签应被剥离后再匹配。
         let (_conn2, engine2) =
             mem_engine("hello world", RuleTargetField::Content, RuleActionType::Hide);
-        let out2 = evaluate_article_rules(
-            &engine2,
+        let v2 = verdict_for_local(
+            Some(&engine2),
             1,
             None,
             "https://s.example",
@@ -327,7 +284,7 @@ mod tests {
             None,
             None,
         );
-        assert!(out2.hide);
+        assert!(v2.hidden && v2.has_been_read);
     }
 
     // ---------- 双路摄取 parity（无网络无 AppHandle，内存库） ----------
@@ -339,11 +296,10 @@ mod tests {
         let (_conn, engine) = mem_engine("alpha beta", RuleTargetField::Content, RuleActionType::MarkRead);
         let engine_opt = Some(&engine);
         // 当：三路分别以各自归一化文本求裁决
-        // feed 路：双源原文；sync 路：上游合并体原文；backfill 路：DB 行双源直调同一接口
+        // feed 路：双源原文；sync 路：上游合并体原文；backfill 路：DB 行双源走同一本地路由
         let feed = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>alpha</p>"), Some("beta"), None, None);
         let sync = verdict_for_remote(engine_opt, 1, None, "https://s.example", "t", "<p>alpha</p> beta", None, None, false, false);
-        let backfill_body = normalize_body(Some("<p>alpha</p>"), Some("beta"));
-        let backfill = derive_verdict(engine_opt, 1, None, "https://s.example", "t", &backfill_body, None, None, false, false);
+        let backfill = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>alpha</p>"), Some("beta"), None, None);
         // 那么：三路皆 mark_read（has_been_read 置位、无隐藏无星标）
         for v in [feed, sync, backfill] {
             assert!(v.has_been_read, "split keyword should mark read: {v:?}");
@@ -411,6 +367,10 @@ mod tests {
     }
 
     /// (5) hidden 单调：先 hide 致 1，换 quiet 重 upsert 仍为 1，且 read/star 跟 LWW。
+    ///
+    /// 本用例同时是 Monotonic Hidden 契约的落盘侧证明：Verdict 只给本次 `hidden`，
+    /// 单调由 `db::upsert_remote_item` 的 `hidden=CASE WHEN ?3<>0 THEN 1 ELSE hidden END`
+    /// 保证；read/star 走服务端 LWW 覆盖。
     #[test]
     fn verdict_parity_hidden_monotonic_upsert() {
         // 给定：内存库 + 订阅源

@@ -212,6 +212,9 @@ impl RuleEngine {
 }
 
 /// 单遍扫描并将所有规则应用到现有文章（历史回溯）。
+/// 裁决唯一入口为 `services::article::verdict_for_local`（DB 行双源一次裁决，直接收
+/// `Verdict`，hide→已读折叠在模块内完成）；hidden 落盘只置 1（`batch_set_flag`
+/// 仅 `SET hidden=1`，不清 0，与 `db::upsert_remote_item` 同单调契约）。
 /// 数据行按 ID 分页流式处理（在大型归档下保证内存受限），仅累积 ID 列表；
 /// 标志位写入在单个事务中通过分批 IN 语句批量提交，而非逐行单独执行 UPDATE。
 pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats, String> {

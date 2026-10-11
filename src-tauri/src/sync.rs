@@ -376,20 +376,9 @@ async fn sync_subscriptions(
 /// 同步订阅源的本地标识：(source_id, group_id, source_url)。
 type SourceIdentity = (i64, Option<i64>, String);
 
-/// 将服务端状态与本地规则执行结果合并：服务端已读/加星状态优先（LWW），规则标记在其基础上叠加。返回 (has_been_read, starred, hidden)。
-///
-/// 唯一折叠点在 `services::article::merge_outcome_with_server`，此处仅为薄委托以收编旧调用。
-#[allow(dead_code)]
-fn apply_rules_to_remote(
-    server_read: bool,
-    server_starred: bool,
-    outcome: &crate::rules::Outcome,
-) -> (bool, bool, bool) {
-    let v = crate::services::article::merge_outcome_with_server(outcome, server_read, server_starred);
-    (v.has_been_read, v.starred, v.hidden)
-}
-
 /// 拉取自上次同步游标以来发生变更的条目，以服务端的已读/加星状态进行更新或插入，并像本地刷新路径一样通过规则引擎处理新条目（标记已读 / 加星 / 隐藏 / 通知）。
+/// 远端裁决唯一入口为 `services::article::verdict_for_remote`（推导 + 折叠 + 服务端 OR 一次完成；
+/// 行级 hidden 单调由 `db::upsert_remote_item` 落盘保证）。
 /// 返回（新增行数，匹配通知规则的文章标题列表）。
 async fn pull_items(
     state: &AppState,
@@ -514,28 +503,63 @@ async fn pull_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{RuleActionType, RuleInput, RuleSourceScope, RuleTargetField};
+
+    fn mem_engine(
+        pattern: &str,
+        target: RuleTargetField,
+        action: RuleActionType,
+    ) -> (rusqlite::Connection, crate::rules::RuleEngine) {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&conn).unwrap();
+        crate::db::create_rule(
+            &conn,
+            &RuleInput {
+                name: "t".into(),
+                pattern: pattern.into(),
+                target_field: target,
+                action_type: action,
+                is_case_sensitive: false,
+                is_enabled: true,
+                source_scope: RuleSourceScope::All,
+            },
+        )
+        .unwrap();
+        let engine = crate::rules::RuleEngine::load(&conn).unwrap();
+        (conn, engine)
+    }
 
     #[test]
     fn rule_flags_apply_on_top_of_server_state() {
-        // 设定：服务端表示未读/未加星，规则指定 标记已读 + 加星 + 隐藏 + 通知
-        let outcome = crate::rules::Outcome { mark_read: true, star: true, hide: true, notify: true };
-        // 操作：合并
-        let flags = apply_rules_to_remote(false, false, &outcome);
-        // 验证：每项规则标记均生效
-        assert_eq!(flags, (true, true, true));
+        // 远端裁决唯一入口 `verdict_for_remote` 的行状态语义（不再经 Outcome 薄委托）：
+        // 规则标记在服务端 LWW 之上叠加，hide 唯一折叠为已读，notify 不改行。
+        // 设定：hide 规则命中，服务端为未读/未加星
+        let (_c, hide_engine) = mem_engine("hide-me-xyz", RuleTargetField::Content, RuleActionType::Hide);
+        // 操作：远端路由一次裁决
+        let v = crate::services::article::verdict_for_remote(
+            Some(&hide_engine), 1, None, "https://s.example", "t", "hide-me-xyz body", None, None, false, false,
+        );
+        // 验证：隐藏与已读同时置位
+        assert!(v.hidden && v.has_been_read);
 
-        // 设定：服务端已为已读/已加星，无规则匹配
-        let quiet = crate::rules::Outcome::default();
-        // 操作：合并
-        let flags = apply_rules_to_remote(true, true, &quiet);
+        // 设定：服务端已为已读/已加星，quiet 规则（空引擎）
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_tests(&conn).unwrap();
+        let quiet = crate::rules::RuleEngine::load(&conn).unwrap();
+        // 操作：远端路由一次裁决
+        let v = crate::services::article::verdict_for_remote(
+            Some(&quiet), 1, None, "https://s.example", "t", "plain", None, None, true, true,
+        );
         // 验证：服务端状态原样保留
-        assert_eq!(flags, (true, true, false));
+        assert!(v.has_been_read && v.starred && !v.hidden && !v.notify);
 
         // 设定：服务端为未读，仅匹配通知规则（无状态修改）
-        let notify_only = crate::rules::Outcome { notify: true, ..Default::default() };
-        // 操作：合并
-        let flags = apply_rules_to_remote(false, false, &notify_only);
-        // 验证：行状态保持不变
-        assert_eq!(flags, (false, false, false));
+        let (_c3, notify_engine) = mem_engine("notify-me-xyz", RuleTargetField::Content, RuleActionType::Notify);
+        // 操作：远端路由一次裁决
+        let v = crate::services::article::verdict_for_remote(
+            Some(&notify_engine), 1, None, "https://s.example", "t", "notify-me-xyz body", None, None, false, false,
+        );
+        // 验证：仅通知，行状态保持不变
+        assert!(v.notify && !v.has_been_read && !v.hidden && !v.starred);
     }
 }

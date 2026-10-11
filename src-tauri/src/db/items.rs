@@ -43,6 +43,8 @@ pub struct UpsertEntry<'a> {
 }
 
 /// 插入一条文章，若 (source_id, guid) 已存在则跳过。
+/// 规则标志位（`has_been_read/starred/hidden`）须来自
+/// `services::article::verdict_for_local` 的一次裁决，仅在新建行时写入。
 /// 若创建了新数据行则返回 true。
 pub fn insert_item(conn: &Connection, source_id: i64, e: &UpsertEntry) -> Result<bool, String> {
     let n = conn
@@ -306,10 +308,11 @@ pub fn vacuum(conn: &Connection) -> Result<(), String> {
 }
 
 /// 插入或对齐单篇远端文章。匹配顺序：优先按远端 ID，其次按 (source, url)
-/// 匹配在绑定同步前已从本地抓取的数据行。匹配成功时远端已读/加星状态
-/// 将覆盖本地（服务端优先 / LWW 规则），并与调用方的规则引擎标志位进行逻辑或
-/// （本地规则的标记已读/加星/隐藏叠加生效）；隐藏单调只置1不清0
-///（`hidden = hidden OR verdict.hide`，quiet 重放不回清）；若未匹配则插入新数据行。
+/// 匹配在绑定同步前已从本地抓取的数据行。调用方标志位须来自
+/// `services::article::verdict_for_remote` 的一次裁决（单一推导入口，hide→已读
+/// 折叠与服务端 OR 已在模块内完成）。匹配成功时远端已读/加星状态
+/// 将覆盖本地（服务端优先 / LWW 规则），规则加星在其上叠加；隐藏单调只置1不清0
+///（`hidden=CASE WHEN ?3<>0 THEN 1 ELSE hidden END`，quiet 重放不回清）；若未匹配则插入新数据行。
 /// 若创建了新数据行则返回 true。
 pub struct RemoteItemUpsert<'a> {
     pub remote_id: &'a str,
