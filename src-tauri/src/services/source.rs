@@ -1,4 +1,4 @@
-//! 订阅源抓取与生命周期服务：唯一的单源生命周期 Module。
+//! 订阅源刷新生命周期 Module：唯一的单源与周期生命周期拥有者。
 //!
 //! 锁纪律契约（唯一出处）：`await` 网络段绝不跨持 `db` 锁；仅存库/标记状态/图标路径写入的
 //! 短暂临界区内加锁。本模块之外不再重复描述该纪律。
@@ -7,6 +7,13 @@
 //!（`source_id` 两端共享）；[`refresh_single_source`] 为便捷入口（内部分两段调用），
 //! [`store_parsed`] 为存库段入口（跳过抓取：store→标状态→补图标，供 `add_source` 复用已预检的
 //! `ParsedFeed`）。
+//!
+//! 周期 Interface：本 Module 拥有
+//! cycle→targets→fan-out→merge→retention→notify 的全部决策 Seam
+//!（[`REFRESH_CONCURRENCY`] bound、[`build_targets`]、[`merge_outcome`]、
+//! [`should_notify`]/[`notify_body`]、[`apply_refresh_retention`]）；
+//! `feed` 的抓取/存库/图标仅为 Adapter，经由本 Module 的 Seam 调用，调用方不再直连 Adapter；
+//! `lib.rs` 仅保留 cycle-ID 生成与 sync/本地单入口分流（ADR-0002）及事件/托盘/通知的薄 Adapter。
 
 #![allow(dead_code)]
 
@@ -78,12 +85,14 @@ pub fn promote_store(s: &crate::feed::StoreOutcome) -> SourceRefreshOutcome {
     }
 }
 
-/// 抓取段：下载并解析订阅源。纯网络阶段，不持有数据库锁。
+/// 抓取段 Seam（Adapter 委托）：下载并解析订阅源。纯网络阶段，不持有数据库锁。
+/// 底层 `feed::fetch_and_parse_with` 仅为 Adapter，经由此 Seam 调用。
 pub async fn fetch_stage(spec: FetchSpec<'_>) -> Result<ParsedFeed, String> {
     crate::feed::fetch_and_parse_with(spec.client, spec.url, spec.cycle, Some(spec.source_id)).await
 }
 
-/// 存库段入口（跳过抓取）：store→标状态→补图标，供 `add_source` 复用已预检的 `ParsedFeed`。
+/// 存库段入口 Seam（跳过抓取）：store→标状态→补图标，供 `add_source` 复用已预检的 `ParsedFeed`。
+/// 底层 `feed::store` / `feed::fetch_favicon_with` 仅为 Adapter，经由此 Seam 调用。
 ///
 /// `fetch_ms` 为抓取段耗时（复用路径传 0，保持 `fetch_ms/store_ms/favicon_ms/elapsed_ms` 键名不变）；
 /// `net` 提供存库与补图标所需的 `client/url/cycle`（与 `store.source_id` 一致）。
@@ -245,6 +254,100 @@ pub async fn refresh_single_source(
         fetch_ms,
     )
     .await
+}
+
+// ---------- 刷新周期 Interface（单一入口簇：targets→fan-out bound→merge→retention→notify 决策） ----------
+
+/// 刷新周期 fan-out 的有界并发上限（semaphore bound；与 JoinSet fan-in 配对）。
+/// 唯一出处：`lib.rs` 的周期循环经由此 Seam 取值，不再各自硬编码。
+pub const REFRESH_CONCURRENCY: usize = 6;
+
+/// 刷新目标（纯）：全量或按 `ids` 子集映射的任务单元，替代调用方的临时元组。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshTarget {
+    pub id: i64,
+    pub group_id: Option<i64>,
+    pub url: String,
+    pub favicon: Option<String>,
+}
+
+/// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务单元，保持输入顺序。
+pub fn build_targets(
+    sources: &[crate::models::Source],
+    ids: Option<&[i64]>,
+) -> Vec<RefreshTarget> {
+    match ids {
+        Some(v) => sources
+            .iter()
+            .filter(|s| v.contains(&s.id))
+            .map(|s| RefreshTarget { id: s.id, group_id: s.group_id, url: s.url.clone(), favicon: s.favicon.clone() })
+            .collect(),
+        None => sources
+            .iter()
+            .map(|s| RefreshTarget { id: s.id, group_id: s.group_id, url: s.url.clone(), favicon: s.favicon.clone() })
+            .collect(),
+    }
+}
+
+/// 将单个订阅源的刷新结果累加到刷新周期总计中（纯折叠）。
+pub fn merge_outcome(
+    total_new: &mut usize,
+    failures: &mut usize,
+    notified: &mut Vec<String>,
+    fail_kinds: &mut std::collections::HashMap<String, usize>,
+    out: SourceRefreshOutcome,
+) {
+    *total_new += out.inserted;
+    if out.failed {
+        *failures += 1;
+        let kind = out.error_kind.unwrap_or_else(|| "other".to_string());
+        *fail_kinds.entry(kind).or_insert(0) += 1;
+    }
+    notified.extend(out.notified);
+}
+
+/// 是否弹出聚合桌面通知（纯）：仅后台周期且（新文章命中开关或规则通知非空）时为真。
+pub fn should_notify(
+    background: bool,
+    notify_on_new: bool,
+    new_count: usize,
+    notified: &[String],
+) -> bool {
+    background && ((notify_on_new && new_count > 0) || !notified.is_empty())
+}
+
+/// 通知正文（纯，沿用既有 zh/en 文案）：空标题时为聚合计数，非空时取前 3 预览 + 余数。
+pub fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String {
+    let zh = crate::utils::is_zh_locale(locale);
+    let mut body = if zh {
+        format!("获取到 {new_count} 篇新文章")
+    } else {
+        format!("Fetched {new_count} new articles")
+    };
+    if !titles.is_empty() {
+        let preview: Vec<String> = titles.iter().take(3).cloned().collect();
+        let rest = titles.len() - preview.len();
+        let list = if zh { preview.join("、") } else { preview.join(", ") };
+        body = if zh {
+            let more = if rest > 0 { format!(" 等 {rest} 篇") } else { String::new() };
+            format!("命中通知规则：{list}{more}")
+        } else {
+            let more = if rest > 0 { format!(" and {rest} more") } else { String::new() };
+            format!("Notify rules matched: {list}{more}")
+        };
+    }
+    body
+}
+
+/// 刷新路径的保留策略 Seam：阈值语义固定为 200（删除数严格大于 200 时执行 VACUUM）。
+/// 调用方（`lib.rs` 周期收尾、`commands.rs::sync_now`）经由此 Seam 进入存储服务，
+/// 不再各自硬编码阈值；手动立即清理（阈值 0）不经此 Seam，直连存储服务。
+pub fn apply_refresh_retention(
+    conn: &rusqlite::Connection,
+    days: u32,
+    max_items: u32,
+) -> usize {
+    crate::services::storage::run_retention_policy(conn, days, max_items, 200)
 }
 
 #[cfg(test)]

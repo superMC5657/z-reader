@@ -95,6 +95,7 @@ pub async fn set_group_expanded(state: State<'_, AppState>, id: i64, expanded: b
 }
 
 /// 通过抓取订阅源以验证 URL，随后持久化该订阅源及其文章条目。
+/// Pre-persist probe uses feed Adapter directly (no source id yet); persist reuses refresh Module store_parsed seam.
 #[tauri::command]
 pub async fn add_source(
     app: AppHandle,
@@ -565,6 +566,8 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
 }
 
 /// 手动执行一次同步周期。
+/// Manual sync entry; refresh single-entry split (ADR-0002) stays in `refresh_all_sources`.
+/// Post-cycle retention reuses refresh Module seam; push-first + local SQLite sole UI source unchanged.
 #[tauri::command]
 pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     log::info!("[CMD] action=sync_now");
@@ -573,11 +576,11 @@ pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serd
     let settings = settings_io::load(&settings_io::settings_path(&app)?);
     {
         let conn = state.db.lock().await;
-        crate::services::storage::run_retention_policy(
+        // Retention via refresh Module seam (threshold 200 baked in); storage is Adapter.
+        crate::services::source::apply_refresh_retention(
             &conn,
             settings.retention_days,
             settings.max_items_per_source,
-            200,
         );
     }
     crate::tray::update_tray(&app).await;

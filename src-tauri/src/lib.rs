@@ -150,7 +150,9 @@ async fn background_refresh(app: tauri::AppHandle) {
 }
 
 /// 刷新周期中允许的最大并发订阅源抓取数。
-const REFRESH_CONCURRENCY: usize = 6;
+/// 唯一出处为刷新生命周期 Module 的 [`crate::services::source::REFRESH_CONCURRENCY`] Seam；
+/// 此处仅为单入口分流循环的薄引用，不再各自硬编码。
+const REFRESH_CONCURRENCY: usize = crate::services::source::REFRESH_CONCURRENCY;
 
 /// 后台刷新链路的站点图标目录解析。
 ///
@@ -163,6 +165,8 @@ fn refresh_favicon_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Str
 
 /// 单个刷新任务的数据（事件所需最小字段 + 业务输入）；不携带 `AppHandle`/`background`，
 /// 生命周期渗漏由调用方显式参数承担。
+/// 本 struct 仅为单入口分流循环的事件 Seam 载体；业务上下文经由刷新 Module 的
+/// `RefreshSingleSourceContext` Interface 进入，抓取/存库/图标均走 Module Seam（Adapter 不直连）。
 struct RefreshTask {
     id: i64,
     group_id: Option<i64>,
@@ -175,8 +179,8 @@ struct RefreshTask {
     allow_third_party: bool,
 }
 
-/// 刷新单个订阅源：委托 `services::source` 两段式业务流程
-///（抓取段 + 存库段，含分段耗时日志）。
+/// 刷新单个订阅源：刷新 Module 单源 Interface 的事件 Seam 薄包装。
+/// 业务委托 `services::source` 两段式流程（抓取段 + 存库段，含分段耗时日志）；
 /// 本函数仅负责前端 `fetch-progress` 事件收发；业务错误绝不向上抛出，
 /// 错误会记录在该源的数据行并通过结果返回。
 async fn refresh_one_source(
@@ -216,56 +220,36 @@ async fn refresh_one_source(
 }
 
 /// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务元组。
+/// 唯一实现收归刷新 Module 的 `build_targets` Interface；此处仅做
+/// `RefreshTarget`→元组的薄适配，保持调用方与单测签名不变。
 fn build_targets(
     sources: &[crate::models::Source],
     ids: Option<&[i64]>,
 ) -> Vec<(i64, Option<i64>, String, Option<String>)> {
-    match ids {
-        Some(v) => sources
-            .iter()
-            .filter(|s| v.contains(&s.id))
-            .map(|s| (s.id, s.group_id, s.url.clone(), s.favicon.clone()))
-            .collect(),
-        None => sources
-            .iter()
-            .map(|s| (s.id, s.group_id, s.url.clone(), s.favicon.clone()))
-            .collect(),
-    }
+    crate::services::source::build_targets(sources, ids)
+        .into_iter()
+        .map(|t| (t.id, t.group_id, t.url, t.favicon))
+        .collect()
 }
 
 /// 是否弹出聚合桌面通知（纯）：仅后台周期且（新文章命中开关或规则通知非空）时为真。
+/// 唯一实现收归刷新 Module 的 `should_notify` Interface；此处为薄委托。
 fn should_notify(
     background: bool,
     notify_on_new: bool,
     new_count: usize,
     notified: &[String],
 ) -> bool {
-    background && ((notify_on_new && new_count > 0) || !notified.is_empty())
+    crate::services::source::should_notify(background, notify_on_new, new_count, notified)
 }
 
 /// 通知正文（纯，沿用既有 zh/en 文案）：空标题时为聚合计数，非空时取前 3 预览 + 余数。
+/// 唯一实现收归刷新 Module 的 `notify_body` Interface；此处为薄委托。
 fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String {
-    let zh = crate::utils::is_zh_locale(locale);
-    let mut body = if zh {
-        format!("获取到 {new_count} 篇新文章")
-    } else {
-        format!("Fetched {new_count} new articles")
-    };
-    if !titles.is_empty() {
-        let preview: Vec<String> = titles.iter().take(3).cloned().collect();
-        let rest = titles.len() - preview.len();
-        let list = if zh { preview.join("、") } else { preview.join(", ") };
-        body = if zh {
-            let more = if rest > 0 { format!(" 等 {rest} 篇") } else { String::new() };
-            format!("命中通知规则：{list}{more}")
-        } else {
-            let more = if rest > 0 { format!(" and {rest} more") } else { String::new() };
-            format!("Notify rules matched: {list}{more}")
-        };
-    }
-    body
+    crate::services::source::notify_body(locale, new_count, titles)
 }
 /// 将单个订阅源的刷新结果累加到刷新周期总计中。
+/// 唯一实现收归刷新 Module 的 `merge_outcome` Interface；此处为薄委托。
 fn merge_outcome(
     total_new: &mut usize,
     failures: &mut usize,
@@ -273,19 +257,15 @@ fn merge_outcome(
     fail_kinds: &mut std::collections::HashMap<String, usize>,
     out: SourceRefreshOutcome,
 ) {
-    *total_new += out.inserted;
-    if out.failed {
-        *failures += 1;
-        let kind = out.error_kind.unwrap_or_else(|| "other".to_string());
-        *fail_kinds.entry(kind).or_insert(0) += 1;
-    }
-    notified.extend(out.notified);
+    crate::services::source::merge_outcome(total_new, failures, notified, fail_kinds, out)
 }
 
 /// 抓取所有（或选定的）订阅源，将新条目送入规则引擎处理、
 /// 存储条目、刷新缺失的站点图标、应用保留策略并同步托盘红点徽标。向前端发送 fetch-progress / fetch-done 事件。
 ///
 /// `background` = 定时器触发：不发送单源进度事件，并在有新文章（或规则命中“通知”）到达时发出聚合的桌面通知。
+/// 单入口分流（ADR-0002）：本地 SQLite 为 UI 唯一数据源；周期决策收归刷新 Module 的单一 Interface，
+/// 本函数仅保留 cycle 生成、分流、fan-out 事件 Adapter、托盘/通知 Adapter 与单行周期日志。
 pub async fn refresh_all_sources(
     app: tauri::AppHandle,
     ids: Option<Vec<i64>>,
@@ -329,6 +309,7 @@ pub async fn refresh_all_sources(
 
         // 有界并发刷新：bound=6 semaphore + JoinSet fan-out/fan-in。
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(REFRESH_CONCURRENCY));
+        // Fan-out Adapter over refresh Module per-source Interface; bound canonical in Module.
         let mut set = tokio::task::JoinSet::new();
         for (id, group_id, url, favicon) in targets {
             let permit = sem
@@ -375,11 +356,11 @@ pub async fn refresh_all_sources(
     // 计数收敛为单行输出：仅在确实有行被删除时输出 info 级别日志（均由服务内部完成）。
     {
         let conn = state.db.lock().await;
-        crate::services::storage::run_retention_policy(
+        // Retention via refresh Module seam (threshold 200 baked in); storage is Adapter.
+        crate::services::source::apply_refresh_retention(
             &conn,
             settings.retention_days,
             settings.max_items_per_source,
-            200,
         );
     }
 

@@ -38,6 +38,7 @@ pub struct ParsedFeed {
 
 /// 仅网络阶段：下载并解析订阅源。不持有任何数据库连接引用。
 /// 网络日志行上标记 `cycle=` / `id=`（无周期上下文时传 `""` / `None`）。
+/// Adapter for refresh lifecycle Module: prefer `services::source::fetch_stage` seam; direct use only for pre-persist probe.
 pub async fn fetch_and_parse_with(
     client: &reqwest::Client,
     url: &str,
@@ -133,6 +134,7 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
 
 /// 仅数据库阶段：插入已解析条目，跳过已存在的 GUID。在插入前对新条目
 /// 应用规则引擎（标记已读 / 加星标 / 隐藏 / 通知）。绝不修改已有数据行。
+/// Adapter for refresh lifecycle Module: prefer `services::source::store_parsed` seam; Verdict derivation untouched.
 pub fn store(
     conn: &rusqlite::Connection,
     source: &SourceCtx,
@@ -215,6 +217,7 @@ pub struct FaviconFetchOptions<'a> {
 
 /// 抓取网站图标并在网络日志行上标记 `cycle=`（无周期上下文时传 `""`）。
 /// 网站图标候选请求保持 debug 级别，绝不升为 INFO。
+/// Adapter for refresh lifecycle Module: cycle path via `services::source::store_parsed` seam; manual icon command may call directly.
 pub async fn fetch_favicon_with(
     client: &reqwest::Client,
     opts: FaviconFetchOptions<'_>,
