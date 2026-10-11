@@ -88,7 +88,7 @@ pub async fn ensure_session_with(
     }
     let host = sync_host(acct);
     let cycle_disp = if cycle.is_empty() { String::new() } else { format!(" cycle={cycle}") };
-    let auth = match greader::login(http, &acct.server_url, &acct.username, &acct.password).await
+    let auth = match greader::login_with(http, &acct.server_url, &acct.username, &acct.password, crate::net::RequestContext::sync(cycle)).await
     {
         Ok(a) => a,
         Err(e) => {
@@ -193,7 +193,8 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
             let s = state.clone();
             let h = http.clone();
             let a = acct.clone();
-            async move { push_queue(&s, &h, &a, &auth_owned).await }
+            let c = cycle.to_string();
+            async move { push_queue(&s, &h, &a, &auth_owned, &c).await }
         },
     )
     .await
@@ -215,7 +216,8 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
             let s = state.clone();
             let h = http.clone();
             let a = acct.clone();
-            async move { sync_subscriptions(&s, &h, &a, &auth_owned).await }
+            let c = cycle.to_string();
+            async move { sync_subscriptions(&s, &h, &a, &auth_owned, &c).await }
         },
     )
     .await
@@ -262,11 +264,13 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
 }
 
 /// 将本地操作队列消耗并推送到服务端。推送成功的条目将被删除；途中发生失败时剩余条目保留在队列中（重复推送已应用的修改是幂等的）。
+/// `cycle` 仅用于网络日志关联（经 context 透传到 greader sends；payload/编排不变）。
 async fn push_queue(
     state: &AppState,
     http: &reqwest::Client,
     acct: &SyncAccount,
     auth: &str,
+    cycle: &str,
 ) -> Result<usize, GReaderError> {
     let entries = {
         let conn = state.db.lock().await;
@@ -275,7 +279,8 @@ async fn push_queue(
     if entries.is_empty() {
         return Ok(0);
     }
-    let token = greader::get_token(http, &acct.server_url, auth).await?;
+    let ctx = crate::net::RequestContext::sync(cycle);
+    let token = greader::get_token_with(http, &acct.server_url, auth, ctx).await?;
 
     use std::collections::HashMap;
     let mut by_action: HashMap<SyncAction, Vec<(i64, String)>> = HashMap::new();
@@ -299,12 +304,12 @@ async fn push_queue(
         };
         for chunk in items.chunks(PUSH_BATCH) {
             let ids: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
-            greader::edit_tag(http, &acct.server_url, auth, &token, &ids, add, remove).await?;
+            greader::edit_tag_with(http, &acct.server_url, auth, &token, &ids, add, remove, ctx).await?;
             pushed_ids.extend(chunk.iter().map(|(id, _)| *id));
         }
     }
     for (id, stream) in &stream_actions {
-        greader::edit_tag_stream(http, &acct.server_url, auth, &token, stream, greader::STATE_READ)
+        greader::edit_tag_stream_with(http, &acct.server_url, auth, &token, stream, greader::STATE_READ, ctx)
             .await?;
         pushed_ids.push(*id);
     }
@@ -352,16 +357,24 @@ pub trait PullFetch {
 }
 
 /// Live 抓取适配器：`PullFetch` 在生产路径的唯一实现，
-/// 对 greader 网络调用的薄委托（调用形状与历史逐字一致）。
+/// 对 greader 网络调用的薄委托（调用形状与历史逐字一致；`cycle` 仅经
+/// context 透传到 greader sends 做日志关联，抓取语义/编排不变）。
 pub struct LivePullFetch<'a> {
     pub http: &'a reqwest::Client,
     pub base: &'a str,
     pub auth: &'a str,
+    pub cycle: &'a str,
 }
 
 impl PullFetch for LivePullFetch<'_> {
     async fn fetch_subscriptions(&self) -> Result<Vec<greader::GSubscription>, GReaderError> {
-        greader::subscriptions(self.http, self.base, self.auth).await
+        greader::subscriptions_with(
+            self.http,
+            self.base,
+            self.auth,
+            crate::net::RequestContext::sync(self.cycle),
+        )
+        .await
     }
 
     async fn fetch_ids_page(
@@ -369,7 +382,7 @@ impl PullFetch for LivePullFetch<'_> {
         ot: i64,
         continuation: Option<&str>,
     ) -> Result<(Vec<String>, Option<String>), GReaderError> {
-        greader::stream_ids(
+        greader::stream_ids_with(
             self.http,
             self.base,
             self.auth,
@@ -377,24 +390,27 @@ impl PullFetch for LivePullFetch<'_> {
             ot,
             IDS_PAGE_SIZE,
             continuation,
+            crate::net::RequestContext::sync(self.cycle),
         )
         .await
     }
 
     async fn fetch_contents(&self, ids: &[String]) -> Result<Vec<greader::GItem>, GReaderError> {
-        greader::contents(self.http, self.base, self.auth, ids).await
+        greader::contents_with(self.http, self.base, self.auth, ids, crate::net::RequestContext::sync(self.cycle)).await
     }
 }
 
 /// 将服务端的订阅源更新或插入到本地分组/订阅源中。本地存在但服务端不存在的订阅源保持不变。
+/// `cycle` 仅用于网络日志关联（经 LivePullFetch context 透传；对账/落盘不变）。
 async fn sync_subscriptions(
     state: &AppState,
     http: &reqwest::Client,
     acct: &SyncAccount,
     auth: &str,
+    cycle: &str,
 ) -> Result<usize, GReaderError> {
     // Live 适配器经 `PullFetch` 缝合面取数；纯解析仍在 greader.rs（ADR-0002）。
-    let fetch = LivePullFetch { http, base: &acct.server_url, auth };
+    let fetch = LivePullFetch { http, base: &acct.server_url, auth, cycle };
     let subs = fetch.fetch_subscriptions().await?;
     apply_subscriptions(state, &subs).await
 }
@@ -575,8 +591,9 @@ async fn pull_items(
     cycle: &str,
 ) -> Result<(usize, Vec<String>), GReaderError> {
     // Live 适配器经 `PullFetch` 缝合面进入可注入编排核心；行为见 `pull_items_with`。
+    // `cycle` 经 LivePullFetch context 透传到 greader sends（日志关联；拉取语义不变）。
     let host = sync_host(acct);
-    let fetch = LivePullFetch { http, base: &acct.server_url, auth };
+    let fetch = LivePullFetch { http, base: &acct.server_url, auth, cycle };
     pull_items_with(state, &fetch, cycle, &host).await
 }
 
@@ -835,7 +852,7 @@ mod tests {
     fn pull_seam_has_live_and_fixture_adapters() {
         // 设定：live（薄委托，本用例不发请求）与 fixture（内存）两种适配器
         let client = reqwest::Client::new();
-        let live = LivePullFetch { http: &client, base: "https://sync.example", auth: "t" };
+        let live = LivePullFetch { http: &client, base: "https://sync.example", auth: "t", cycle: "c-seam" };
         let fixture = FixturePullFetch::empty();
         // 操作：同一泛型约束接纳两者（编译期即证明单缝合面）
         assert_is_pull_fetch(&live);

@@ -39,6 +39,9 @@ pub struct ParsedFeed {
 /// 仅网络阶段：下载并解析订阅源。不持有任何数据库连接引用。
 /// 网络日志行上标记 `cycle=` / `id=`（无周期上下文时传 `""` / `None`）。
 /// Adapter for refresh lifecycle Module: prefer `services::source::fetch_stage` seam; direct use only for pre-persist probe.
+/// Internally bundles `cycle`/`source_id` into [`crate::net::RequestContext`]
+/// and sends via the single checked interface [`crate::net::fetch_bytes`]
+/// (payload/timeout/auth semantics unchanged; log shapes byte-identical).
 pub async fn fetch_and_parse_with(
     client: &reqwest::Client,
     url: &str,
@@ -48,7 +51,9 @@ pub async fn fetch_and_parse_with(
     let req = client
         .get(url)
         .timeout(std::time::Duration::from_secs(30));
-    let bytes = crate::net::send_and_check_bytes("feed", "GET", url, req, cycle, source_id).await?;
+    let bytes =
+        crate::net::fetch_bytes(crate::net::RequestContext::feed(cycle, source_id), "GET", url, req)
+            .await?;
     parse_feed_data(&bytes, Some(url), url)
 }
 
@@ -218,6 +223,9 @@ pub struct FaviconFetchOptions<'a> {
 /// 抓取网站图标并在网络日志行上标记 `cycle=`（无周期上下文时传 `""`）。
 /// 网站图标候选请求保持 debug 级别，绝不升为 INFO。
 /// Adapter for refresh lifecycle Module: cycle path via `services::source::store_parsed` seam; manual icon command may call directly.
+/// Internally sends each candidate via the single logged interface
+/// [`crate::net::send_logged`] with [`crate::net::RequestContext::favicon`]
+/// (status/bytes/size/sniff/write semantics unchanged).
 pub async fn fetch_favicon_with(
     client: &reqwest::Client,
     opts: FaviconFetchOptions<'_>,
@@ -270,7 +278,14 @@ pub async fn fetch_favicon_with(
 
     for candidate in &candidates {
         let req = client.get(candidate).timeout(std::time::Duration::from_secs(8));
-        if let Ok(resp) = crate::net::send_logged_with("favicon", "GET", candidate, req, cycle, Some(source_id)).await {
+        if let Ok(resp) = crate::net::send_logged(
+            crate::net::RequestContext::favicon(cycle, source_id),
+            "GET",
+            candidate,
+            req,
+        )
+        .await
+        {
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes().await {
                     if bytes.len() > 80 && bytes.len() < 2_000_000 {

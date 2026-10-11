@@ -113,6 +113,61 @@ fn has_auth_token(s: &str) -> bool {
         .any(|tok| tok == "auth")
 }
 
+/// Single request-context for all net sends: bundles `kind` + `cycle` + `source_id`
+/// so callers pass one context value instead of separate strings/options.
+/// Log line shapes via [`RequestLog`] are byte-identical; this only threads
+/// real values to the point where logs are emitted (previously greader/extractor
+/// hardcoded `""`/`None` so cycle correlation silently dropped).
+#[derive(Debug, Clone, Copy)]
+pub struct RequestContext<'a> {
+    pub kind: &'static str,
+    pub cycle: &'a str,
+    pub source_id: Option<i64>,
+}
+
+impl<'a> RequestContext<'a> {
+    pub fn new(kind: &'static str, cycle: &'a str, source_id: Option<i64>) -> Self {
+        Self { kind, cycle, source_id }
+    }
+
+    /// Sync (greader) requests: kind=`sync`, no source id.
+    pub fn sync(cycle: &'a str) -> Self {
+        Self { kind: "sync", cycle, source_id: None }
+    }
+
+    /// Feed fetch requests.
+    pub fn feed(cycle: &'a str, source_id: Option<i64>) -> Self {
+        Self { kind: "feed", cycle, source_id }
+    }
+
+    /// Favicon candidate requests (always tied to a source).
+    pub fn favicon(cycle: &'a str, source_id: i64) -> Self {
+        Self { kind: "favicon", cycle, source_id: Some(source_id) }
+    }
+
+    /// Full-text extractor requests.
+    /// (Kept as the canonical constructor; the no-cycle `extract_from_url`
+    /// wrapper currently uses `bare("extractor")` which is shape-identical.)
+    #[allow(dead_code)]
+    pub fn extractor(cycle: &'a str) -> Self {
+        Self { kind: "extractor", cycle, source_id: None }
+    }
+
+    /// Proxy probe requests.
+    /// (Kept for future context callers; `commands::test_proxy` still uses the
+    /// legacy `send_and_check_text("proxy", .., "", None)` wrapper — out of scope.)
+    #[allow(dead_code)]
+    pub fn proxy() -> RequestContext<'static> {
+        RequestContext { kind: "proxy", cycle: "", source_id: None }
+    }
+
+    /// Bare context for legacy callers without cycle correlation
+    /// (log suffix omitted, byte-identical to the old `""`/`None` path).
+    pub fn bare(kind: &'static str) -> RequestContext<'static> {
+        RequestContext { kind, cycle: "", source_id: None }
+    }
+}
+
 pub struct RequestLog {
     pub kind: &'static str,
     pub method: &'static str,
@@ -126,6 +181,12 @@ pub struct RequestLog {
 }
 
 impl RequestLog {
+    /// Context-carrying constructor: single-context entry point.
+    /// Byte-identical to [`RequestLog::start_with`] (delegates to it).
+    pub fn start_ctx(ctx: RequestContext<'_>, method: &'static str, url: &str) -> Self {
+        Self::start_with(ctx.kind, method, url, ctx.cycle, ctx.source_id)
+    }
+
     pub fn start_with(
         kind: &'static str,
         method: &'static str,
@@ -252,15 +313,16 @@ impl RequestLog {
     }
 }
 
-pub async fn send_logged_with(
-    kind: &'static str,
+/// Single logged send interface: takes one [`RequestContext`] instead of
+/// separate `kind`/`cycle`/`source_id` strings. Log shapes byte-identical
+/// (delegates to [`RequestLog::start_ctx`]/`finish`/`finish_err`).
+pub async fn send_logged(
+    ctx: RequestContext<'_>,
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let req_log = RequestLog::start_with(kind, method, url, cycle, source_id);
+    let req_log = RequestLog::start_ctx(ctx, method, url);
     match builder.send().await {
         Ok(resp) => {
             let status = resp.status();
@@ -274,6 +336,20 @@ pub async fn send_logged_with(
             Err(e)
         }
     }
+}
+
+/// Legacy 6-arg logged send: thin wrapper over [`send_logged`] for callers
+/// outside the context-migrated scope (log/payload-identical).
+#[allow(dead_code)]
+pub async fn send_logged_with(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<reqwest::Response, reqwest::Error> {
+    send_logged(RequestContext::new(kind, cycle, source_id), method, url, builder).await
 }
 
 /// 生成单行 reqwest 失败原因，并将回显的请求 URL 精简为主机名：reqwest 的
@@ -292,49 +368,17 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     }
 }
 
-/// 发送请求并在 HTTP 成功时返回文本正文（`builder` 已由调用方基于共享
-/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged_with`] 一致）。
-/// 401/403 映射为鉴权错误以便上层刷新会话，其余非 2xx 返回 `HTTP <status>`。
-/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容）。
-pub async fn send_and_check_text(
-    kind: &'static str,
+/// Single checked send interface: takes one [`RequestContext`], returns raw
+/// bytes after [`send_logged`] + status/auth check. Payload/auth/header/
+/// timeout semantics unchanged; text side applies `from_utf8_lossy`.
+/// 抓取阶段错误前缀为 `fetch failed`，正文流式错误前缀为 `body failed`。
+pub async fn fetch_bytes(
+    ctx: RequestContext<'_>,
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
-) -> Result<String, String> {
-    let bytes = send_and_check_core(kind, method, url, builder, cycle, source_id).await?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
-/// 发送请求并在 HTTP 成功时返回原始字节（`Vec<u8>` 即 `Bytes` 负载；
-/// 不引入额外 `bytes` 直接依赖）。状态检查与鉴权映射同 [`send_and_check_text`]。
-/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容）。
-pub async fn send_and_check_bytes(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
 ) -> Result<Vec<u8>, String> {
-    send_and_check_core(kind, method, url, builder, cycle, source_id).await
-}
-
-/// `send_and_check_text` / `send_and_check_bytes` 的共享 core：全程携带
-/// `cycle`/`source_id` 经 [`send_logged_with`] 发送（不再掉进无 cycle 的旧入口），
-/// 返回原始字节；text 侧由调用方 `from_utf8_lossy`。抓取阶段错误前缀为
-/// `fetch failed`，正文流式错误前缀为 `body failed`。
-async fn send_and_check_core(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
-) -> Result<Vec<u8>, String> {
-    let resp = send_logged_with(kind, method, url, builder, cycle, source_id)
+    let resp = send_logged(ctx, method, url, builder)
         .await
         .map_err(|e| http_err_reason("fetch failed", &e))?;
     let status = resp.status();
@@ -348,6 +392,48 @@ async fn send_and_check_core(
         .await
         .map(|b| b.to_vec())
         .map_err(|e| http_err_reason("body failed", &e))
+}
+
+/// Checked text convenience over [`fetch_bytes`] (lossy UTF-8, payload-identical
+/// to the old `send_and_check_text` path).
+pub async fn fetch_text(
+    ctx: RequestContext<'_>,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+) -> Result<String, String> {
+    Ok(String::from_utf8_lossy(&fetch_bytes(ctx, method, url, builder).await?).into_owned())
+}
+
+/// 发送请求并在 HTTP 成功时返回文本正文（`builder` 已由调用方基于共享
+/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged`] 一致）。
+/// 401/403 映射为鉴权错误以便上层刷新会话，其余非 2xx 返回 `HTTP <status>`。
+/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容：经 context 薄包装）。
+pub async fn send_and_check_text(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<String, String> {
+    fetch_text(RequestContext::new(kind, cycle, source_id), method, url, builder).await
+}
+
+/// 发送请求并在 HTTP 成功时返回原始字节（`Vec<u8>` 即 `Bytes` 负载；
+/// 不引入额外 `bytes` 直接依赖）。状态检查与鉴权映射同 [`send_and_check_text`]。
+/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容：经 context 薄包装）。
+/// (In-crate sends now use [`fetch_bytes`]; kept for out-of-scope callers.)
+#[allow(dead_code)]
+pub async fn send_and_check_bytes(
+    kind: &'static str,
+    method: &'static str,
+    url: &str,
+    builder: reqwest::RequestBuilder,
+    cycle: &str,
+    source_id: Option<i64>,
+) -> Result<Vec<u8>, String> {
+    fetch_bytes(RequestContext::new(kind, cycle, source_id), method, url, builder).await
 }
 
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
@@ -495,5 +581,29 @@ mod tests {
         assert_eq!(bare.cycle, "");
         assert_eq!(bare.source_id, None);
         assert_eq!(bare.host, "x.example");
+    }
+
+    #[test]
+    fn request_context_constructors_thread_to_log() {
+        // 给定：各构造器携带的 kind/cycle/source_id
+        // 当：经 start_ctx 建日志时
+        let ctx = RequestContext::sync("cyc12345");
+        assert_eq!((ctx.kind, ctx.cycle, ctx.source_id), ("sync", "cyc12345", None));
+        let log = RequestLog::start_ctx(ctx, "GET", "https://x.example/api");
+        // 那么：字段与 start_with 等价（形状逐字一致，仅来源收敛为 context）
+        assert_eq!((log.kind, log.method), ("sync", "GET"));
+        assert_eq!(log.cycle, "cyc12345");
+        assert_eq!(log.source_id, None);
+        let feed = RequestLog::start_ctx(
+            RequestContext::feed("cyc12345", Some(9)),
+            "GET",
+            "https://f.example/rss",
+        );
+        assert_eq!(feed.cycle, "cyc12345");
+        assert_eq!(feed.source_id, Some(9));
+        // bare 兼容形状：空 cycle/None（旧 ""/None 路径逐字一致）
+        let bare = RequestLog::start_ctx(RequestContext::bare("sync"), "POST", "https://x.example/api");
+        assert_eq!(bare.cycle, "");
+        assert_eq!(bare.source_id, None);
     }
 }

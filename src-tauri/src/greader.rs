@@ -2,6 +2,7 @@
 //! TT-RSS 插件等）。纯解析辅助函数与网络调用分离，
 //! 以便针对录制的响应夹具进行独立测试。
 
+use crate::net::RequestContext;
 use serde_json::Value;
 
 pub const STREAM_READING_LIST: &str = "user/-/state/com.google/reading-list";
@@ -231,11 +232,12 @@ async fn read_authed(
     client: &reqwest::Client,
     auth: &str,
     url: &str,
+    ctx: RequestContext<'_>,
 ) -> Result<String, GReaderError> {
     let req = client
         .get(url)
         .header("Authorization", format!("GoogleLogin auth={auth}"));
-    crate::net::send_and_check_text("sync", "GET", url, req, "", None)
+    crate::net::fetch_text(ctx, "GET", url, req)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -246,18 +248,32 @@ async fn read_authed(
         })
 }
 
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn login(
     client: &reqwest::Client,
     base: &str,
     email: &str,
     passwd: &str,
 ) -> Result<String, GReaderError> {
+    login_with(client, base, email, passwd, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying login: `ctx` carries the sync cycle for log correlation
+/// (payload/auth/header logic unchanged; legacy [`login`] passes bare context).
+pub async fn login_with(
+    client: &reqwest::Client,
+    base: &str,
+    email: &str,
+    passwd: &str,
+    ctx: RequestContext<'_>,
+) -> Result<String, GReaderError> {
     let url = format!("{}/accounts/ClientLogin", base_url(base));
     let req = client
         .post(&url)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(login_body(email, passwd));
-    let text = crate::net::send_and_check_text("sync", "POST", &url, req, "", None)
+    let text = crate::net::fetch_text(ctx, "POST", &url, req)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -270,9 +286,21 @@ pub async fn login(
 }
 
 /// edit-tag 调用所需的短期 CSRF "T" 令牌。
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn get_token(client: &reqwest::Client, base: &str, auth: &str) -> Result<String, GReaderError> {
+    get_token_with(client, base, auth, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying token fetch (see [`login_with`]).
+pub async fn get_token_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    ctx: RequestContext<'_>,
+) -> Result<String, GReaderError> {
     let url = format!("{}/reader/api/0/token", base_url(base));
-    let text = read_authed(client, auth, &url).await?;
+    let text = read_authed(client, auth, &url, ctx).await?;
     let token = text.trim().to_string();
     if token.is_empty() {
         return Err(GReaderError::Other("empty edit-tag token".into()));
@@ -285,13 +313,25 @@ pub async fn subscriptions(
     base: &str,
     auth: &str,
 ) -> Result<Vec<GSubscription>, GReaderError> {
+    subscriptions_with(client, base, auth, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying subscriptions fetch (see [`login_with`]).
+pub async fn subscriptions_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    ctx: RequestContext<'_>,
+) -> Result<Vec<GSubscription>, GReaderError> {
     let url = format!("{}/reader/api/0/subscription/list?output=json", base_url(base));
-    let text = read_authed(client, auth, &url).await?;
+    let text = read_authed(client, auth, &url, ctx).await?;
     parse_subscriptions(&text).map_err(GReaderError::Other)
 }
 
 /// 获取 reading-list 流的单页数据，仅限于 `ot`（Unix 秒）之后变更的条目。
 /// 持续沿用 `continuation` 直至返回 None。
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn stream_ids(
     client: &reqwest::Client,
     base: &str,
@@ -300,6 +340,20 @@ pub async fn stream_ids(
     ot: i64,
     n: u32,
     continuation: Option<&str>,
+) -> Result<(Vec<String>, Option<String>), GReaderError> {
+    stream_ids_with(client, base, auth, stream, ot, n, continuation, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying ids page fetch (see [`login_with`]).
+pub async fn stream_ids_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    stream: &str,
+    ot: i64,
+    n: u32,
+    continuation: Option<&str>,
+    ctx: RequestContext<'_>,
 ) -> Result<(Vec<String>, Option<String>), GReaderError> {
     let mut url = url::Url::parse(&format!("{}/reader/api/0/stream/items/ids", base_url(base)))
         .map_err(|e| GReaderError::Other(e.to_string()))?;
@@ -313,15 +367,28 @@ pub async fn stream_ids(
     if let Some(c) = continuation {
         url.query_pairs_mut().append_pair("continuation", c);
     }
-    let text = read_authed(client, auth, url.as_str()).await?;
+    let text = read_authed(client, auth, url.as_str(), ctx).await?;
     parse_item_ids(&text).map_err(GReaderError::Other)
 }
 
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn contents(
     client: &reqwest::Client,
     base: &str,
     auth: &str,
     ids: &[String],
+) -> Result<Vec<GItem>, GReaderError> {
+    contents_with(client, base, auth, ids, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying contents fetch (see [`login_with`]).
+pub async fn contents_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    ids: &[String],
+    ctx: RequestContext<'_>,
 ) -> Result<Vec<GItem>, GReaderError> {
     let url = format!("{}/reader/api/0/stream/items/contents", base_url(base));
     // 序列化器持有非 Send 闭包且带有 drop 守卫；
@@ -341,7 +408,7 @@ pub async fn contents(
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body);
-    let text = crate::net::send_and_check_text("sync", "POST", &url, req, "", None)
+    let text = crate::net::fetch_text(ctx, "POST", &url, req)
         .await
         .map_err(|e| {
             if e.starts_with("auth failed:") {
@@ -354,6 +421,8 @@ pub async fn contents(
 }
 
 /// 推送指定条目的状态变更。`add`/`remove` 为通过表单字段 `a`/`r` 应用的状态流 ID（例如 STATE_READ）。
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn edit_tag(
     client: &reqwest::Client,
     base: &str,
@@ -362,6 +431,20 @@ pub async fn edit_tag(
     ids: &[String],
     add: &[&str],
     remove: &[&str],
+) -> Result<(), GReaderError> {
+    edit_tag_with(client, base, auth, token, ids, add, remove, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying edit-tag push (see [`login_with`]).
+pub async fn edit_tag_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    token: &str,
+    ids: &[String],
+    add: &[&str],
+    remove: &[&str],
+    ctx: RequestContext<'_>,
 ) -> Result<(), GReaderError> {
     let url = format!("{}/reader/api/0/edit-tag", base_url(base));
     // 序列化器为带有 drop 守卫的非 Send 类型 —— 限制在独立作用域内。
@@ -381,10 +464,12 @@ pub async fn edit_tag(
         form.append_pair("T", token);
         form.finish()
     };
-    post_authed(client, auth, &url, &body).await
+    post_authed(client, auth, &url, &body, ctx).await
 }
 
 /// 流级别的 edit-tag，用于全部标记已读（s = feed/label/reading-list）。
+/// Legacy wrapper (bare sync context) for callers outside the migrated scope.
+#[allow(dead_code)]
 pub async fn edit_tag_stream(
     client: &reqwest::Client,
     base: &str,
@@ -392,6 +477,19 @@ pub async fn edit_tag_stream(
     token: &str,
     stream: &str,
     add: &str,
+) -> Result<(), GReaderError> {
+    edit_tag_stream_with(client, base, auth, token, stream, add, RequestContext::bare("sync")).await
+}
+
+/// Context-carrying stream edit-tag push (see [`login_with`]).
+pub async fn edit_tag_stream_with(
+    client: &reqwest::Client,
+    base: &str,
+    auth: &str,
+    token: &str,
+    stream: &str,
+    add: &str,
+    ctx: RequestContext<'_>,
 ) -> Result<(), GReaderError> {
     let url = format!("{}/reader/api/0/edit-tag", base_url(base));
     let body = {
@@ -401,7 +499,7 @@ pub async fn edit_tag_stream(
         form.append_pair("T", token);
         form.finish()
     };
-    post_authed(client, auth, &url, &body).await
+    post_authed(client, auth, &url, &body, ctx).await
 }
 
 async fn post_authed(
@@ -409,13 +507,14 @@ async fn post_authed(
     auth: &str,
     url: &str,
     body: &str,
+    ctx: RequestContext<'_>,
 ) -> Result<(), GReaderError> {
     let req = client
         .post(url)
         .header("Authorization", format!("GoogleLogin auth={auth}"))
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body.to_string());
-    crate::net::send_and_check_text("sync", "POST", url, req, "", None)
+    crate::net::fetch_text(ctx, "POST", url, req)
         .await
         .map(|_| ())
         .map_err(|e| {
