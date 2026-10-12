@@ -25,7 +25,10 @@ pub fn short_reason(s: &str) -> String {
 ///
 /// 若无法提取有效的文件名字符串，则回退返回 `"?"`。
 pub fn file_base(path: &str) -> String {
-    Path::new(path)
+    // 跨平台：将 Windows 分隔符统一为 `/`，否则 Linux 下 `Path::file_name`
+    // 会把 `C:\data\config.toml` 整体当作文件名导致单测失败。
+    let normalized = path.replace('\\', "/");
+    Path::new(&normalized)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("?")
