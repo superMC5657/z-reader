@@ -82,7 +82,7 @@ pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
     write_secrets(settings_path, &store)
 }
 
-pub fn load(path: &PathBuf) -> Settings {
+pub fn load(path: &Path) -> Settings {
     let mut s: Settings = read_json_safe(path, "settings corrupt");
     let secrets = read_secrets(path);
     if let Some(acct) = s.sync_account.as_mut() {
@@ -93,7 +93,7 @@ pub fn load(path: &PathBuf) -> Settings {
     s
 }
 
-pub fn save(path: &PathBuf, settings: &Settings) -> Result<(), String> {
+pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
     let mut s = settings.clone();
     let store = SecretStore {
         sync_password: s

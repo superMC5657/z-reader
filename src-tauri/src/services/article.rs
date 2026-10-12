@@ -12,7 +12,7 @@
 //!   （hide→已读唯一折叠）；`starred = server_starred || star`（服务端 LWW 之上的叠加）。
 //! - Monotonic Hidden（与持久层同契约）：`verdict.hidden` 只反映本次规则命中；
 //!   行级单调由 `db::upsert_remote_item` 的 SQL CASE 保证
-//!  （`hidden = CASE WHEN ?3 <> 0 THEN 1 ELSE hidden END`，只置 1 不清 0；
+//!   （`hidden = CASE WHEN ?3 <> 0 THEN 1 ELSE hidden END`，只置 1 不清 0；
 //!   read/star 保持服务端 LWW 覆盖）。quiet 重放永不回清 hidden，详见本模块
 //!   `verdict_parity_hidden_monotonic_upsert` 测试。
 

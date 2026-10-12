@@ -9,10 +9,11 @@
 /// 对齐 `lib.rs::refresh_all_sources`、`commands.rs::sync_now` 及
 /// `commands.rs::cleanup_now` 三处的清理与压缩逻辑：
 /// 1. 按保留天数 `days`（`0` 表示跳过时间窗口清理）结合单源条目上限 `max_items`
-///   （`0` 表示不设上限），清理未加星标的已读/隐藏文章；
+///    （`0` 表示不设上限），清理未加星标的已读/隐藏文章；
 /// 2. 若删除的文章总数**严格大于** `vacuum_threshold`，则触发 SQLite `VACUUM`
 ///    整理数据库空间（后台刷新/同步传 `200`，手动立即清理传 `0`，阈值语义不变）；
 /// 3. 返回本次清理删除的文章总数；清理失败时记录 warn 并返回 `0`。
+///
 /// Retention seam Adapter: refresh cycle enters via `services::source::apply_refresh_retention` (threshold 200);
 /// manual cleanup enters directly with threshold 0. Threshold semantics unchanged.
 /// 存储入口经窄壳 flat `crate::db::{cleanup_retention, vacuum}` 进入条目 cohesive interface

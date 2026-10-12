@@ -9,7 +9,7 @@
 
 /// login 收尾：subscriptions 成功后才保存账户（调用方保证先网络后 save 的顺序）。
 pub fn complete_login(
-    settings_path: &std::path::PathBuf,
+    settings_path: &std::path::Path,
     acct: crate::models::SyncAccount,
 ) -> Result<(), String> {
     let mut s = crate::settings::load(settings_path);
@@ -19,7 +19,7 @@ pub fn complete_login(
 
 /// logout 全序：save(None)→clear_sync_secret→clear_session→queue_clear。
 pub fn apply_logout(
-    settings_path: &std::path::PathBuf,
+    settings_path: &std::path::Path,
     conn: &rusqlite::Connection,
     clear_session: impl FnOnce(),
 ) -> Result<(), String> {

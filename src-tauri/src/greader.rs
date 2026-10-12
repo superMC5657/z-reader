@@ -314,6 +314,7 @@ pub async fn subscriptions_with(
 /// 获取 reading-list 流的单页数据，仅限于 `ot`（Unix 秒）之后变更的条目。
 /// 持续沿用 `continuation` 直至返回 None。
 /// Context-carrying ids page fetch (see [`login_with`]).
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_ids_with(
     client: &reqwest::Client,
     base: &str,
@@ -380,6 +381,7 @@ pub async fn contents_with(
 
 /// 推送指定条目的状态变更。`add`/`remove` 为通过表单字段 `a`/`r` 应用的状态流 ID（例如 STATE_READ）。
 /// Context-carrying edit-tag push (see [`login_with`]).
+#[allow(clippy::too_many_arguments)]
 pub async fn edit_tag_with(
     client: &reqwest::Client,
     base: &str,
