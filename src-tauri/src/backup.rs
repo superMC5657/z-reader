@@ -245,8 +245,10 @@ fn rollback_live(
 /// - stage 为 `restored_db→staged` 拷贝（锁外）随后重验 staged 副本；
 /// - snapshot-live 失败尽力继续（不阻断恢复）；
 /// - WAL/SHM 删除与 replace→reopen 包进 swap 临界段内；
-/// - 仅 swap 成功才拷 settings 与 favicons；
-/// - swap 失败走 rollback（rollback→live 拷贝 + reopen + 清 staged/tmp + 返回原 Err）；
+/// - 仅 swap 成功才应用 settings 与 favicons；
+/// - swap 失败或 settings 拷贝失败（库已换而配置未换的半完成态不允许存在）
+///   均走 rollback：rollback→live 拷贝 + reopen + 清 staged/tmp + 返回原 Err；
+/// - favicons 尽力而为：目录创建失败仅记录日志，不影响恢复结果；
 /// - 成功/失败均清理 tmp。
 pub async fn restore_from_archive(
     archive: &Path,
@@ -305,16 +307,38 @@ pub async fn restore_from_archive(
     }
 
     // 仅在数据库切换成功后，才应用设置和网站图标。
+    // settings 承载账户与同步配置：拷贝失败则整体回滚到恢复前快照，
+    // 不允许出现"库已换而配置未换"的半完成状态。
     let restored_settings = tmp_dir.join(SETTINGS_ENTRY);
     if restored_settings.exists() {
-        std::fs::copy(&restored_settings, settings_file).map_err(|e| e.to_string())?;
+        if let Err(e) = std::fs::copy(&restored_settings, settings_file) {
+            let mut guard = db.lock().await;
+            // 先以内存占位连接丢弃对已换库的持有（干净关闭并收走其 WAL），
+            // 再用快照覆盖 live 文件，最后由 rollback_live 重开原库。
+            *guard = Connection::open_in_memory().map_err(|e| e.to_string())?;
+            let err = rollback_live(
+                &rollback,
+                db_path,
+                &staged,
+                &tmp_dir,
+                &mut guard,
+                e.to_string(),
+            );
+            return Err(err);
+        }
     }
 
     // 网站图标为普通文件；将其复制覆盖回现有文件。
+    // 目录创建失败降级为尽力而为：库已成功切换，favicon 不值得触发整体回滚。
     let restored_favicons = tmp_dir.join("favicons");
     if restored_favicons.is_dir() {
-        std::fs::create_dir_all(favicon_dir).map_err(|e| e.to_string())?;
-        if let Ok(entries) = std::fs::read_dir(&restored_favicons) {
+        if let Err(e) = std::fs::create_dir_all(favicon_dir) {
+            log::warn!(
+                "restore favicons incomplete dir={} reason={}",
+                crate::utils::file_base(&favicon_dir.to_string_lossy()),
+                crate::utils::short_reason(&e.to_string())
+            );
+        } else if let Ok(entries) = std::fs::read_dir(&restored_favicons) {
             for entry in entries.flatten() {
                 let from = entry.path();
                 if let Some(name) = from.file_name() {
@@ -717,5 +741,199 @@ mod tests {
         assert!(replace_live(&missing, &live).is_err());
         assert_eq!(std::fs::read(&live).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_settings_failure_rolls_back_db() {
+        // 给定：live 库（含条目）+ 合法归档（异构库 + settings）。
+        // settings_file 指向目录（fs::copy 必然失败），settings 阶段失败必须整体回滚。
+        let base = temp_dir("restore-settings-rb");
+        let live_dir = base.join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_path = live_dir.join("zreader.db");
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let src =
+            crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None)
+                .unwrap();
+        crate::db::insert_item(
+            &live_conn,
+            src.id,
+            &crate::db::UpsertEntry {
+                guid: "live-g1",
+                title: "live article",
+                url: None,
+                author: None,
+                published_at: 100,
+                content: Some("live body"),
+                summary: None,
+                snippet: Some("live"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        drop(live_conn);
+        // settings 目标是目录：拷贝必然失败
+        let settings_file = base.join("settings.json");
+        std::fs::create_dir_all(&settings_file).unwrap();
+        let favicon_dir = base.join("favicons");
+
+        let staged_src = base.join("staged.db");
+        {
+            let c = crate::db::open(&staged_src).unwrap();
+            let s =
+                crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None)
+                    .unwrap();
+            crate::db::insert_item(
+                &c,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: "new-g1",
+                    title: "restored article",
+                    url: None,
+                    author: None,
+                    published_at: 200,
+                    content: Some("new body"),
+                    summary: None,
+                    snippet: Some("new"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        let arc_settings = base.join("arc-settings.json");
+        std::fs::write(&arc_settings, r#"{"marker":"restored"}"#).unwrap();
+        let archive = base.join("good.zreader.bak");
+        write_archive(&staged_src, Some(&arc_settings), None, &archive).unwrap();
+
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let db = tokio::sync::Mutex::new(live_conn);
+
+        // 当：swap 成功后 settings 拷贝失败时
+        let err = tauri::async_runtime::block_on(restore_from_archive(
+            &archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ));
+        // 那么：整体失败，且 live 库回滚为恢复前内容，tmp/staged 清理
+        assert!(err.is_err());
+        {
+            let guard = db.try_lock().expect("lock");
+            let items =
+                crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].guid, "live-g1");
+        }
+        assert!(!live_dir.join("restore-tmp").exists());
+        assert!(!live_path.with_extension("db.restoring").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn restore_favicon_failure_is_best_effort() {
+        // 给定：live 库 + 含 settings 与 favicons 的合法归档。
+        // favicon_dir 位于普通文件之下 → create_dir_all 必然失败，
+        // 恢复整体仍须成功（favicon 尽力而为，不回滚）。
+        let base = temp_dir("restore-favicon-be");
+        let live_dir = base.join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_path = live_dir.join("zreader.db");
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let src =
+            crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None)
+                .unwrap();
+        crate::db::insert_item(
+            &live_conn,
+            src.id,
+            &crate::db::UpsertEntry {
+                guid: "live-g1",
+                title: "live article",
+                url: None,
+                author: None,
+                published_at: 100,
+                content: Some("live body"),
+                summary: None,
+                snippet: Some("live"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        drop(live_conn);
+        let settings_file = base.join("settings.json");
+        std::fs::write(&settings_file, r#"{"marker":"live"}"#).unwrap();
+        let blocker = base.join("blocker.txt");
+        std::fs::write(&blocker, b"x").unwrap();
+        let favicon_dir = blocker.join("favicons");
+
+        let staged_src = base.join("staged.db");
+        {
+            let c = crate::db::open(&staged_src).unwrap();
+            let s =
+                crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None)
+                    .unwrap();
+            crate::db::insert_item(
+                &c,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: "new-g1",
+                    title: "restored article",
+                    url: None,
+                    author: None,
+                    published_at: 200,
+                    content: Some("new body"),
+                    summary: None,
+                    snippet: Some("new"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        let arc_settings = base.join("arc-settings.json");
+        std::fs::write(&arc_settings, r#"{"marker":"restored-456"}"#).unwrap();
+        let arc_fav = base.join("arc-favicons");
+        std::fs::create_dir_all(&arc_fav).unwrap();
+        std::fs::write(arc_fav.join("7.png"), b"fakepng-bytes-123").unwrap();
+        let archive = base.join("good.zreader.bak");
+        write_archive(&staged_src, Some(&arc_settings), Some(&arc_fav), &archive).unwrap();
+
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let db = tokio::sync::Mutex::new(live_conn);
+
+        // 当：favicon 目录无法创建时恢复
+        let ok = tauri::async_runtime::block_on(restore_from_archive(
+            &archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ));
+        // 那么：整体成功，库与 settings 均已更新（favicon 仅日志）
+        assert!(ok.is_ok());
+        {
+            let guard = db.try_lock().expect("lock");
+            let items =
+                crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].guid, "new-g1");
+        }
+        assert!(std::fs::read_to_string(&settings_file)
+            .unwrap()
+            .contains("restored-456"));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
