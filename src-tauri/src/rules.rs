@@ -149,58 +149,32 @@ impl RuleEngine {
             return out;
         }
 
-        if let Some(set) = &self.title_rules.set {
-            for idx in set.matches(ctx.title) {
-                let rule = &self.title_rules.rules[idx];
-                if Self::scope_applies(rule, ctx.source_id, ctx.group_id) {
-                    Self::apply_action(rule.action_type, &mut out);
-                }
-            }
-        }
-
-        if let Some(set) = &self.content_rules.set {
-            for idx in set.matches(ctx.content_text) {
-                let rule = &self.content_rules.rules[idx];
-                if Self::scope_applies(rule, ctx.source_id, ctx.group_id) {
-                    Self::apply_action(rule.action_type, &mut out);
-                }
-            }
-        }
-
-        if let Some(set) = &self.author_rules.set {
-            let author_str = ctx.author.unwrap_or("");
-            for idx in set.matches(author_str) {
-                let rule = &self.author_rules.rules[idx];
-                if Self::scope_applies(rule, ctx.source_id, ctx.group_id) {
-                    Self::apply_action(rule.action_type, &mut out);
-                }
-            }
-        }
-
-        if let Some(set) = &self.source_url_rules.set {
-            let source_url_str = match ctx.url {
-                Some(url) => format!("{url} {}", ctx.source_url),
-                None => ctx.source_url.to_string(),
+        // SourceUrl 匹配文章 URL 与源 URL 的拼接；Any 匹配全部字段的拼接。
+        let source_url_text = match ctx.url {
+            Some(url) => format!("{url} {}", ctx.source_url),
+            None => ctx.source_url.to_string(),
+        };
+        let any_text = format!(
+            "{} {} {} {} {}",
+            ctx.title,
+            ctx.content_text,
+            ctx.author.unwrap_or(""),
+            ctx.url.unwrap_or(""),
+            ctx.source_url
+        );
+        let groups = [
+            (&self.title_rules, ctx.title),
+            (&self.content_rules, ctx.content_text),
+            (&self.author_rules, ctx.author.unwrap_or("")),
+            (&self.source_url_rules, source_url_text.as_str()),
+            (&self.any_rules, any_text.as_str()),
+        ];
+        for (group, text) in groups {
+            let Some(set) = &group.set else {
+                continue;
             };
-            for idx in set.matches(&source_url_str) {
-                let rule = &self.source_url_rules.rules[idx];
-                if Self::scope_applies(rule, ctx.source_id, ctx.group_id) {
-                    Self::apply_action(rule.action_type, &mut out);
-                }
-            }
-        }
-
-        if let Some(set) = &self.any_rules.set {
-            let any_str = format!(
-                "{} {} {} {} {}",
-                ctx.title,
-                ctx.content_text,
-                ctx.author.unwrap_or(""),
-                ctx.url.unwrap_or(""),
-                ctx.source_url
-            );
-            for idx in set.matches(&any_str) {
-                let rule = &self.any_rules.rules[idx];
+            for idx in set.matches(text) {
+                let rule = &group.rules[idx];
                 if Self::scope_applies(rule, ctx.source_id, ctx.group_id) {
                     Self::apply_action(rule.action_type, &mut out);
                 }

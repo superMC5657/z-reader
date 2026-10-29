@@ -230,6 +230,16 @@ fn category_states(item: &Value) -> Vec<&str> {
 
 // ---------- 网络调用 ----------
 
+/// 网络层错误统一归类。"auth failed:" 前缀是 net.rs 重登路径与协议层之间的
+/// 隐式协议，识别点收敛于此（票 10 将把该往返类型化）。
+fn map_net_err(e: String) -> GReaderError {
+    if e.starts_with("auth failed:") {
+        GReaderError::Auth(e)
+    } else {
+        GReaderError::Other(e)
+    }
+}
+
 pub fn base_url(base: &str) -> String {
     base.trim().trim_end_matches('/').to_string()
 }
@@ -252,13 +262,7 @@ async fn read_authed(
         .header("Authorization", format!("GoogleLogin auth={auth}"));
     crate::net::fetch_text(ctx, "GET", url, req)
         .await
-        .map_err(|e| {
-            if e.starts_with("auth failed:") {
-                GReaderError::Auth(e)
-            } else {
-                GReaderError::Other(e)
-            }
-        })
+        .map_err(map_net_err)
 }
 
 /// Context-carrying login: `ctx` carries the sync cycle for log correlation
@@ -277,13 +281,7 @@ pub async fn login_with(
         .body(login_body(email, passwd));
     let text = crate::net::fetch_text(ctx, "POST", &url, req)
         .await
-        .map_err(|e| {
-            if e.starts_with("auth failed:") {
-                GReaderError::Auth(e)
-            } else {
-                GReaderError::Other(e)
-            }
-        })?;
+        .map_err(map_net_err)?;
     parse_login(&text).ok_or_else(|| GReaderError::Other("no Auth in ClientLogin response".into()))
 }
 
@@ -385,13 +383,7 @@ pub async fn contents_with(
         .body(body);
     let text = crate::net::fetch_text(ctx, "POST", &url, req)
         .await
-        .map_err(|e| {
-            if e.starts_with("auth failed:") {
-                GReaderError::Auth(e)
-            } else {
-                GReaderError::Other(e)
-            }
-        })?;
+        .map_err(map_net_err)?;
     parse_contents(&text).map_err(GReaderError::Other)
 }
 
@@ -466,13 +458,7 @@ async fn post_authed(
     crate::net::fetch_text(ctx, "POST", url, req)
         .await
         .map(|_| ())
-        .map_err(|e| {
-            if e.starts_with("auth failed:") {
-                GReaderError::Auth(e)
-            } else {
-                GReaderError::Other(e)
-            }
-        })
+        .map_err(map_net_err)
 }
 
 #[cfg(test)]
