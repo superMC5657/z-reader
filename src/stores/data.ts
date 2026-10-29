@@ -143,6 +143,10 @@ export const useDataStore = defineStore('data', {
         this.loadGroups().catch(() => {})
         this.loadItems().catch(() => {})
       })
+      // Windows 点击系统通知：后端已唤起主窗口，前端切到未读视图。
+      await listen<unknown>('notify-click', () => {
+        void this.setFilter(1)
+      })
     },
     async loadSources() {
       this.sources = await api.getSources()

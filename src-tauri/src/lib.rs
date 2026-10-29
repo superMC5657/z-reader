@@ -6,6 +6,7 @@ mod feed;
 mod greader;
 mod models;
 mod net;
+mod notify;
 mod opml_io;
 mod rules;
 mod services;
@@ -67,7 +68,6 @@ pub fn run() {
                         "[APP] action=build_http_client failed reason={} fallback=direct",
                         crate::utils::short_reason(&e)
                     );
-                    use tauri_plugin_notification::NotificationExt;
                     let zh = crate::utils::is_zh_locale(&settings.locale);
                     let body = if zh {
                         format!("代理配置非法：{e}，已按直连运行，请在设置中修正")
@@ -76,12 +76,7 @@ pub fn run() {
                             "Invalid proxy config: {e}. Running direct until fixed in Settings."
                         )
                     };
-                    let _ = app
-                        .notification()
-                        .builder()
-                        .title("ZReader")
-                        .body(&body)
-                        .show();
+                    notify::show_toast(app.handle(), "ZReader", &body);
                     reqwest::Client::default()
                 }
             };
@@ -474,14 +469,8 @@ fn notify_new_articles(
     new_count: usize,
     rule_titles: &[String],
 ) {
-    use tauri_plugin_notification::NotificationExt;
     let body = notify_body(&settings.locale, new_count, rule_titles);
-    let _ = app
-        .notification()
-        .builder()
-        .title("ZReader")
-        .body(&body)
-        .show();
+    notify::show_toast(app, "ZReader", &body);
 }
 
 #[cfg(test)]

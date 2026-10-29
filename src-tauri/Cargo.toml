@@ -38,6 +38,9 @@ url = "2"
 log = "0.4"
 base64 = "0.22"
 
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+
 [profile.release]
 opt-level = "s"          # 体积优先
 lto = "fat"              # 全程序链接时优化
