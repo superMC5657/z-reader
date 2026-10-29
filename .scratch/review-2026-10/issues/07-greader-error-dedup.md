@@ -1,6 +1,6 @@
 # 07 — greader 错误分类去重 + rules evaluate 收敛
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 

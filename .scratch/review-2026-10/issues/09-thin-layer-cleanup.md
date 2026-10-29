@@ -1,6 +1,6 @@
 # 09 — 薄委托壳与 dead code 清理
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 

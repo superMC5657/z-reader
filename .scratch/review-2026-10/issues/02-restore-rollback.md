@@ -1,6 +1,6 @@
 # 02 — 备份恢复 post-swap 阶段回滚完整性
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 

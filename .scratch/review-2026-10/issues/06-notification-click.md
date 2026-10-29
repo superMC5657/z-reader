@@ -1,6 +1,6 @@
 # 06 — 通知点击唤起主窗口（roadmap 4.1）
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 
@@ -24,3 +24,4 @@ Blocked by: 01
 ## Comments
 
 - 2026-10-30：维护者拍板最小实现：点击通知 → 前置主窗口 + 切未读视图；"定位到具体文章"延后为独立增强（需通知载荷携带 feed/article id）。
+- 2026-10-30：落地边界：tauri-plugin-notification 桌面端不暴露任何点击回调 API（已核实 2.4.0 源码），Windows 安装版绕行 tauri-winrt-notification 注入 on_activated；开发目录与非 Windows 平台回落插件（无点击能力）。代码级验证（clippy/92 后端测试/40 前端测试）通过；toast 实际点击需安装版手测。

@@ -1,6 +1,6 @@
 # 05 — build_http_client 消除静默直连回退
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01
 

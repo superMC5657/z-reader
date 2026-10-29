@@ -1,6 +1,6 @@
 # 03 — 恢复后清理 secrets.json sidecar，兑现"恢复后需重填"
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 02
 

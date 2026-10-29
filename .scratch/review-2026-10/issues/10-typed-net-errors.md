@@ -1,6 +1,6 @@
 # 10 — 网络错误类型化，替代字符串前缀往返（可选）
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 07
 

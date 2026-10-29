@@ -1,6 +1,6 @@
 # 04 — 新增 ADR-0004 记录 secrets sidecar 决策，ADR-0002 标注部分被取代
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 03
 
