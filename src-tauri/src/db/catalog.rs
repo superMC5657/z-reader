@@ -20,14 +20,21 @@ pub fn get_groups(conn: &Connection) -> Result<Vec<Group>, String> {
     let rows = stmt
         .query_map([], row_to_group)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn create_group(conn: &Connection, name: &str) -> Result<Group, String> {
     conn.execute("INSERT INTO groups (name) VALUES (?1)", params![name])
         .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
-    Ok(Group { id, name: name.into(), expanded: true, sort: 0, remote_id: None })
+    Ok(Group {
+        id,
+        name: name.into(),
+        expanded: true,
+        sort: 0,
+        remote_id: None,
+    })
 }
 
 pub fn rename_group(conn: &Connection, id: i64, name: &str) -> Result<(), String> {
@@ -78,7 +85,8 @@ pub fn get_sources(conn: &Connection) -> Result<Vec<Source>, String> {
     let rows = stmt
         .query_map([], row_to_source)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn get_source(conn: &Connection, id: i64) -> Result<Source, String> {
@@ -121,7 +129,11 @@ pub fn remove_source(conn: &Connection, id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn set_source_group(conn: &Connection, source_id: i64, group_id: Option<i64>) -> Result<(), String> {
+pub fn set_source_group(
+    conn: &Connection,
+    source_id: i64,
+    group_id: Option<i64>,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE sources SET group_id=?1 WHERE id=?2",
         params![group_id, source_id],
@@ -191,7 +203,11 @@ pub fn get_group_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Opti
     .map_err(|e| e.to_string())
 }
 
-pub fn set_group_remote(conn: &Connection, group_id: i64, remote_id: Option<&str>) -> Result<(), String> {
+pub fn set_group_remote(
+    conn: &Connection,
+    group_id: i64,
+    remote_id: Option<&str>,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE groups SET remote_id=?1 WHERE id=?2",
         params![remote_id, group_id],
@@ -253,7 +269,10 @@ pub fn find_or_create_group_by_remote(
     }
 }
 
-pub fn get_source_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Option<Source>, String> {
+pub fn get_source_by_remote_id(
+    conn: &Connection,
+    remote_id: &str,
+) -> Result<Option<Source>, String> {
     conn.query_row(
         &format!("{SOURCE_SELECT} WHERE s.remote_id = ?1"),
         params![remote_id],
@@ -263,7 +282,11 @@ pub fn get_source_by_remote_id(conn: &Connection, remote_id: &str) -> Result<Opt
     .map_err(|e| e.to_string())
 }
 
-pub fn set_source_remote(conn: &Connection, source_id: i64, remote_id: Option<&str>) -> Result<(), String> {
+pub fn set_source_remote(
+    conn: &Connection,
+    source_id: i64,
+    remote_id: Option<&str>,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE sources SET remote_id=?1 WHERE id=?2",
         params![remote_id, source_id],

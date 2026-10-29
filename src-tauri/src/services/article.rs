@@ -130,7 +130,9 @@ fn derive_verdict(
     server_starred: bool,
 ) -> Verdict {
     let outcome = match engine {
-        Some(e) => evaluate_normalized(e, source_id, group_id, source_url, title, body_raw, author, url),
+        Some(e) => evaluate_normalized(
+            e, source_id, group_id, source_url, title, body_raw, author, url,
+        ),
         None => Outcome::default(),
     };
     merge_outcome_with_server(&outcome, server_read, server_starred)
@@ -151,7 +153,9 @@ pub fn verdict_for_local(
     url: Option<&str>,
 ) -> Verdict {
     let body = normalize_body(content, summary);
-    derive_verdict(engine, source_id, group_id, source_url, title, &body, author, url, false, false)
+    derive_verdict(
+        engine, source_id, group_id, source_url, title, &body, author, url, false, false,
+    )
 }
 
 /// 远端路由 Adapter（sync 拉取）：上游已合并的 `GItem.content` 直接作为归一化文本。
@@ -170,7 +174,18 @@ pub fn verdict_for_remote(
     server_read: bool,
     server_starred: bool,
 ) -> Verdict {
-    derive_verdict(engine, source_id, group_id, source_url, title, merged_raw, author, url, server_read, server_starred)
+    derive_verdict(
+        engine,
+        source_id,
+        group_id,
+        source_url,
+        title,
+        merged_raw,
+        author,
+        url,
+        server_read,
+        server_starred,
+    )
 }
 
 #[cfg(test)]
@@ -187,7 +202,11 @@ mod tests {
         assert_eq!(snippet_of(&long_text).len(), 200);
     }
 
-    fn mem_engine(pattern: &str, target: RuleTargetField, action: RuleActionType) -> (rusqlite::Connection, RuleEngine) {
+    fn mem_engine(
+        pattern: &str,
+        target: RuleTargetField,
+        action: RuleActionType,
+    ) -> (rusqlite::Connection, RuleEngine) {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
         crate::db::create_rule(
@@ -239,10 +258,24 @@ mod tests {
         );
         // 那么：均为全 false（无行状态变更、无通知）
         for v in [quiet, missing] {
-            assert!(!v.has_been_read && !v.starred && !v.hidden && !v.notify, "quiet verdict: {v:?}");
+            assert!(
+                !v.has_been_read && !v.starred && !v.hidden && !v.notify,
+                "quiet verdict: {v:?}"
+            );
         }
         // 当：远端路由以 quiet 叠加服务端状态
-        let keep = verdict_for_remote(Some(&engine), 1, None, "https://s.example", "t", "plain", None, None, true, true);
+        let keep = verdict_for_remote(
+            Some(&engine),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "plain",
+            None,
+            None,
+            true,
+            true,
+        );
         // 那么：服务端状态原样保持
         assert!(keep.has_been_read && keep.starred && !keep.hidden && !keep.notify);
     }
@@ -270,8 +303,11 @@ mod tests {
         assert!(v.has_been_read);
 
         // HTML 标签应被剥离后再匹配。
-        let (_conn2, engine2) =
-            mem_engine("hello world", RuleTargetField::Content, RuleActionType::Hide);
+        let (_conn2, engine2) = mem_engine(
+            "hello world",
+            RuleTargetField::Content,
+            RuleActionType::Hide,
+        );
         let v2 = verdict_for_local(
             Some(&engine2),
             1,
@@ -292,13 +328,48 @@ mod tests {
     #[test]
     fn verdict_parity_split_keyword_three_routes_mark_read() {
         // 给定：正文规则 `alpha beta`（Content 域，标记已读）
-        let (_conn, engine) = mem_engine("alpha beta", RuleTargetField::Content, RuleActionType::MarkRead);
+        let (_conn, engine) = mem_engine(
+            "alpha beta",
+            RuleTargetField::Content,
+            RuleActionType::MarkRead,
+        );
         let engine_opt = Some(&engine);
         // 当：三路分别以各自归一化文本求裁决
         // feed 路：双源原文；sync 路：上游合并体原文；backfill 路：DB 行双源走同一本地路由
-        let feed = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>alpha</p>"), Some("beta"), None, None);
-        let sync = verdict_for_remote(engine_opt, 1, None, "https://s.example", "t", "<p>alpha</p> beta", None, None, false, false);
-        let backfill = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>alpha</p>"), Some("beta"), None, None);
+        let feed = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("<p>alpha</p>"),
+            Some("beta"),
+            None,
+            None,
+        );
+        let sync = verdict_for_remote(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "<p>alpha</p> beta",
+            None,
+            None,
+            false,
+            false,
+        );
+        let backfill = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("<p>alpha</p>"),
+            Some("beta"),
+            None,
+            None,
+        );
         // 那么：三路皆 mark_read（has_been_read 置位、无隐藏无星标）
         for v in [feed, sync, backfill] {
             assert!(v.has_been_read, "split keyword should mark read: {v:?}");
@@ -310,12 +381,47 @@ mod tests {
     #[test]
     fn verdict_parity_summary_only_hits() {
         // 给定：仅摘要含关键词的规则
-        let (_conn, engine) = mem_engine("beta-only-xyz", RuleTargetField::Content, RuleActionType::MarkRead);
+        let (_conn, engine) = mem_engine(
+            "beta-only-xyz",
+            RuleTargetField::Content,
+            RuleActionType::MarkRead,
+        );
         let engine_opt = Some(&engine);
         // 当：正文不含关键词的三路裁决
-        let feed = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>plain</p>"), Some("beta-only-xyz here"), None, None);
-        let sync = verdict_for_remote(engine_opt, 1, None, "https://s.example", "t", "<p>plain</p> beta-only-xyz here", None, None, false, false);
-        let backfill = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("<p>plain</p>"), Some("beta-only-xyz here"), None, None);
+        let feed = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("<p>plain</p>"),
+            Some("beta-only-xyz here"),
+            None,
+            None,
+        );
+        let sync = verdict_for_remote(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "<p>plain</p> beta-only-xyz here",
+            None,
+            None,
+            false,
+            false,
+        );
+        let backfill = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("<p>plain</p>"),
+            Some("beta-only-xyz here"),
+            None,
+            None,
+        );
         // 那么：三路皆已读（summary 信号未丢失）
         for v in [feed, sync, backfill] {
             assert!(v.has_been_read, "summary-only should hit: {v:?}");
@@ -326,12 +432,47 @@ mod tests {
     #[test]
     fn verdict_parity_hide_folds_to_read_three_routes() {
         // 给定：隐藏规则
-        let (_conn, engine) = mem_engine("secret-hide-xyz", RuleTargetField::Content, RuleActionType::Hide);
+        let (_conn, engine) = mem_engine(
+            "secret-hide-xyz",
+            RuleTargetField::Content,
+            RuleActionType::Hide,
+        );
         let engine_opt = Some(&engine);
         // 当：三路裁决
-        let feed = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("secret-hide-xyz body"), Some("extra"), None, None);
-        let sync = verdict_for_remote(engine_opt, 1, None, "https://s.example", "t", "secret-hide-xyz body", None, None, false, false);
-        let backfill = verdict_for_local(engine_opt, 1, None, "https://s.example", "t", Some("secret-hide-xyz body"), Some("extra"), None, None);
+        let feed = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("secret-hide-xyz body"),
+            Some("extra"),
+            None,
+            None,
+        );
+        let sync = verdict_for_remote(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "secret-hide-xyz body",
+            None,
+            None,
+            false,
+            false,
+        );
+        let backfill = verdict_for_local(
+            engine_opt,
+            1,
+            None,
+            "https://s.example",
+            "t",
+            Some("secret-hide-xyz body"),
+            Some("extra"),
+            None,
+            None,
+        );
         // 那么：三路 hidden && has_been_read（唯一折叠点生效）
         for v in [feed, sync, backfill] {
             assert!(v.hidden && v.has_been_read, "hide must fold to read: {v:?}");
@@ -346,21 +487,59 @@ mod tests {
         crate::db::migrate_for_tests(&conn).unwrap();
         let quiet = RuleEngine::load(&conn).unwrap();
         assert!(quiet.is_empty());
-        let (_c2, hide_engine) = mem_engine("hide-me", RuleTargetField::Content, RuleActionType::Hide);
-        let (_c3, notify_engine) = mem_engine("notify-me", RuleTargetField::Content, RuleActionType::Notify);
+        let (_c2, hide_engine) =
+            mem_engine("hide-me", RuleTargetField::Content, RuleActionType::Hide);
+        let (_c3, notify_engine) = mem_engine(
+            "notify-me",
+            RuleTargetField::Content,
+            RuleActionType::Notify,
+        );
 
         // 当：服务端已读/加星 + quiet 规则
-        let keep = verdict_for_remote(Some(&quiet), 1, None, "https://s.example", "t", "plain", None, None, true, true);
+        let keep = verdict_for_remote(
+            Some(&quiet),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "plain",
+            None,
+            None,
+            true,
+            true,
+        );
         // 那么：服务端状态原样保持，无隐藏无通知
         assert!(keep.has_been_read && keep.starred && !keep.hidden && !keep.notify);
 
         // 当：服务端未读 + hide 命中
-        let hid = verdict_for_remote(Some(&hide_engine), 1, None, "https://s.example", "t", "hide-me body", None, None, false, false);
+        let hid = verdict_for_remote(
+            Some(&hide_engine),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "hide-me body",
+            None,
+            None,
+            false,
+            false,
+        );
         // 那么：隐藏置位且折叠为已读
         assert!(hid.hidden && hid.has_been_read);
 
         // 当：服务端未读 + 仅 notify 命中
-        let only = verdict_for_remote(Some(&notify_engine), 1, None, "https://s.example", "t", "notify-me body", None, None, false, false);
+        let only = verdict_for_remote(
+            Some(&notify_engine),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "notify-me body",
+            None,
+            None,
+            false,
+            false,
+        );
         // 那么：仅 notify，不改变行状态
         assert!(only.notify && !only.has_been_read && !only.hidden && !only.starred);
     }
@@ -417,7 +596,14 @@ mod tests {
         .unwrap();
         assert!(!second);
         // 那么：hidden 单调保持 1，read/star 跟随第二次 LWW
-        let row = crate::db::get_items(&conn, &crate::models::GetItemsParams { filter: Some(3), ..Default::default() }).unwrap();
+        let row = crate::db::get_items(
+            &conn,
+            &crate::models::GetItemsParams {
+                filter: Some(3),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(row.len(), 1, "hidden must stay 1 (monotonic)");
         assert!(row[0].hidden);
         assert!(!row[0].has_been_read, "read follows LWW");

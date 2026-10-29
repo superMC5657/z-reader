@@ -254,7 +254,10 @@ pub fn redact(msg: &str) -> String {
 }
 
 fn is_value_delim(c: u8) -> bool {
-    matches!(c, b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'\'' | b',' | b';' | b'&')
+    matches!(
+        c,
+        b' ' | b'\t' | b'\n' | b'\r' | b'"' | b'\'' | b',' | b';' | b'&'
+    )
 }
 
 /// 在字节偏移量 `at` 处进行不区分大小写的 `key = value` / `key: value` 匹配；
@@ -283,8 +286,7 @@ fn match_pair_at(msg: &str, at: usize, keys: &[&str]) -> Option<usize> {
             }
             if j < bytes.len() && (bytes[j] == b'=' || bytes[j] == b':') {
                 j += 1;
-                while j < bytes.len()
-                    && (bytes[j] == b' ' || bytes[j] == b'=' || bytes[j] == b':')
+                while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'=' || bytes[j] == b':')
                 {
                     j += 1;
                 }
@@ -344,9 +346,15 @@ mod tests {
         assert_eq!(parse_level("warn"), Some(log::LevelFilter::Warn));
         assert_eq!(parse_level("error"), Some(log::LevelFilter::Error));
         assert_eq!(parse_level("off"), Some(log::LevelFilter::Off));
-        assert_eq!(parse_level("zreader_lib=debug"), Some(log::LevelFilter::Debug));
+        assert_eq!(
+            parse_level("zreader_lib=debug"),
+            Some(log::LevelFilter::Debug)
+        );
         assert_eq!(parse_level("nope"), None);
-        assert_eq!(level_from_env("ZREADER_LOG_DEFINITELY_UNSET", log::LevelFilter::Info), log::LevelFilter::Info);
+        assert_eq!(
+            level_from_env("ZREADER_LOG_DEFINITELY_UNSET", log::LevelFilter::Info),
+            log::LevelFilter::Info
+        );
     }
     #[test]
     fn redact_masks_password_and_token_pairs() {
@@ -402,7 +410,8 @@ mod tests {
     #[test]
     fn redact_multibyte_utf8_does_not_panic() {
         // 包含中文字符与引号的用户交互日志精确测试
-        let msg1 = r#"Select article "少数派年度征文：从效率工具到生活方式" [Feed: "少数派", id=24]"#;
+        let msg1 =
+            r#"Select article "少数派年度征文：从效率工具到生活方式" [Feed: "少数派", id=24]"#;
         let got1 = redact(msg1);
         assert_eq!(got1, msg1);
 

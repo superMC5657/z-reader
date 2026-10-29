@@ -12,11 +12,19 @@ pub struct QueueEntry {
 
 /// 为每篇文章加入一条操作队列记录，跳过没有远端 ID 的文章。
 /// 返回入队的操作条数。
-pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAction) -> Result<usize, String> {
+pub fn enqueue_item_actions(
+    conn: &Connection,
+    item_ids: &[i64],
+    action: SyncAction,
+) -> Result<usize, String> {
     let mut n = 0usize;
     for id in item_ids {
         let remote: Option<String> = conn
-            .query_row("SELECT remote_id FROM items WHERE id=?1", params![id], |row| row.get(0))
+            .query_row(
+                "SELECT remote_id FROM items WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
         if let Some(target) = remote.filter(|t| !t.is_empty()) {
             conn.execute(
@@ -31,7 +39,11 @@ pub fn enqueue_item_actions(conn: &Connection, item_ids: &[i64], action: SyncAct
 }
 
 /// 入队一个流级别的操作（例如对整个 feed / label / reading-list 全部标记为已读）。
-pub fn enqueue_stream_action(conn: &Connection, action: SyncAction, target: &str) -> Result<(), String> {
+pub fn enqueue_stream_action(
+    conn: &Connection,
+    action: SyncAction,
+    target: &str,
+) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sync_queue (action, target, created_at) VALUES (?1, ?2, ?3)",
         params![action, target, crate::models::now_ts()],
@@ -53,7 +65,8 @@ pub fn queue_fetch(conn: &Connection, limit: i64) -> Result<Vec<QueueEntry>, Str
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn queue_delete(conn: &Connection, ids: &[i64]) -> Result<(), String> {

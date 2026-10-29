@@ -29,7 +29,11 @@ pub fn normalize_feed_url(raw: &str) -> String {
 
 pub fn import(conn: &rusqlite::Connection, text: &str) -> Result<ImportResult, String> {
     let doc = opml::OPML::from_str(text).map_err(|e| format!("invalid OPML: {e}"))?;
-    let mut result = ImportResult { groups_added: 0, sources_added: 0, sources_existing: 0 };
+    let mut result = ImportResult {
+        groups_added: 0,
+        sources_added: 0,
+        sources_existing: 0,
+    };
     // 用已规范化的既有订阅源 URL 初始化去重集合（单纯的精确匹配
     // 可能会遗漏相同订阅源的 http/https 或带末尾斜杠的变体）。
     let mut seen: HashSet<String> = db::get_sources(conn)
@@ -70,7 +74,9 @@ fn walk_outline(
         parent_group
     } else {
         // 复用共享的建组辅助：已存在则直接复用，仅在新建时计数（排重语义不变）。
-        let already_exists = db::get_groups(conn)?.iter().any(|g| g.name.as_str() == name);
+        let already_exists = db::get_groups(conn)?
+            .iter()
+            .any(|g| g.name.as_str() == name);
         let g = db::find_or_create_group(conn, name)?;
         if !already_exists {
             result.groups_added += 1;
@@ -96,7 +102,11 @@ fn import_source(
         result.sources_existing += 1;
         return Ok(());
     }
-    let title = if title.trim().is_empty() { xml_url.trim() } else { title.trim() };
+    let title = if title.trim().is_empty() {
+        xml_url.trim()
+    } else {
+        title.trim()
+    };
     db::insert_source(conn, xml_url.trim(), title, None, group_id)?;
     result.sources_added += 1;
     Ok(())
@@ -107,10 +117,16 @@ pub fn export(conn: &rusqlite::Connection) -> Result<String, String> {
     let sources = db::get_sources(conn)?;
 
     let mut doc = opml::OPML::default();
-    let head = opml::Head { title: Some("ZReader subscriptions".into()), ..Default::default() };
+    let head = opml::Head {
+        title: Some("ZReader subscriptions".into()),
+        ..Default::default()
+    };
     doc.head = Some(head);
     for g in &groups {
-        let mut folder = Outline { text: g.name.clone(), ..Default::default() };
+        let mut folder = Outline {
+            text: g.name.clone(),
+            ..Default::default()
+        };
         for s in sources.iter().filter(|s| s.group_id == Some(g.id)) {
             folder.outlines.push(feed_outline(&s.title, &s.url));
         }
@@ -179,7 +195,10 @@ mod tests {
         assert_eq!(go.group_id, Some(go_group.id));
         // 嵌套订阅源位于顶层文件夹下一级，未被错误扁平化。
         let tech_group = groups.iter().find(|g| g.name == "Tech").unwrap();
-        let rust = sources.iter().find(|s| s.url == "https://a.example/feed.xml").unwrap();
+        let rust = sources
+            .iter()
+            .find(|s| s.url == "https://a.example/feed.xml")
+            .unwrap();
         assert_eq!(rust.group_id, Some(tech_group.id));
     }
 }

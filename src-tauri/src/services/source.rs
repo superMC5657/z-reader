@@ -112,7 +112,9 @@ pub async fn store_parsed(
         favicon_dir,
         allow_third_party,
     } = store;
-    let FetchSpec { client, url, cycle, .. } = net;
+    let FetchSpec {
+        client, url, cycle, ..
+    } = net;
     // 日志仅输出主机名：完整 URL 可能包含令牌或查询参数等机密信息。
     let (host, _) = crate::net::sanitize_url(url);
     let mut out = SourceRefreshOutcome::default();
@@ -172,11 +174,8 @@ pub async fn store_parsed(
             .await
             {
                 let conn = db.lock().await;
-                let _ = crate::db::set_source_favicon(
-                    &conn,
-                    source_id,
-                    fav.to_string_lossy().as_ref(),
-                );
+                let _ =
+                    crate::db::set_source_favicon(&conn, source_id, fav.to_string_lossy().as_ref());
             }
         }
     }
@@ -228,7 +227,14 @@ pub async fn refresh_single_source(
 
     // 1. 抓取与解析（纯网络阶段，绝不持有数据库锁）。
     let fetch_start = std::time::Instant::now();
-    let parsed = match fetch_stage(FetchSpec { client, url, cycle, source_id }).await {
+    let parsed = match fetch_stage(FetchSpec {
+        client,
+        url,
+        cycle,
+        source_id,
+    })
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             out.failed = true;
@@ -248,8 +254,21 @@ pub async fn refresh_single_source(
 
     // 2. 存库段（store→标状态→补图标）。
     store_parsed(
-        StoreSpec { db, engine, source_id, group_id, favicon, favicon_dir, allow_third_party },
-        FetchSpec { client, url, cycle, source_id },
+        StoreSpec {
+            db,
+            engine,
+            source_id,
+            group_id,
+            favicon,
+            favicon_dir,
+            allow_third_party,
+        },
+        FetchSpec {
+            client,
+            url,
+            cycle,
+            source_id,
+        },
         &parsed,
         fetch_ms,
     )
@@ -272,19 +291,26 @@ pub struct RefreshTarget {
 }
 
 /// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务单元，保持输入顺序。
-pub fn build_targets(
-    sources: &[crate::models::Source],
-    ids: Option<&[i64]>,
-) -> Vec<RefreshTarget> {
+pub fn build_targets(sources: &[crate::models::Source], ids: Option<&[i64]>) -> Vec<RefreshTarget> {
     match ids {
         Some(v) => sources
             .iter()
             .filter(|s| v.contains(&s.id))
-            .map(|s| RefreshTarget { id: s.id, group_id: s.group_id, url: s.url.clone(), favicon: s.favicon.clone() })
+            .map(|s| RefreshTarget {
+                id: s.id,
+                group_id: s.group_id,
+                url: s.url.clone(),
+                favicon: s.favicon.clone(),
+            })
             .collect(),
         None => sources
             .iter()
-            .map(|s| RefreshTarget { id: s.id, group_id: s.group_id, url: s.url.clone(), favicon: s.favicon.clone() })
+            .map(|s| RefreshTarget {
+                id: s.id,
+                group_id: s.group_id,
+                url: s.url.clone(),
+                favicon: s.favicon.clone(),
+            })
             .collect(),
     }
 }
@@ -327,12 +353,24 @@ pub fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String 
     if !titles.is_empty() {
         let preview: Vec<String> = titles.iter().take(3).cloned().collect();
         let rest = titles.len() - preview.len();
-        let list = if zh { preview.join("、") } else { preview.join(", ") };
+        let list = if zh {
+            preview.join("、")
+        } else {
+            preview.join(", ")
+        };
         body = if zh {
-            let more = if rest > 0 { format!(" 等 {rest} 篇") } else { String::new() };
+            let more = if rest > 0 {
+                format!(" 等 {rest} 篇")
+            } else {
+                String::new()
+            };
             format!("命中通知规则：{list}{more}")
         } else {
-            let more = if rest > 0 { format!(" and {rest} more") } else { String::new() };
+            let more = if rest > 0 {
+                format!(" and {rest} more")
+            } else {
+                String::new()
+            };
             format!("Notify rules matched: {list}{more}")
         };
     }
@@ -342,11 +380,7 @@ pub fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String 
 /// 刷新路径的保留策略 Seam：阈值语义固定为 200（删除数严格大于 200 时执行 VACUUM）。
 /// 调用方（`lib.rs` 周期收尾、`commands.rs::sync_now`）经由此 Seam 进入存储服务，
 /// 不再各自硬编码阈值；手动立即清理（阈值 0）不经此 Seam，直连存储服务。
-pub fn apply_refresh_retention(
-    conn: &rusqlite::Connection,
-    days: u32,
-    max_items: u32,
-) -> usize {
+pub fn apply_refresh_retention(conn: &rusqlite::Connection, days: u32, max_items: u32) -> usize {
     crate::services::storage::run_retention_policy(conn, days, max_items, 200)
 }
 
@@ -366,7 +400,10 @@ mod tests {
     #[test]
     fn promote_store_lifts_inserted_and_notified() {
         // 给定：feed 存库结果
-        let s = crate::feed::StoreOutcome { inserted: 2, notified: vec!["a".into()] };
+        let s = crate::feed::StoreOutcome {
+            inserted: 2,
+            notified: vec!["a".into()],
+        };
         // 当：纯提升时
         let out = promote_store(&s);
         // 那么：成功态原样提升，无失败标记
@@ -384,7 +421,11 @@ mod tests {
         let s = crate::db::insert_source(&conn, "https://s.example/feed", "S", None, None).unwrap();
         let source_id = s.id;
         for (name, pattern, action) in [
-            ("split", "alpha beta", crate::models::RuleActionType::MarkRead),
+            (
+                "split",
+                "alpha beta",
+                crate::models::RuleActionType::MarkRead,
+            ),
             ("ping", "notify-xyz", crate::models::RuleActionType::Notify),
         ] {
             crate::db::create_rule(
@@ -409,7 +450,12 @@ mod tests {
         <item><guid>g1</guid><title>First</title><link>https://s.example/1</link><description>beta and notify-xyz</description><content:encoded><![CDATA[<p>alpha</p>]]></content:encoded></item>
         <item><guid>g2</guid><title>Second</title><link>https://s.example/2</link><content:encoded><![CDATA[<p>plain</p>]]></content:encoded></item>
         </channel></rss>"#;
-        let parsed = crate::feed::parse_feed_data(xml.as_bytes(), Some("https://s.example/feed"), "https://s.example/feed").unwrap();
+        let parsed = crate::feed::parse_feed_data(
+            xml.as_bytes(),
+            Some("https://s.example/feed"),
+            "https://s.example/feed",
+        )
+        .unwrap();
         assert_eq!(parsed.entries.len(), 2);
         // g1 应为双源（content+summary 均非空），g2 缺 summary
         let g1 = parsed.entries.iter().find(|e| e.guid == "g1").unwrap();
@@ -421,8 +467,21 @@ mod tests {
         let db = tokio::sync::Mutex::new(conn);
         let client = reqwest::Client::new();
         let out1 = tauri::async_runtime::block_on(store_parsed(
-            StoreSpec { db: &db, engine: Some(&engine), source_id, group_id: None, favicon: None, favicon_dir: None, allow_third_party: false },
-            FetchSpec { client: &client, url: "https://s.example/feed", cycle: "", source_id },
+            StoreSpec {
+                db: &db,
+                engine: Some(&engine),
+                source_id,
+                group_id: None,
+                favicon: None,
+                favicon_dir: None,
+                allow_third_party: false,
+            },
+            FetchSpec {
+                client: &client,
+                url: "https://s.example/feed",
+                cycle: "",
+                source_id,
+            },
             &parsed,
             0,
         ))
@@ -434,15 +493,38 @@ mod tests {
         // 与 #1 verdict 一致：g1 拆分关键词已读，g2 未读
         {
             let guard = db.try_lock().expect("lock");
-            let first: bool = guard.query_row("SELECT has_been_read FROM items WHERE guid='g1'", [], |r| r.get::<_, i64>(0)).unwrap() != 0;
+            let first: bool = guard
+                .query_row("SELECT has_been_read FROM items WHERE guid='g1'", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap()
+                != 0;
             assert!(first, "g1 split keyword should mark read per verdict");
-            let second: bool = guard.query_row("SELECT has_been_read FROM items WHERE guid='g2'", [], |r| r.get::<_, i64>(0)).unwrap() != 0;
+            let second: bool = guard
+                .query_row("SELECT has_been_read FROM items WHERE guid='g2'", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap()
+                != 0;
             assert!(!second, "g2 should stay unread");
         }
         // 当：二次重入同一 ParsedFeed 时
         let out2 = tauri::async_runtime::block_on(store_parsed(
-            StoreSpec { db: &db, engine: Some(&engine), source_id, group_id: None, favicon: None, favicon_dir: None, allow_third_party: false },
-            FetchSpec { client: &client, url: "https://s.example/feed", cycle: "", source_id },
+            StoreSpec {
+                db: &db,
+                engine: Some(&engine),
+                source_id,
+                group_id: None,
+                favicon: None,
+                favicon_dir: None,
+                allow_third_party: false,
+            },
+            FetchSpec {
+                client: &client,
+                url: "https://s.example/feed",
+                cycle: "",
+                source_id,
+            },
             &parsed,
             0,
         ))

@@ -48,33 +48,61 @@ pub async fn fetch_and_parse_with(
     cycle: &str,
     source_id: Option<i64>,
 ) -> Result<ParsedFeed, String> {
-    let req = client
-        .get(url)
-        .timeout(std::time::Duration::from_secs(30));
-    let bytes =
-        crate::net::fetch_bytes(crate::net::RequestContext::feed(cycle, source_id), "GET", url, req)
-            .await?;
+    let req = client.get(url).timeout(std::time::Duration::from_secs(30));
+    let bytes = crate::net::fetch_bytes(
+        crate::net::RequestContext::feed(cycle, source_id),
+        "GET",
+        url,
+        req,
+    )
+    .await?;
     parse_feed_data(&bytes, Some(url), url)
 }
 
-pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str) -> Result<ParsedFeed, String> {
+pub fn parse_feed_data(
+    bytes: &[u8],
+    base_url: Option<&str>,
+    original_url: &str,
+) -> Result<ParsedFeed, String> {
     let mut builder = parser::Builder::new();
     if let Some(base) = base_url {
         builder = builder.base_uri(Some(base));
     }
-    let feed = builder.build().parse(bytes).map_err(|e| format!("parse failed: {e}"))?;
+    let feed = builder
+        .build()
+        .parse(bytes)
+        .map_err(|e| format!("parse failed: {e}"))?;
 
-    let title = feed.title.as_ref().map(|t| t.content.clone()).unwrap_or_default();
+    let title = feed
+        .title
+        .as_ref()
+        .map(|t| t.content.clone())
+        .unwrap_or_default();
     let description = feed.description.as_ref().map(|d| d.content.clone());
-    let icon_url = feed.icon.as_ref().map(|i| i.uri.clone())
+    let icon_url = feed
+        .icon
+        .as_ref()
+        .map(|i| i.uri.clone())
         .or_else(|| feed.logo.as_ref().map(|l| l.uri.clone()));
-    let site_url = feed.links.iter().find(|l| l.rel.as_deref() != Some("self")).map(|l| l.href.clone())
+    let site_url = feed
+        .links
+        .iter()
+        .find(|l| l.rel.as_deref() != Some("self"))
+        .map(|l| l.href.clone())
         .or_else(|| feed.links.first().map(|l| l.href.clone()));
 
     let mut entries = Vec::with_capacity(feed.entries.len());
     for entry in &feed.entries {
         let guid = if entry.id.is_empty() {
-            format!("{}#{}", original_url, entry.title.as_ref().map(|t| t.content.as_str()).unwrap_or(""))
+            format!(
+                "{}#{}",
+                original_url,
+                entry
+                    .title
+                    .as_ref()
+                    .map(|t| t.content.as_str())
+                    .unwrap_or("")
+            )
         } else {
             entry.id.clone()
         };
@@ -134,7 +162,13 @@ pub fn parse_feed_data(bytes: &[u8], base_url: Option<&str>, original_url: &str)
         });
     }
 
-    Ok(ParsedFeed { title, description, icon_url, site_url, entries })
+    Ok(ParsedFeed {
+        title,
+        description,
+        icon_url,
+        site_url,
+        entries,
+    })
 }
 
 /// 仅数据库阶段：插入已解析条目，跳过已存在的 GUID。在插入前对新条目
@@ -146,7 +180,10 @@ pub fn store(
     parsed: &ParsedFeed,
     engine: Option<&crate::rules::RuleEngine>,
 ) -> Result<StoreOutcome, String> {
-    let mut out = StoreOutcome { inserted: 0, notified: Vec::new() };
+    let mut out = StoreOutcome {
+        inserted: 0,
+        notified: Vec::new(),
+    };
     for e in &parsed.entries {
         // 双路共用 Interface：本地路由经 Verdict 模块一次裁决，直接收 has_been_read。
         let verdict = crate::services::article::verdict_for_local(
@@ -263,7 +300,9 @@ pub async fn fetch_favicon_with(
         // 第三方回退会将订阅域名暴露给 Google/DuckDuckGo；
         // 仅在用户显式开启时才纳入候选。
         if allow_third_party && !host.is_empty() {
-            candidates.push(format!("https://www.google.com/s2/favicons?domain={host}&sz=64"));
+            candidates.push(format!(
+                "https://www.google.com/s2/favicons?domain={host}&sz=64"
+            ));
             candidates.push(format!("https://icons.duckduckgo.com/ip2/{host}.ico"));
         }
     }
@@ -277,7 +316,9 @@ pub async fn fetch_favicon_with(
     }
 
     for candidate in &candidates {
-        let req = client.get(candidate).timeout(std::time::Duration::from_secs(8));
+        let req = client
+            .get(candidate)
+            .timeout(std::time::Duration::from_secs(8));
         if let Ok(resp) = crate::net::send_logged(
             crate::net::RequestContext::favicon(cycle, source_id),
             "GET",
@@ -315,12 +356,24 @@ mod tests {
     fn test_sniff_image_ext() {
         // 给定：规范的魔数文件头
         // 当/那么：识别各有效图片格式，拒绝 SVG 和无效垃圾数据
-        assert_eq!(sniff_image_ext(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00]), Some("png"));
-        assert_eq!(sniff_image_ext(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]), Some("jpg"));
+        assert_eq!(
+            sniff_image_ext(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00]),
+            Some("png")
+        );
+        assert_eq!(
+            sniff_image_ext(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]),
+            Some("jpg")
+        );
         assert_eq!(sniff_image_ext(b"GIF89a\x01\x00"), Some("gif"));
-        assert_eq!(sniff_image_ext(&[0x00, 0x00, 0x01, 0x00, 0x01]), Some("ico"));
+        assert_eq!(
+            sniff_image_ext(&[0x00, 0x00, 0x01, 0x00, 0x01]),
+            Some("ico")
+        );
         assert_eq!(sniff_image_ext(b"RIFF\x00\x00\x00\x00WEBP"), Some("webp"));
-        assert_eq!(sniff_image_ext(b"<svg xmlns='http://www.w3.org/2000/svg'>"), None);
+        assert_eq!(
+            sniff_image_ext(b"<svg xmlns='http://www.w3.org/2000/svg'>"),
+            None
+        );
         assert_eq!(sniff_image_ext(b"<html>not an image</html>"), None);
         assert_eq!(sniff_image_ext(&[]), None);
     }
@@ -341,10 +394,24 @@ mod tests {
             </entry>
         </feed>"#;
 
-        let parsed = parse_feed_data(xml.as_bytes(), Some("https://example.com/blog/feed.xml"), "https://example.com/blog/feed.xml").expect("parse atom");
-        assert_eq!(parsed.site_url.as_deref(), Some("https://example.com/index.html"));
-        assert_eq!(parsed.icon_url.as_deref(), Some("https://example.com/favicon.ico"));
+        let parsed = parse_feed_data(
+            xml.as_bytes(),
+            Some("https://example.com/blog/feed.xml"),
+            "https://example.com/blog/feed.xml",
+        )
+        .expect("parse atom");
+        assert_eq!(
+            parsed.site_url.as_deref(),
+            Some("https://example.com/index.html")
+        );
+        assert_eq!(
+            parsed.icon_url.as_deref(),
+            Some("https://example.com/favicon.ico")
+        );
         assert_eq!(parsed.entries.len(), 1);
-        assert_eq!(parsed.entries[0].url.as_deref(), Some("https://example.com/posts/1.html"));
+        assert_eq!(
+            parsed.entries[0].url.as_deref(),
+            Some("https://example.com/posts/1.html")
+        );
     }
 }

@@ -23,7 +23,11 @@ pub struct TrayHandles {
 pub struct TrayState(pub Mutex<Option<TrayHandles>>);
 
 fn label(zh: bool, zh_text: &str, en_text: &str) -> String {
-    if zh { zh_text.to_string() } else { en_text.to_string() }
+    if zh {
+        zh_text.to_string()
+    } else {
+        en_text.to_string()
+    }
 }
 
 fn locale_is_zh(app: &AppHandle) -> bool {
@@ -35,16 +39,49 @@ fn locale_is_zh(app: &AppHandle) -> bool {
 pub fn create_tray(app: &AppHandle) -> Result<(), tauri::Error> {
     let zh = locale_is_zh(app);
 
-    let unread_item = MenuItem::with_id(app, ID_UNREAD, label(zh, "未读 0 篇", "0 unread"), false, None::<&str>)?;
-    let refresh_item = MenuItem::with_id(app, ID_REFRESH, label(zh, "立即刷新所有订阅", "Refresh All"), true, None::<&str>)?;
-    let mark_all_item = MenuItem::with_id(app, ID_MARK_ALL, label(zh, "全部标记已读", "Mark All as Read"), true, None::<&str>)?;
-    let show_item = MenuItem::with_id(app, ID_SHOW, label(zh, "显示主窗口", "Show ZReader"), true, None::<&str>)?;
+    let unread_item = MenuItem::with_id(
+        app,
+        ID_UNREAD,
+        label(zh, "未读 0 篇", "0 unread"),
+        false,
+        None::<&str>,
+    )?;
+    let refresh_item = MenuItem::with_id(
+        app,
+        ID_REFRESH,
+        label(zh, "立即刷新所有订阅", "Refresh All"),
+        true,
+        None::<&str>,
+    )?;
+    let mark_all_item = MenuItem::with_id(
+        app,
+        ID_MARK_ALL,
+        label(zh, "全部标记已读", "Mark All as Read"),
+        true,
+        None::<&str>,
+    )?;
+    let show_item = MenuItem::with_id(
+        app,
+        ID_SHOW,
+        label(zh, "显示主窗口", "Show ZReader"),
+        true,
+        None::<&str>,
+    )?;
     let quit_item = MenuItem::with_id(app, ID_QUIT, label(zh, "退出", "Quit"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&unread_item, &refresh_item, &mark_all_item, &show_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &unread_item,
+            &refresh_item,
+            &mark_all_item,
+            &show_item,
+            &quit_item,
+        ],
+    )?;
 
-    let base_icon = app.default_window_icon().map(|img| {
-        tauri::image::Image::new_owned(img.rgba().to_vec(), img.width(), img.height())
-    });
+    let base_icon = app
+        .default_window_icon()
+        .map(|img| tauri::image::Image::new_owned(img.rgba().to_vec(), img.width(), img.height()));
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
@@ -120,35 +157,55 @@ pub async fn update_tray(app: &AppHandle) {
         match crate::db::total_unread(&conn) {
             Ok(n) => n,
             Err(e) => {
-                log::warn!("tray unread query failed reason {}", crate::utils::short_reason(&e));
+                log::warn!(
+                    "tray unread query failed reason {}",
+                    crate::utils::short_reason(&e)
+                );
                 0
             }
         }
     };
     let mut handles = guard.0.lock().expect("tray state lock");
-    let Some(handles) = handles.as_mut() else { return };
+    let Some(handles) = handles.as_mut() else {
+        return;
+    };
     let zh = locale_is_zh(app);
     if let Err(e) = handles.unread_item.set_text(label(
         zh,
         &format!("未读 {unread} 篇"),
         &format!("{unread} unread"),
     )) {
-        log::warn!("tray label update failed reason {}", crate::utils::short_reason(&e.to_string()));
+        log::warn!(
+            "tray label update failed reason {}",
+            crate::utils::short_reason(&e.to_string())
+        );
     }
     // 菜单标签在创建时已固定；重新设置它们以便语言切换（通过 save_settings 触发）能传播到托盘菜单。
     for (item, text) in [
-        (&handles.refresh_item, label(zh, "立即刷新所有订阅", "Refresh All")),
-        (&handles.mark_all_item, label(zh, "全部标记已读", "Mark All as Read")),
+        (
+            &handles.refresh_item,
+            label(zh, "立即刷新所有订阅", "Refresh All"),
+        ),
+        (
+            &handles.mark_all_item,
+            label(zh, "全部标记已读", "Mark All as Read"),
+        ),
         (&handles.show_item, label(zh, "显示主窗口", "Show ZReader")),
         (&handles.quit_item, label(zh, "退出", "Quit")),
     ] {
         if let Err(e) = item.set_text(text) {
-            log::warn!("tray label update failed reason {}", crate::utils::short_reason(&e.to_string()));
+            log::warn!(
+                "tray label update failed reason {}",
+                crate::utils::short_reason(&e.to_string())
+            );
         }
     }
     if let Some(base) = &handles.base_icon {
         if let Err(e) = handles.icon.set_icon(Some(with_badge(base, unread > 0))) {
-            log::warn!("tray icon update failed reason {}", crate::utils::short_reason(&e.to_string()));
+            log::warn!(
+                "tray icon update failed reason {}",
+                crate::utils::short_reason(&e.to_string())
+            );
         }
     }
 }

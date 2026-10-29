@@ -167,9 +167,13 @@ impl std::str::FromStr for RuleSourceScope {
         if s == "all" {
             Ok(RuleSourceScope::All)
         } else if let Some(id) = s.strip_prefix("source:") {
-            id.parse::<i64>().map(RuleSourceScope::Source).map_err(|e| e.to_string())
+            id.parse::<i64>()
+                .map(RuleSourceScope::Source)
+                .map_err(|e| e.to_string())
         } else if let Some(id) = s.strip_prefix("group:") {
-            id.parse::<i64>().map(RuleSourceScope::Group).map_err(|e| e.to_string())
+            id.parse::<i64>()
+                .map(RuleSourceScope::Group)
+                .map_err(|e| e.to_string())
         } else {
             Err(format!("invalid source_scope: {s}"))
         }

@@ -23,13 +23,15 @@ pub fn get_rules(conn: &Connection) -> Result<Vec<crate::models::Rule>, String> 
              FROM regex_rules ORDER BY id",
         )
         .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], row_to_rule)
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let rows = stmt.query_map([], row_to_rule).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub fn create_rule(conn: &Connection, r: &crate::models::RuleInput) -> Result<crate::models::Rule, String> {
+pub fn create_rule(
+    conn: &Connection,
+    r: &crate::models::RuleInput,
+) -> Result<crate::models::Rule, String> {
     conn.execute(
         "INSERT INTO regex_rules (name, pattern, target_field, action_type, is_case_sensitive, is_enabled, source_scope, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

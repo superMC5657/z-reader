@@ -99,10 +99,22 @@ mod tests {
 
     #[test]
     fn test_ensure_https_scheme() {
-        assert_eq!(ensure_https_scheme("example.com/rss"), "https://example.com/rss");
-        assert_eq!(ensure_https_scheme("  example.com  "), "https://example.com");
-        assert_eq!(ensure_https_scheme("http://example.com"), "http://example.com");
-        assert_eq!(ensure_https_scheme("https://example.com"), "https://example.com");
+        assert_eq!(
+            ensure_https_scheme("example.com/rss"),
+            "https://example.com/rss"
+        );
+        assert_eq!(
+            ensure_https_scheme("  example.com  "),
+            "https://example.com"
+        );
+        assert_eq!(
+            ensure_https_scheme("http://example.com"),
+            "http://example.com"
+        );
+        assert_eq!(
+            ensure_https_scheme("https://example.com"),
+            "https://example.com"
+        );
         assert_eq!(ensure_https_scheme("custom://feed"), "custom://feed");
     }
 

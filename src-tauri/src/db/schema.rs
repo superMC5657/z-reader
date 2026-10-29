@@ -119,7 +119,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             "#,
         )
         .map_err(|e| e.to_string())?;
-        conn.pragma_update(None, "user_version", CURRENT_VERSION).ok();
+        conn.pragma_update(None, "user_version", CURRENT_VERSION)
+            .ok();
         return Ok(());
     }
     if version < 2 {

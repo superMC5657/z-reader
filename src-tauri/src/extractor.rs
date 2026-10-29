@@ -12,9 +12,7 @@ pub async fn extract_from_url_with(
     link: &str,
     ctx: crate::net::RequestContext<'_>,
 ) -> Result<String, String> {
-    let req = client
-        .get(link)
-        .timeout(std::time::Duration::from_secs(30));
+    let req = client.get(link).timeout(std::time::Duration::from_secs(30));
     let html = crate::net::fetch_text(ctx, "GET", link, req).await?;
 
     let mut readability = dom_smoothie::Readability::new(html.as_str(), Some(link), None)

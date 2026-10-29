@@ -120,7 +120,13 @@ pub fn parse_subscriptions(body: &str) -> Result<Vec<GSubscription>, String> {
                     })
                 })
                 .unwrap_or((None, None));
-            Some(GSubscription { stream_id, title, url, category_id, category })
+            Some(GSubscription {
+                stream_id,
+                title,
+                url,
+                category_id,
+                category,
+            })
         })
         .collect())
 }
@@ -137,7 +143,10 @@ pub fn parse_item_ids(body: &str) -> Result<(Vec<String>, Option<String>), Strin
         .iter()
         .filter_map(|r| r.get("id").and_then(|i| i.as_str()).map(String::from))
         .collect();
-    let continuation = v.get("continuation").and_then(|c| c.as_str()).map(String::from);
+    let continuation = v
+        .get("continuation")
+        .and_then(|c| c.as_str())
+        .map(String::from);
     Ok((ids, continuation))
 }
 
@@ -158,7 +167,11 @@ pub fn parse_contents(body: &str) -> Result<Vec<GItem>, String> {
                 .and_then(|s| s.as_str())
                 .unwrap_or("")
                 .to_string();
-            let title = i.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let title = i
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
             let url = i
                 .get("canonical")
                 .and_then(|c| c.as_array())
@@ -306,7 +319,10 @@ pub async fn subscriptions_with(
     auth: &str,
     ctx: RequestContext<'_>,
 ) -> Result<Vec<GSubscription>, GReaderError> {
-    let url = format!("{}/reader/api/0/subscription/list?output=json", base_url(base));
+    let url = format!(
+        "{}/reader/api/0/subscription/list?output=json",
+        base_url(base)
+    );
     let text = read_authed(client, auth, &url, ctx).await?;
     parse_subscriptions(&text).map_err(GReaderError::Other)
 }
@@ -535,7 +551,10 @@ mod tests {
         assert_eq!(items[0].content, "<p>body text</p>");
         assert_eq!(items[0].author.as_deref(), Some("Alice"));
         // 十进制 ID 规范化为十六进制，并成功提取 content 格式的正文
-        assert_eq!(items[1].remote_id, format!("{:016x}", 1692932246948035500i64));
+        assert_eq!(
+            items[1].remote_id,
+            format!("{:016x}", 1692932246948035500i64)
+        );
         assert!(!items[1].read);
         assert!(items[1].starred);
         assert_eq!(items[1].content, "<p>content form</p>");

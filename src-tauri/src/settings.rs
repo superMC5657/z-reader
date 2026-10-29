@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("settings.json"))
 }
 
@@ -162,7 +159,10 @@ mod tests {
     fn clear_sync_secret_drops_password() {
         let path = temp_settings("clear");
         save(&path, &settings_with_secrets()).unwrap();
-        assert_eq!(load(&path).sync_account.as_ref().unwrap().password, "hunter2");
+        assert_eq!(
+            load(&path).sync_account.as_ref().unwrap().password,
+            "hunter2"
+        );
         clear_sync_secret(&path).unwrap();
         assert_eq!(load(&path).sync_account.as_ref().unwrap().password, "");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

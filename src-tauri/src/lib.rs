@@ -68,7 +68,10 @@ pub fn run() {
             });
 
             if let Err(e) = tray::create_tray(app.handle()) {
-                log::error!("tray create failed reason {}", crate::utils::short_reason(&e.to_string()));
+                log::error!(
+                    "tray create failed reason {}",
+                    crate::utils::short_reason(&e.to_string())
+                );
             }
 
             let handle = app.handle().clone();
@@ -139,7 +142,9 @@ async fn background_refresh(app: tauri::AppHandle) {
     let mut last_fetch = std::time::Instant::now();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        let Ok(path) = settings::settings_path(&app) else { continue };
+        let Ok(path) = settings::settings_path(&app) else {
+            continue;
+        };
         let s = settings::load(&path);
         if last_fetch.elapsed().as_secs() < s.fetch_interval.max(1) * 60 {
             continue;
@@ -189,9 +194,22 @@ async fn refresh_one_source(
     background: bool,
 ) -> SourceRefreshOutcome {
     use tauri::{Emitter, Manager};
-    let RefreshTask { id, group_id, url, favicon, cycle, client, engine, favicon_dir, allow_third_party } = task;
+    let RefreshTask {
+        id,
+        group_id,
+        url,
+        favicon,
+        cycle,
+        client,
+        engine,
+        favicon_dir,
+        allow_third_party,
+    } = task;
     if !background {
-        let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": false }));
+        let _ = app.emit(
+            "fetch-progress",
+            serde_json::json!({ "sourceId": id, "done": false }),
+        );
     }
     let state = app.state::<AppState>();
     let out = crate::services::source::refresh_single_source(
@@ -210,11 +228,22 @@ async fn refresh_one_source(
     )
     .await
     .unwrap_or_else(|e| {
-        log::warn!("feed refresh failed id={id} reason {}", crate::utils::short_reason(&e));
-        SourceRefreshOutcome { inserted: 0, notified: Vec::new(), failed: true, error_kind: Some("other".to_string()) }
+        log::warn!(
+            "feed refresh failed id={id} reason {}",
+            crate::utils::short_reason(&e)
+        );
+        SourceRefreshOutcome {
+            inserted: 0,
+            notified: Vec::new(),
+            failed: true,
+            error_kind: Some("other".to_string()),
+        }
     });
     if !background {
-        let _ = app.emit("fetch-progress", serde_json::json!({ "sourceId": id, "done": true }));
+        let _ = app.emit(
+            "fetch-progress",
+            serde_json::json!({ "sourceId": id, "done": true }),
+        );
     }
     out
 }
@@ -277,11 +306,21 @@ pub async fn refresh_all_sources(
     let mode = if background { "background" } else { "manual" };
     let cycle = crate::net::new_cycle();
     let cycle_start = std::time::Instant::now();
-    let (total_new, failures, notified, feed_count, fail_kinds) = if settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader") {
+    let (total_new, failures, notified, feed_count, fail_kinds) = if settings
+        .sync_account
+        .as_ref()
+        .is_some_and(|a| a.provider == "greader")
+    {
         log::info!("refresh start cycle={cycle} mode={mode} sync=true");
         let report = sync::run_with_cycle(&app, background, &cycle).await?;
         let kinds = report.fail_kinds.clone();
-        (report.new_items, report.failures, report.notified, report.subscription_count, kinds)
+        (
+            report.new_items,
+            report.failures,
+            report.notified,
+            report.subscription_count,
+            kinds,
+        )
     } else {
         let client = state.http_client();
         let engine = std::sync::Arc::new({
@@ -290,7 +329,10 @@ pub async fn refresh_all_sources(
                 Ok(e) => e,
                 Err(e) => {
                     let error_kind = crate::net::classify_error(&e);
-                    log::warn!("refresh rules load failed cycle={cycle} error_kind={error_kind} reason {}", crate::utils::short_reason(&e));
+                    log::warn!(
+                        "refresh rules load failed cycle={cycle} error_kind={error_kind} reason {}",
+                        crate::utils::short_reason(&e)
+                    );
                     return Err(e);
                 }
             }
@@ -335,14 +377,24 @@ pub async fn refresh_all_sources(
         let mut total_new = 0usize;
         let mut failures = 0usize;
         let mut notified: Vec<String> = Vec::new();
-        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut fail_kinds: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         while let Some(res) = set.join_next().await {
             match res {
-                Ok(out) => merge_outcome(&mut total_new, &mut failures, &mut notified, &mut fail_kinds, out),
+                Ok(out) => merge_outcome(
+                    &mut total_new,
+                    &mut failures,
+                    &mut notified,
+                    &mut fail_kinds,
+                    out,
+                ),
                 Err(e) => {
                     failures += 1;
                     *fail_kinds.entry("other".to_string()).or_insert(0) += 1;
-                    log::debug!("refresh task join failed cycle={cycle} reason {}", crate::utils::short_reason(&e.to_string()));
+                    log::debug!(
+                        "refresh task join failed cycle={cycle} reason {}",
+                        crate::utils::short_reason(&e.to_string())
+                    );
                 }
             }
         }
@@ -363,7 +415,10 @@ pub async fn refresh_all_sources(
 
     tray::update_tray(&app).await;
 
-    let is_sync = settings.sync_account.as_ref().is_some_and(|a| a.provider == "greader");
+    let is_sync = settings
+        .sync_account
+        .as_ref()
+        .is_some_and(|a| a.provider == "greader");
     if background {
         let _ = app.emit(
             "fetch-done",
@@ -412,20 +467,45 @@ mod tests {
     fn merge_outcome_folds_totals() {
         // 设定：混合包含成功、触发通知以及失败的单源刷新结果
         let outcomes = vec![
-            SourceRefreshOutcome { inserted: 3, notified: vec!["a".into()], failed: false, error_kind: None },
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
-            SourceRefreshOutcome { inserted: 2, notified: vec!["b".into(), "c".into()], failed: false, error_kind: None },
+            SourceRefreshOutcome {
+                inserted: 3,
+                notified: vec!["a".into()],
+                failed: false,
+                error_kind: None,
+            },
+            SourceRefreshOutcome {
+                inserted: 0,
+                notified: vec![],
+                failed: true,
+                error_kind: Some("timeout".into()),
+            },
+            SourceRefreshOutcome {
+                inserted: 2,
+                notified: vec!["b".into(), "c".into()],
+                failed: false,
+                error_kind: None,
+            },
         ];
         // 操作：汇总折叠
         let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
-        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut fail_kinds: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for out in outcomes {
-            merge_outcome(&mut total, &mut failures, &mut notified, &mut fail_kinds, out);
+            merge_outcome(
+                &mut total,
+                &mut failures,
+                &mut notified,
+                &mut fail_kinds,
+                out,
+            );
         }
         // 验证：新增数求和，失败数统计，文章标题按顺序拼接
         assert_eq!(total, 5);
         assert_eq!(failures, 1);
-        assert_eq!(notified, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            notified,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
         assert_eq!(fail_kinds.get("timeout"), Some(&1));
     }
 
@@ -433,17 +513,49 @@ mod tests {
     fn merge_outcome_mixes_fail_kinds() {
         // 给定：多类失败混合（含缺省 other）
         let outcomes = vec![
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("auth".into()) },
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: None },
-            SourceRefreshOutcome { inserted: 1, notified: vec!["x".into()], failed: false, error_kind: None },
-            SourceRefreshOutcome { inserted: 0, notified: vec![], failed: true, error_kind: Some("timeout".into()) },
+            SourceRefreshOutcome {
+                inserted: 0,
+                notified: vec![],
+                failed: true,
+                error_kind: Some("timeout".into()),
+            },
+            SourceRefreshOutcome {
+                inserted: 0,
+                notified: vec![],
+                failed: true,
+                error_kind: Some("auth".into()),
+            },
+            SourceRefreshOutcome {
+                inserted: 0,
+                notified: vec![],
+                failed: true,
+                error_kind: None,
+            },
+            SourceRefreshOutcome {
+                inserted: 1,
+                notified: vec!["x".into()],
+                failed: false,
+                error_kind: None,
+            },
+            SourceRefreshOutcome {
+                inserted: 0,
+                notified: vec![],
+                failed: true,
+                error_kind: Some("timeout".into()),
+            },
         ];
         // 当：折叠时
         let (mut total, mut failures, mut notified) = (0usize, 0usize, Vec::new());
-        let mut fail_kinds: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut fail_kinds: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for out in outcomes {
-            merge_outcome(&mut total, &mut failures, &mut notified, &mut fail_kinds, out);
+            merge_outcome(
+                &mut total,
+                &mut failures,
+                &mut notified,
+                &mut fail_kinds,
+                out,
+            );
         }
         // 那么：计数与分类明细正确
         assert_eq!(total, 1);
@@ -454,7 +566,12 @@ mod tests {
         assert_eq!(fail_kinds.get("other"), Some(&1));
     }
 
-    fn mock_source(id: i64, group_id: Option<i64>, url: &str, favicon: Option<&str>) -> crate::models::Source {
+    fn mock_source(
+        id: i64,
+        group_id: Option<i64>,
+        url: &str,
+        favicon: Option<&str>,
+    ) -> crate::models::Source {
         crate::models::Source {
             id,
             url: url.into(),
@@ -481,18 +598,49 @@ mod tests {
         // 当：全量时
         let full = build_targets(&all, None);
         // 那么：保持输入顺序全映射（直接消费 RefreshTarget，不再经元组）
-        assert_eq!(full, vec![
-            crate::services::source::RefreshTarget { id: 1, group_id: None, url: "https://a.example/feed".to_string(), favicon: None },
-            crate::services::source::RefreshTarget { id: 2, group_id: Some(7), url: "https://b.example/feed".to_string(), favicon: Some("/f.png".to_string()) },
-            crate::services::source::RefreshTarget { id: 3, group_id: None, url: "https://c.example/feed".to_string(), favicon: None },
-        ]);
+        assert_eq!(
+            full,
+            vec![
+                crate::services::source::RefreshTarget {
+                    id: 1,
+                    group_id: None,
+                    url: "https://a.example/feed".to_string(),
+                    favicon: None
+                },
+                crate::services::source::RefreshTarget {
+                    id: 2,
+                    group_id: Some(7),
+                    url: "https://b.example/feed".to_string(),
+                    favicon: Some("/f.png".to_string())
+                },
+                crate::services::source::RefreshTarget {
+                    id: 3,
+                    group_id: None,
+                    url: "https://c.example/feed".to_string(),
+                    favicon: None
+                },
+            ]
+        );
         // 当：ids 子集时
         let sub = build_targets(&all, Some(&[3, 1]));
         // 那么：仅命中子集并保持源顺序
-        assert_eq!(sub, vec![
-            crate::services::source::RefreshTarget { id: 1, group_id: None, url: "https://a.example/feed".to_string(), favicon: None },
-            crate::services::source::RefreshTarget { id: 3, group_id: None, url: "https://c.example/feed".to_string(), favicon: None },
-        ]);
+        assert_eq!(
+            sub,
+            vec![
+                crate::services::source::RefreshTarget {
+                    id: 1,
+                    group_id: None,
+                    url: "https://a.example/feed".to_string(),
+                    favicon: None
+                },
+                crate::services::source::RefreshTarget {
+                    id: 3,
+                    group_id: None,
+                    url: "https://c.example/feed".to_string(),
+                    favicon: None
+                },
+            ]
+        );
         // 当：空子集时
         assert!(build_targets(&all, Some(&[])).is_empty());
     }
@@ -522,17 +670,41 @@ mod tests {
         assert_eq!(notify_body("zh-CN", 5, &[]), "获取到 5 篇新文章");
         assert_eq!(notify_body("en-US", 5, &[]), "Fetched 5 new articles");
         // 1 标题：无余数后缀
-        assert_eq!(notify_body("zh-CN", 2, &["a".to_string()]), "命中通知规则：a");
-        assert_eq!(notify_body("en-US", 2, &["a".to_string()]), "Notify rules matched: a");
+        assert_eq!(
+            notify_body("zh-CN", 2, &["a".to_string()]),
+            "命中通知规则：a"
+        );
+        assert_eq!(
+            notify_body("en-US", 2, &["a".to_string()]),
+            "Notify rules matched: a"
+        );
         // 3 标题：恰好取满，无余数
         let three = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         assert_eq!(notify_body("zh-CN", 3, &three), "命中通知规则：a、b、c");
-        assert_eq!(notify_body("en-US", 3, &three), "Notify rules matched: a, b, c");
+        assert_eq!(
+            notify_body("en-US", 3, &three),
+            "Notify rules matched: a, b, c"
+        );
         // 5 标题：前3预览 + 余数 2
-        let five = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string(), "e".to_string()];
-        assert_eq!(notify_body("zh-CN", 5, &five), "命中通知规则：a、b、c 等 2 篇");
-        assert_eq!(notify_body("en-US", 5, &five), "Notify rules matched: a, b, c and 2 more");
+        let five = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+            "e".to_string(),
+        ];
+        assert_eq!(
+            notify_body("zh-CN", 5, &five),
+            "命中通知规则：a、b、c 等 2 篇"
+        );
+        assert_eq!(
+            notify_body("en-US", 5, &five),
+            "Notify rules matched: a, b, c and 2 more"
+        );
         // 非空标题忽略 new_count（沿用既有语义）
-        assert_eq!(notify_body("zh-CN", 0, &["x".to_string()]), "命中通知规则：x");
+        assert_eq!(
+            notify_body("zh-CN", 0, &["x".to_string()]),
+            "命中通知规则：x"
+        );
     }
 }

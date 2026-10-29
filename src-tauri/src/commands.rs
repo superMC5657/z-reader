@@ -31,7 +31,11 @@ fn enqueue_sync_action(
     if account.is_some() {
         let n = db::enqueue_item_actions(conn, ids, action)?;
         if n < ids.len() {
-            log::debug!("[CMD] action=enqueue skipped={} total={}", ids.len() - n, ids.len());
+            log::debug!(
+                "[CMD] action=enqueue skipped={} total={}",
+                ids.len() - n,
+                ids.len()
+            );
         }
     }
     Ok(())
@@ -68,7 +72,10 @@ pub async fn get_groups(state: State<'_, AppState>) -> Result<Vec<crate::models:
 }
 
 #[tauri::command]
-pub async fn create_group(state: State<'_, AppState>, name: String) -> Result<crate::models::Group, String> {
+pub async fn create_group(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<crate::models::Group, String> {
     log::debug!("[CMD] action=create_group");
     let conn = state.db.lock().await;
     db::create_group(&conn, &name)
@@ -89,7 +96,11 @@ pub async fn delete_group(state: State<'_, AppState>, id: i64) -> Result<(), Str
 }
 
 #[tauri::command]
-pub async fn set_group_expanded(state: State<'_, AppState>, id: i64, expanded: bool) -> Result<(), String> {
+pub async fn set_group_expanded(
+    state: State<'_, AppState>,
+    id: i64,
+    expanded: bool,
+) -> Result<(), String> {
     let conn = state.db.lock().await;
     db::set_group_expanded(&conn, id, expanded)
 }
@@ -117,23 +128,35 @@ pub async fn add_source(
     }
 
     // 探测而不立即持久化：先解析远端订阅源进行验证。
-    let parsed = feed::fetch_and_parse_with(&client, &url, "", None).await.inspect_err(|e| {
-        log::warn!("[CMD] action=add_source host={host} failed reason={}", crate::utils::short_reason(e));
-    })?;
-    let title = if parsed.title.is_empty() { url.clone() } else { parsed.title.clone() };
+    let parsed = feed::fetch_and_parse_with(&client, &url, "", None)
+        .await
+        .inspect_err(|e| {
+            log::warn!(
+                "[CMD] action=add_source host={host} failed reason={}",
+                crate::utils::short_reason(e)
+            );
+        })?;
+    let title = if parsed.title.is_empty() {
+        url.clone()
+    } else {
+        parsed.title.clone()
+    };
 
     let source_id = {
         let conn = state.db.lock().await;
-        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id).inspect_err(|e| {
-            log::warn!("[CMD] action=add_source host={host} failed reason={}", crate::utils::short_reason(e));
-        })?;
+        let s = db::insert_source(&conn, &url, &title, parsed.description.as_deref(), group_id)
+            .inspect_err(|e| {
+                log::warn!(
+                    "[CMD] action=add_source host={host} failed reason={}",
+                    crate::utils::short_reason(e)
+                );
+            })?;
         s.id
     };
     // 委托存库段完成存库→标状态→补图标（复用首次探测的 ParsedFeed，无第二跳抓取）。
     // engine 保持 None（不引入规则预设）。
     let fav_dir = favicon_dir(&app)?;
-    let third_party =
-        settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
+    let third_party = settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
     {
         crate::services::source::store_parsed(
             crate::services::source::StoreSpec {
@@ -172,14 +195,22 @@ pub async fn remove_source(state: State<'_, AppState>, id: i64) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn rename_source(state: State<'_, AppState>, id: i64, title: String) -> Result<(), String> {
+pub async fn rename_source(
+    state: State<'_, AppState>,
+    id: i64,
+    title: String,
+) -> Result<(), String> {
     log::debug!("[CMD] action=rename_source id={id}");
     let conn = state.db.lock().await;
     db::rename_source(&conn, id, &title)
 }
 
 #[tauri::command]
-pub async fn set_source_group(state: State<'_, AppState>, id: i64, group_id: Option<i64>) -> Result<(), String> {
+pub async fn set_source_group(
+    state: State<'_, AppState>,
+    id: i64,
+    group_id: Option<i64>,
+) -> Result<(), String> {
     log::debug!("[CMD] action=set_source_group id={id}");
     let conn = state.db.lock().await;
     db::set_source_group(&conn, id, group_id)
@@ -239,8 +270,19 @@ pub async fn refresh_favicon(
     let third_party = settings_io::load(&settings_io::settings_path(&app)?).favicon_third_party;
     let icon_url = parsed.as_ref().and_then(|p| p.icon_url.as_deref());
     let site_url = parsed.as_ref().and_then(|p| p.site_url.as_deref());
-    if let Some(fav) =
-        feed::fetch_favicon_with(&client, crate::feed::FaviconFetchOptions { feed_url: &url, icon_url, site_url, favicon_dir: &dir, source_id: id, allow_third_party: third_party, cycle: "" }).await
+    if let Some(fav) = feed::fetch_favicon_with(
+        &client,
+        crate::feed::FaviconFetchOptions {
+            feed_url: &url,
+            icon_url,
+            site_url,
+            favicon_dir: &dir,
+            source_id: id,
+            allow_third_party: third_party,
+            cycle: "",
+        },
+    )
+    .await
     {
         let path_str = fav.to_string_lossy().to_string();
         let conn = state.db.lock().await;
@@ -291,7 +333,11 @@ pub async fn mark_read(
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_items_read(&conn, &ids, read)?;
-    let action = if read { SyncAction::MarkRead } else { SyncAction::MarkUnread };
+    let action = if read {
+        SyncAction::MarkRead
+    } else {
+        SyncAction::MarkUnread
+    };
     enqueue_sync_action(&conn, &acct, &ids, action)?;
     drop(conn);
     crate::tray::update_tray(&app).await;
@@ -323,8 +369,9 @@ pub async fn mark_all_read(
             _ => None,
         };
         let group_remote = match scope.as_deref() {
-            Some("group") => db::get_group(&conn, scope_id.unwrap_or(-1))?
-                .and_then(|g| g.remote_id),
+            Some("group") => {
+                db::get_group(&conn, scope_id.unwrap_or(-1))?.and_then(|g| g.remote_id)
+            }
             _ => None,
         };
         if let Some(target) = resolve_mark_all_stream(
@@ -352,13 +399,21 @@ pub async fn star(
     let acct = settings_io::load(&settings_io::settings_path(&app)?).sync_account;
     let conn = state.db.lock().await;
     db::set_item_starred(&conn, id, starred)?;
-    let action = if starred { SyncAction::Star } else { SyncAction::Unstar };
+    let action = if starred {
+        SyncAction::Star
+    } else {
+        SyncAction::Unstar
+    };
     enqueue_sync_action(&conn, &acct, &[id], action)?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn set_item_hidden(state: State<'_, AppState>, id: i64, hidden: bool) -> Result<(), String> {
+pub async fn set_item_hidden(
+    state: State<'_, AppState>,
+    id: i64,
+    hidden: bool,
+) -> Result<(), String> {
     let conn = state.db.lock().await;
     db::set_item_hidden(&conn, id, hidden)
 }
@@ -377,7 +432,10 @@ pub async fn fetch_full_content(state: State<'_, AppState>, id: i64) -> Result<(
             Ok(())
         }
         Err(e) => {
-            log::warn!("[CMD] action=fetch_full_content failed id={id} reason={}", crate::utils::short_reason(&e));
+            log::warn!(
+                "[CMD] action=fetch_full_content failed id={id} reason={}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -426,7 +484,10 @@ pub async fn save_settings(
 }
 
 #[tauri::command]
-pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<serde_json::Value, String> {
+pub async fn import_opml(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<serde_json::Value, String> {
     log::debug!("[CMD] action=import_opml");
     let conn = state.db.lock().await;
     match opml_io::import(&conn, &text) {
@@ -444,7 +505,10 @@ pub async fn import_opml(state: State<'_, AppState>, text: String) -> Result<ser
             }))
         }
         Err(e) => {
-            log::warn!("[CMD] action=import_opml failed reason={}", crate::utils::short_reason(&e));
+            log::warn!(
+                "[CMD] action=import_opml failed reason={}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -460,7 +524,10 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
             Ok(xml)
         }
         Err(e) => {
-            log::error!("[CMD] action=export_opml failed reason={}", crate::utils::short_reason(&e));
+            log::error!(
+                "[CMD] action=export_opml failed reason={}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -476,7 +543,10 @@ pub async fn export_opml(state: State<'_, AppState>) -> Result<String, String> {
 pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u64, String> {
     log::debug!("[CMD] action=test_proxy");
     if let Err(e) = crate::net::validate_proxy(&settings) {
-        log::warn!("[CMD] action=test_proxy failed reason={}", crate::utils::short_reason(&e));
+        log::warn!(
+            "[CMD] action=test_proxy failed reason={}",
+            crate::utils::short_reason(&e)
+        );
         return Err(e);
     }
     let url = target
@@ -488,7 +558,10 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     let start = std::time::Instant::now();
     let req = client.get(url).timeout(std::time::Duration::from_secs(10));
     if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req, "", None).await {
-        log::warn!("[CMD] action=test_proxy failed reason={}", crate::utils::short_reason(&msg));
+        log::warn!(
+            "[CMD] action=test_proxy failed reason={}",
+            crate::utils::short_reason(&msg)
+        );
         return Err(msg);
     }
     let ms = start.elapsed().as_millis() as u64;
@@ -525,7 +598,10 @@ pub async fn sync_login(
         .await
         .map_err(|e| {
             let msg = e.to_string();
-            log::warn!("sync login subscriptions failed reason {}", crate::utils::short_reason(&msg));
+            log::warn!(
+                "sync login subscriptions failed reason {}",
+                crate::utils::short_reason(&msg)
+            );
             msg
         })?;
 
@@ -543,7 +619,9 @@ pub async fn sync_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(
     // 全序收 Module：save(None)→clear_sync_secret→clear_session→queue_clear。
     {
         let conn = state.db.lock().await;
-        crate::services::sync_auth::apply_logout(&path, &conn, || crate::sync::clear_session(&state))?;
+        crate::services::sync_auth::apply_logout(&path, &conn, || {
+            crate::sync::clear_session(&state)
+        })?;
     }
     log::info!("[CMD] action=sync_logout provider=greader");
     Ok(())
@@ -569,7 +647,10 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
 /// Manual sync entry; refresh single-entry split (ADR-0002) stays in `refresh_all_sources`.
 /// Post-cycle retention reuses refresh Module seam; push-first + local SQLite sole UI source unchanged.
 #[tauri::command]
-pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub async fn sync_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     log::info!("[CMD] action=sync_now");
     let cycle = crate::net::new_cycle();
     let r = crate::sync::run_with_cycle(&app, false, &cycle).await?;
@@ -670,7 +751,10 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
     let engine = match crate::rules::RuleEngine::load(&conn) {
         Ok(e) => e,
         Err(e) => {
-            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", crate::utils::short_reason(&e));
+            log::warn!(
+                "[CMD] action=apply_rules_backfill failed reason {}",
+                crate::utils::short_reason(&e)
+            );
             return Err(e);
         }
     };
@@ -691,7 +775,10 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
             }))
         }
         Err(e) => {
-            log::warn!("[CMD] action=apply_rules_backfill failed reason {}", crate::utils::short_reason(&e));
+            log::warn!(
+                "[CMD] action=apply_rules_backfill failed reason {}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -700,16 +787,25 @@ pub async fn apply_rules_backfill(state: State<'_, AppState>) -> Result<serde_js
 // ---------- 备份与恢复 ----------
 
 #[tauri::command]
-pub async fn export_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn export_backup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
     log::info!("[CMD] action=export_backup");
     match export_backup_inner(app, &state).await {
         Ok(Some(path)) => {
-            log::info!("[CMD] action=export_backup ok file={}", crate::utils::file_base(&path));
+            log::info!(
+                "[CMD] action=export_backup ok file={}",
+                crate::utils::file_base(&path)
+            );
             Ok(Some(path))
         }
         Ok(None) => Ok(None),
         Err(e) => {
-            log::error!("[CMD] action=export_backup failed reason={}", crate::utils::short_reason(&e));
+            log::error!(
+                "[CMD] action=export_backup failed reason={}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -748,23 +844,37 @@ async fn export_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     }
     let settings_file = settings_io::settings_path(&app)?;
     let favicon_dir = favicon_dir(&app)?;
-    let result = crate::backup::write_archive(&snapshot, Some(&settings_file), Some(&favicon_dir), &out_path);
+    let result = crate::backup::write_archive(
+        &snapshot,
+        Some(&settings_file),
+        Some(&favicon_dir),
+        &out_path,
+    );
     let _ = std::fs::remove_file(&snapshot);
     result?;
     Ok(Some(out_path.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
-pub async fn import_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn import_backup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
     log::info!("[CMD] action=import_backup");
     match import_backup_inner(app, &state).await {
         Ok(Some(path)) => {
-            log::info!("[CMD] action=import_backup ok file={}", crate::utils::file_base(&path));
+            log::info!(
+                "[CMD] action=import_backup ok file={}",
+                crate::utils::file_base(&path)
+            );
             Ok(Some(path))
         }
         Ok(None) => Ok(None),
         Err(e) => {
-            log::warn!("[CMD] action=import_backup failed reason={}", crate::utils::short_reason(&e));
+            log::warn!(
+                "[CMD] action=import_backup failed reason={}",
+                crate::utils::short_reason(&e)
+            );
             Err(e)
         }
     }
@@ -792,7 +902,14 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
     let db_path = state.db_path.clone();
     let settings_file = settings_io::settings_path(&app)?;
     let fav_dir = favicon_dir(&app)?;
-    crate::backup::restore_from_archive(&archive_path, &db_path, &state.db, &settings_file, &fav_dir).await?;
+    crate::backup::restore_from_archive(
+        &archive_path,
+        &db_path,
+        &state.db,
+        &settings_file,
+        &fav_dir,
+    )
+    .await?;
 
     crate::tray::update_tray(&app).await;
     use tauri::Emitter;
@@ -803,12 +920,17 @@ async fn import_backup_inner(app: AppHandle, state: &AppState) -> Result<Option<
 // ---------- 存储生命周期与统计 ----------
 
 #[tauri::command]
-pub async fn get_stats(_app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub async fn get_stats(
+    _app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let (articles, unread) = {
         let conn = state.db.lock().await;
         (db::item_count(&conn)?, db::total_unread(&conn)?)
     };
-    let db_size = std::fs::metadata(&state.db_path).map(|m| m.len()).unwrap_or(0);
+    let db_size = std::fs::metadata(&state.db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
     Ok(serde_json::json!({
         "articles": articles,
         "unread": unread,
@@ -842,31 +964,65 @@ mod tests {
     fn resolve_mark_all_stream_matrix() {
         let reading = crate::greader::STREAM_READING_LIST;
         // 缺省与 all → reading-list
-        assert_eq!(resolve_mark_all_stream(None, None, None, None).as_deref(), Some(reading));
-        assert_eq!(resolve_mark_all_stream(Some("all"), None, None, None).as_deref(), Some(reading));
+        assert_eq!(
+            resolve_mark_all_stream(None, None, None, None).as_deref(),
+            Some(reading)
+        );
+        assert_eq!(
+            resolve_mark_all_stream(Some("all"), None, None, None).as_deref(),
+            Some(reading)
+        );
         // 未知 scope → None
-        assert_eq!(resolve_mark_all_stream(Some("bogus"), Some(1), Some("feed/1"), Some("g")), None);
+        assert_eq!(
+            resolve_mark_all_stream(Some("bogus"), Some(1), Some("feed/1"), Some("g")),
+            None
+        );
         // source：有/无/空
         assert_eq!(
             resolve_mark_all_stream(Some("source"), Some(7), Some("feed/7"), None).as_deref(),
             Some("feed/7")
         );
-        assert_eq!(resolve_mark_all_stream(Some("source"), Some(7), None, None), None);
-        assert_eq!(resolve_mark_all_stream(Some("source"), Some(7), Some(""), None), None);
+        assert_eq!(
+            resolve_mark_all_stream(Some("source"), Some(7), None, None),
+            None
+        );
+        assert_eq!(
+            resolve_mark_all_stream(Some("source"), Some(7), Some(""), None),
+            None
+        );
         // group：有/无/空（从未同步组无 remote → None 跳过入队）
         assert_eq!(
-            resolve_mark_all_stream(Some("group"), Some(9), None, Some("user/-/label/G")).as_deref(),
+            resolve_mark_all_stream(Some("group"), Some(9), None, Some("user/-/label/G"))
+                .as_deref(),
             Some("user/-/label/G")
         );
-        assert_eq!(resolve_mark_all_stream(Some("group"), Some(9), None, None), None);
-        assert_eq!(resolve_mark_all_stream(Some("group"), Some(9), None, Some("")), None);
+        assert_eq!(
+            resolve_mark_all_stream(Some("group"), Some(9), None, None),
+            None
+        );
+        assert_eq!(
+            resolve_mark_all_stream(Some("group"), Some(9), None, Some("")),
+            None
+        );
         // source 忽略 group 侧，group 忽略 source 侧
         assert_eq!(
-            resolve_mark_all_stream(Some("source"), Some(7), Some("feed/7"), Some("user/-/label/G")).as_deref(),
+            resolve_mark_all_stream(
+                Some("source"),
+                Some(7),
+                Some("feed/7"),
+                Some("user/-/label/G")
+            )
+            .as_deref(),
             Some("feed/7")
         );
         assert_eq!(
-            resolve_mark_all_stream(Some("group"), Some(9), Some("feed/7"), Some("user/-/label/G")).as_deref(),
+            resolve_mark_all_stream(
+                Some("group"),
+                Some(9),
+                Some("feed/7"),
+                Some("user/-/label/G")
+            )
+            .as_deref(),
             Some("user/-/label/G")
         );
     }
@@ -876,7 +1032,8 @@ mod tests {
         // 给定：内存库，本地源（无 remote）+ 远端条目
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
-        let local = crate::db::insert_source(&conn, "https://local.example", "L", None, None).unwrap();
+        let local =
+            crate::db::insert_source(&conn, "https://local.example", "L", None, None).unwrap();
         crate::db::insert_item(
             &conn,
             local.id,
@@ -899,7 +1056,8 @@ mod tests {
         let no_remote: i64 = conn
             .query_row("SELECT id FROM items WHERE guid='plain'", [], |r| r.get(0))
             .unwrap();
-        let remote_src = crate::db::insert_source(&conn, "https://e.example", "E", None, None).unwrap();
+        let remote_src =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).unwrap();
         crate::db::upsert_remote_item(
             &conn,
             &crate::db::RemoteItemUpsert {
@@ -919,7 +1077,11 @@ mod tests {
         )
         .unwrap();
         let with_remote: i64 = conn
-            .query_row("SELECT id FROM items WHERE guid='00000000175c6d3b'", [], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM items WHERE guid='00000000175c6d3b'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         let acct = Some(crate::models::SyncAccount {
             provider: "greader".into(),
@@ -928,7 +1090,13 @@ mod tests {
             password: "p".into(),
         });
         // 当：批量入队时
-        enqueue_sync_action(&conn, &acct, &[no_remote, with_remote], SyncAction::MarkRead).unwrap();
+        enqueue_sync_action(
+            &conn,
+            &acct,
+            &[no_remote, with_remote],
+            SyncAction::MarkRead,
+        )
+        .unwrap();
         // 那么：仅远端计入，主流程 Ok（静默跳过本地）
         assert_eq!(crate::db::queue_len(&conn).unwrap(), 1);
         let q = crate::db::queue_fetch(&conn, 10).unwrap();
@@ -943,11 +1111,20 @@ mod tests {
         use crate::models::RuleSourceScope;
         use std::str::FromStr;
         // 往返：all / source:7 / group:9（线上传形不变）
-        assert_eq!(RuleSourceScope::from_str("all").unwrap(), RuleSourceScope::All);
+        assert_eq!(
+            RuleSourceScope::from_str("all").unwrap(),
+            RuleSourceScope::All
+        );
         assert_eq!(RuleSourceScope::All.to_string(), "all");
-        assert_eq!(RuleSourceScope::from_str("source:7").unwrap(), RuleSourceScope::Source(7));
+        assert_eq!(
+            RuleSourceScope::from_str("source:7").unwrap(),
+            RuleSourceScope::Source(7)
+        );
         assert_eq!(RuleSourceScope::Source(7).to_string(), "source:7");
-        assert_eq!(RuleSourceScope::from_str("group:9").unwrap(), RuleSourceScope::Group(9));
+        assert_eq!(
+            RuleSourceScope::from_str("group:9").unwrap(),
+            RuleSourceScope::Group(9)
+        );
         assert_eq!(RuleSourceScope::Group(9).to_string(), "group:9");
         // 非法串 Err
         assert!(RuleSourceScope::from_str("bogus").is_err());

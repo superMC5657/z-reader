@@ -64,7 +64,15 @@ mod tests {
         conn
     }
 
-    fn seed_item(conn: &rusqlite::Connection, source_id: i64, guid: &str, published_at: i64, read: bool, starred: bool, hidden: bool) {
+    fn seed_item(
+        conn: &rusqlite::Connection,
+        source_id: i64,
+        guid: &str,
+        published_at: i64,
+        read: bool,
+        starred: bool,
+        hidden: bool,
+    ) {
         crate::db::insert_item(
             conn,
             source_id,
@@ -89,12 +97,21 @@ mod tests {
     #[test]
     fn deletes_expired_and_caps_per_source() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         let now = crate::models::now_ts();
         let day: i64 = 86_400;
         seed_item(&conn, s.id, "old-read", now - 100 * day, true, false, false);
         seed_item(&conn, s.id, "old-star", now - 100 * day, false, true, false);
-        seed_item(&conn, s.id, "recent-read", now - 10 * day, true, false, false);
+        seed_item(
+            &conn,
+            s.id,
+            "recent-read",
+            now - 10 * day,
+            true,
+            false,
+            false,
+        );
 
         // 30 天窗口：仅删除超期的未加星标已读 1 篇；阈值取极大值避免 VACUUM。
         let deleted = run_retention_policy_days(&conn, 30, 0, usize::MAX);
@@ -105,7 +122,8 @@ mod tests {
     #[test]
     fn zero_days_skips_time_expiry_and_zero_threshold_vacuums() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         let now = crate::models::now_ts();
         seed_item(&conn, s.id, "a", now, false, false, false);
         seed_item(&conn, s.id, "b", now, false, false, false);

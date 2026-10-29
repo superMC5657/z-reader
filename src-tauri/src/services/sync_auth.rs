@@ -79,10 +79,13 @@ mod tests {
     fn logout_order_clears_account_secret_session_queue() {
         // 给定：临时设置（含账户凭据）+ 内存库预置队列
         let path = temp_settings("logout");
-        crate::settings::save(&path, &crate::models::Settings {
-            sync_account: Some(login_acct("hunter2")),
-            ..crate::models::Settings::default()
-        })
+        crate::settings::save(
+            &path,
+            &crate::models::Settings {
+                sync_account: Some(login_acct("hunter2")),
+                ..crate::models::Settings::default()
+            },
+        )
         .unwrap();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
@@ -107,10 +110,15 @@ mod tests {
         .unwrap();
         assert!(inserted);
         let item_id: i64 = conn
-            .query_row("SELECT id FROM items WHERE remote_id='00000000175c6d3b'", [], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM items WHERE remote_id='00000000175c6d3b'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(
-            crate::db::enqueue_item_actions(&conn, &[item_id], crate::models::SyncAction::MarkRead).unwrap(),
+            crate::db::enqueue_item_actions(&conn, &[item_id], crate::models::SyncAction::MarkRead)
+                .unwrap(),
             1
         );
         assert_eq!(crate::db::queue_len(&conn).unwrap(), 1);

@@ -261,7 +261,9 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
                     })
                 })
                 .map_err(|e| e.to_string())?;
-            mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+            mapped
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
         };
         if rows.is_empty() {
             break;
@@ -310,19 +312,17 @@ pub fn backfill(conn: &Connection, engine: &RuleEngine) -> Result<BackfillStats,
 
 /// 使用分批 `WHERE id IN` 语句为多行批量设置某个布尔标志位列。
 /// `column` 始终为内部常量，绝非用户输入。
-fn batch_set_flag(
-    tx: &rusqlite::Transaction,
-    column: &str,
-    ids: &[i64],
-) -> Result<(), String> {
+fn batch_set_flag(tx: &rusqlite::Transaction, column: &str, ids: &[i64]) -> Result<(), String> {
     const CHUNK: usize = 500;
     for chunk in ids.chunks(CHUNK) {
         if chunk.is_empty() {
             continue;
         }
-        let placeholders: Vec<String> =
-            (1..=chunk.len()).map(|i| format!("?{i}")).collect();
-        let sql = format!("UPDATE items SET {column}=1 WHERE id IN ({})", placeholders.join(","));
+        let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "UPDATE items SET {column}=1 WHERE id IN ({})",
+            placeholders.join(",")
+        );
         let mut stmt = tx.prepare(&sql).map_err(|e| e.to_string())?;
         stmt.execute(rusqlite::params_from_iter(chunk.iter()))
             .map_err(|e| e.to_string())?;
@@ -359,14 +359,59 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
         let g = crate::db::create_group(&conn, "G").unwrap();
-        let s = crate::db::insert_source(&conn, "https://s.example", "S", None, Some(g.id)).unwrap();
+        let s =
+            crate::db::insert_source(&conn, "https://s.example", "S", None, Some(g.id)).unwrap();
         let s2 = crate::db::insert_source(&conn, "https://t.example", "T", None, None).unwrap();
 
         // 作用于分组 G 且不区分大小写的标题规则
-        let _r1 = crate::db::create_rule(&conn, &rule_input("ad", "广告|ADs?", RuleTargetField::Title, RuleActionType::MarkRead, false, RuleSourceScope::All)).unwrap();
-        let _r2 = crate::db::create_rule(&conn, &rule_input("star-release", "重磅", RuleTargetField::Any, RuleActionType::Star, false, RuleSourceScope::Source(s.id))).unwrap();
-        let _r3 = crate::db::create_rule(&conn, &rule_input("hide-spam", "casino", RuleTargetField::Content, RuleActionType::Hide, false, RuleSourceScope::All)).unwrap();
-        let _r4 = crate::db::create_rule(&conn, &rule_input("notify-url", "breaking", RuleTargetField::SourceUrl, RuleActionType::Notify, true, RuleSourceScope::All)).unwrap();
+        let _r1 = crate::db::create_rule(
+            &conn,
+            &rule_input(
+                "ad",
+                "广告|ADs?",
+                RuleTargetField::Title,
+                RuleActionType::MarkRead,
+                false,
+                RuleSourceScope::All,
+            ),
+        )
+        .unwrap();
+        let _r2 = crate::db::create_rule(
+            &conn,
+            &rule_input(
+                "star-release",
+                "重磅",
+                RuleTargetField::Any,
+                RuleActionType::Star,
+                false,
+                RuleSourceScope::Source(s.id),
+            ),
+        )
+        .unwrap();
+        let _r3 = crate::db::create_rule(
+            &conn,
+            &rule_input(
+                "hide-spam",
+                "casino",
+                RuleTargetField::Content,
+                RuleActionType::Hide,
+                false,
+                RuleSourceScope::All,
+            ),
+        )
+        .unwrap();
+        let _r4 = crate::db::create_rule(
+            &conn,
+            &rule_input(
+                "notify-url",
+                "breaking",
+                RuleTargetField::SourceUrl,
+                RuleActionType::Notify,
+                true,
+                RuleSourceScope::All,
+            ),
+        )
+        .unwrap();
 
         let engine = RuleEngine::load(&conn).unwrap();
         assert_eq!(engine.len(), 4);
@@ -448,11 +493,22 @@ mod tests {
         let s = crate::db::insert_source(&conn, "https://s.example", "S", None, None).unwrap();
         let _r = crate::db::create_rule(
             &conn,
-            &rule_input("m", "matchme", RuleTargetField::Title, RuleActionType::MarkRead, false, RuleSourceScope::All),
+            &rule_input(
+                "m",
+                "matchme",
+                RuleTargetField::Title,
+                RuleActionType::MarkRead,
+                false,
+                RuleSourceScope::All,
+            ),
         )
         .unwrap();
         for i in 0..2500 {
-            let title = if i % 2 == 0 { "matchme article" } else { "other article" };
+            let title = if i % 2 == 0 {
+                "matchme article"
+            } else {
+                "other article"
+            };
             crate::db::insert_item(
                 &conn,
                 s.id,
@@ -480,16 +536,32 @@ mod tests {
         assert_eq!(stats.marked_read, 1250);
         let remaining = crate::db::get_items(
             &conn,
-            &crate::models::GetItemsParams { filter: Some(1), limit: Some(3000), ..Default::default() },
+            &crate::models::GetItemsParams {
+                filter: Some(1),
+                limit: Some(3000),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(remaining.len(), 1250);
     }
 
     #[test]
-    fn test_compile_rejects_invalid() {        let conn = Connection::open_in_memory().unwrap();
+    fn test_compile_rejects_invalid() {
+        let conn = Connection::open_in_memory().unwrap();
         crate::db::migrate_for_tests(&conn).unwrap();
-        let bad = crate::db::create_rule(&conn, &rule_input("bad", "([unclosed", RuleTargetField::Title, RuleActionType::Star, false, RuleSourceScope::All)).unwrap();
+        let bad = crate::db::create_rule(
+            &conn,
+            &rule_input(
+                "bad",
+                "([unclosed",
+                RuleTargetField::Title,
+                RuleActionType::Star,
+                false,
+                RuleSourceScope::All,
+            ),
+        )
+        .unwrap();
         let rule = crate::db::get_rule(&conn, bad.id).unwrap();
         assert!(compile_pattern(&rule).is_err());
     }

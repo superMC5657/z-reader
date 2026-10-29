@@ -38,7 +38,8 @@ pub fn write_archive(
 
     if let Some(sp) = settings_file {
         if let Ok(text) = std::fs::read_to_string(sp) {
-            zw.start_file(SETTINGS_ENTRY, opts).map_err(|e| e.to_string())?;
+            zw.start_file(SETTINGS_ENTRY, opts)
+                .map_err(|e| e.to_string())?;
             zw.write_all(scrub_settings_json(&text).as_bytes())
                 .map_err(|e| e.to_string())?;
         }
@@ -87,7 +88,10 @@ pub fn scrub_settings_json(text: &str) -> String {
             }
         }
         if obj.contains_key("proxyPassword") {
-            obj.insert("proxyPassword".into(), serde_json::Value::String(String::new()));
+            obj.insert(
+                "proxyPassword".into(),
+                serde_json::Value::String(String::new()),
+            );
         }
     }
     serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())
@@ -167,7 +171,9 @@ pub fn validate_db(db_file: &Path) -> Result<(), String> {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
     if version > crate::db::CURRENT_VERSION {
-        return Err(format!("backup was created by a newer app version (schema {version})"));
+        return Err(format!(
+            "backup was created by a newer app version (schema {version})"
+        ));
     }
     for table in ["groups", "sources", "items"] {
         let n: i64 = conn
@@ -195,11 +201,7 @@ fn shm_path(live: &Path) -> std::path::PathBuf {
 }
 
 /// swap 临界段内步骤：WAL/SHM 删除与 `replace_live`→`reopen` 包在一起（调用方持有排他锁）。
-fn swap_live(
-    staged: &Path,
-    live: &Path,
-    live_conn: &mut Connection,
-) -> Result<(), String> {
+fn swap_live(staged: &Path, live: &Path, live_conn: &mut Connection) -> Result<(), String> {
     let _ = std::fs::remove_file(wal_path(live));
     let _ = std::fs::remove_file(shm_path(live));
     // 同目录重命名/复制是原子操作的关键点；参见 replace_live。
@@ -352,7 +354,9 @@ mod tests {
 
         let conn = crate::db::open(&db_path).unwrap();
         let group = crate::db::create_group(&conn, "G").unwrap();
-        let source = crate::db::insert_source(&conn, "https://x.example", "X", None, Some(group.id)).unwrap();
+        let source =
+            crate::db::insert_source(&conn, "https://x.example", "X", None, Some(group.id))
+                .unwrap();
         crate::db::insert_item(
             &conn,
             source.id,
@@ -390,18 +394,18 @@ mod tests {
         let restored_db = restored_dir.join(DB_ENTRY);
         assert!(restored_db.exists());
         // 设置经过脱敏往返后保留为等价的 JSON（格式化输出）。
-        let restored_settings: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(restored_dir.join(SETTINGS_ENTRY)).unwrap())
-                .unwrap();
-        assert_eq!(restored_settings.get("theme").and_then(|v| v.as_str()), Some("dark"));
+        let restored_settings: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(restored_dir.join(SETTINGS_ENTRY)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            restored_settings.get("theme").and_then(|v| v.as_str()),
+            Some("dark")
+        );
         validate_db(&restored_db).unwrap();
 
         let conn = crate::db::open(&restored_db).unwrap();
-        let items = crate::db::get_items(
-            &conn,
-            &crate::models::GetItemsParams::default(),
-        )
-        .unwrap();
+        let items = crate::db::get_items(&conn, &crate::models::GetItemsParams::default()).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "hello world");
 
@@ -420,11 +424,15 @@ mod tests {
         assert_eq!(v.get("theme").and_then(|v| v.as_str()), Some("dark"));
         assert_eq!(v.get("proxyPassword").and_then(|v| v.as_str()), Some(""));
         assert_eq!(
-            v.get("syncAccount").and_then(|a| a.get("password")).and_then(|p| p.as_str()),
+            v.get("syncAccount")
+                .and_then(|a| a.get("password"))
+                .and_then(|p| p.as_str()),
             Some("")
         );
         assert_eq!(
-            v.get("syncAccount").and_then(|a| a.get("username")).and_then(|u| u.as_str()),
+            v.get("syncAccount")
+                .and_then(|a| a.get("username"))
+                .and_then(|u| u.as_str()),
             Some("u")
         );
         assert!(!out.contains("s3cret") && !out.contains("hunter2"));
@@ -459,7 +467,10 @@ mod tests {
         let dest = dir.join("out");
         extract_archive(&archive, &dest).unwrap();
         // 那么：仅解压合法文件，无文件逃逸到目标目录之外
-        assert_eq!(std::fs::read_to_string(dest.join("ok.txt")).unwrap(), "fine");
+        assert_eq!(
+            std::fs::read_to_string(dest.join("ok.txt")).unwrap(),
+            "fine"
+        );
         assert!(!dir.join("evil.txt").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -472,7 +483,9 @@ mod tests {
         std::fs::create_dir_all(&live_dir).unwrap();
         let live_path = live_dir.join("zreader.db");
         let live_conn = crate::db::open(&live_path).unwrap();
-        let src = crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None).unwrap();
+        let src =
+            crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None)
+                .unwrap();
         crate::db::insert_item(
             &live_conn,
             src.id,
@@ -530,7 +543,8 @@ mod tests {
         assert!(err.is_err());
         {
             let guard = db.try_lock().expect("lock");
-            let items = crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            let items =
+                crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].guid, "live-g1");
         }
@@ -540,7 +554,9 @@ mod tests {
         let staged_src = base.join("staged.db");
         {
             let c = crate::db::open(&staged_src).unwrap();
-            let s = crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None).unwrap();
+            let s =
+                crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None)
+                    .unwrap();
             crate::db::insert_item(
                 &c,
                 s.id,
@@ -567,7 +583,13 @@ mod tests {
         std::fs::create_dir_all(&arc_fav).unwrap();
         std::fs::write(arc_fav.join("7.png"), b"fakepng-bytes-123").unwrap();
         let good_archive = base.join("good.zreader.bak");
-        write_archive(&staged_src, Some(&arc_settings), Some(&arc_fav), &good_archive).unwrap();
+        write_archive(
+            &staged_src,
+            Some(&arc_settings),
+            Some(&arc_fav),
+            &good_archive,
+        )
+        .unwrap();
 
         // 当：成功恢复时
         let ok = tauri::async_runtime::block_on(restore_from_archive(
@@ -582,13 +604,17 @@ mod tests {
         // 那么：live 为新内容、设置/图标落盘、tmp/staged 清理
         {
             let guard = db.try_lock().expect("lock");
-            let items = crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            let items =
+                crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].guid, "new-g1");
         }
         let settings_text = std::fs::read_to_string(&settings_file).unwrap();
         assert!(settings_text.contains("restored-123"));
-        assert_eq!(std::fs::read(favicon_dir.join("7.png")).unwrap(), b"fakepng-bytes-123");
+        assert_eq!(
+            std::fs::read(favicon_dir.join("7.png")).unwrap(),
+            b"fakepng-bytes-123"
+        );
         assert!(!live_dir.join("restore-tmp").exists());
         assert!(!live_path.with_extension("db.restoring").exists());
 
@@ -603,24 +629,24 @@ mod tests {
         std::fs::copy(&staged_src, &sw_staged).unwrap();
         let mut sw_conn = Connection::open_in_memory().unwrap();
         swap_live(&sw_staged, &sw_live, &mut sw_conn).unwrap();
-        // WAL/SHM 残留必须被清掉（db::open 切 WAL 模式后 SQLite 自建的旁路文件不算残留，
+        // WAL/SHM 残留必须被清掉（db::open 切 WAL模式后 SQLite 自建的旁路文件不算残留，
         // 故断言内容不再是预置 junk，而非文件不存在）。
-        match std::fs::read(sw_live.with_extension("db-wal")) {
-            Ok(bytes) => assert_ne!(bytes, b"wal-junk", "junk wal must be gone"),
-            Err(_) => {}
+        if let Ok(bytes) = std::fs::read(sw_live.with_extension("db-wal")) {
+            assert_ne!(bytes, b"wal-junk", "junk wal must be gone");
         }
-        match std::fs::read(sw_live.with_extension("db-shm")) {
-            Ok(bytes) => assert_ne!(bytes, b"shm-junk", "junk shm must be gone"),
-            Err(_) => {}
+        if let Ok(bytes) = std::fs::read(sw_live.with_extension("db-shm")) {
+            assert_ne!(bytes, b"shm-junk", "junk shm must be gone");
         }
-        let sw_items = crate::db::get_items(&sw_conn, &crate::models::GetItemsParams::default()).unwrap();
+        let sw_items =
+            crate::db::get_items(&sw_conn, &crate::models::GetItemsParams::default()).unwrap();
         assert_eq!(sw_items.len(), 1);
         assert_eq!(sw_items[0].guid, "new-g1");
 
         // 当：swap 失败触发回滚时（以缺失 staged 直接驱动回滚 helper）
         let rb_live = base.join("rb-live.db");
         let rb_conn = crate::db::open(&rb_live).unwrap();
-        let rb_src = crate::db::insert_source(&rb_conn, "https://rb.example", "RB", None, None).unwrap();
+        let rb_src =
+            crate::db::insert_source(&rb_conn, "https://rb.example", "RB", None, None).unwrap();
         crate::db::insert_item(
             &rb_conn,
             rb_src.id,
@@ -652,9 +678,17 @@ mod tests {
         // swap 必然失败（staged 缺失）
         assert!(swap_live(&base.join("no-such-staged.db"), &rb_live, &mut doomed).is_err());
         // 回滚后 live 恢复
-        let ret = rollback_live(&rb_file, &rb_live, &rb_staged, &rb_tmp, &mut doomed, "boom".into());
+        let ret = rollback_live(
+            &rb_file,
+            &rb_live,
+            &rb_staged,
+            &rb_tmp,
+            &mut doomed,
+            "boom".into(),
+        );
         assert_eq!(ret, "boom");
-        let items = crate::db::get_items(&doomed, &crate::models::GetItemsParams::default()).unwrap();
+        let items =
+            crate::db::get_items(&doomed, &crate::models::GetItemsParams::default()).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].guid, "rb-g1");
         assert!(!rb_staged.exists() && !rb_tmp.exists());

@@ -79,7 +79,10 @@ pub fn insert_item(conn: &Connection, source_id: i64, e: &UpsertEntry) -> Result
     Ok(n > 0)
 }
 
-pub fn get_items(conn: &Connection, p: &crate::models::GetItemsParams) -> Result<Vec<Item>, String> {
+pub fn get_items(
+    conn: &Connection,
+    p: &crate::models::GetItemsParams,
+) -> Result<Vec<Item>, String> {
     // 用户输入的 FTS5 MATCH 语法可能会被拒绝；发生任何错误时回退到 LIKE 模糊查询。
     match get_items_impl(conn, p, true) {
         Ok(items) => Ok(items),
@@ -181,7 +184,8 @@ fn get_items_impl(
     let rows = stmt
         .query_map(refs.as_slice(), row_to_item)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn get_item(conn: &Connection, id: i64) -> Result<Item, String> {
@@ -248,7 +252,12 @@ pub fn set_item_hidden(conn: &Connection, id: i64, hidden: bool) -> Result<(), S
     Ok(())
 }
 
-pub fn set_item_content(conn: &Connection, id: i64, content: &str, snippet: &str) -> Result<(), String> {
+pub fn set_item_content(
+    conn: &Connection,
+    id: i64,
+    content: &str,
+    snippet: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE items SET content=?1, snippet=?2 WHERE id=?3",
         params![content, snippet, id],
@@ -278,9 +287,7 @@ pub fn cleanup_retention(
     retention_days: u32,
     max_per_source: u32,
 ) -> Result<usize, String> {
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let mut deleted = 0usize;
     if retention_days > 0 {
         let cutoff = crate::models::now_ts() - (retention_days as i64) * 86_400;
@@ -400,7 +407,10 @@ pub fn upsert_remote_item(conn: &Connection, r: &RemoteItemUpsert) -> Result<boo
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_retention, get_items, insert_item, mark_all_read, upsert_remote_item, RemoteItemUpsert, UpsertEntry};
+    use super::{
+        cleanup_retention, get_items, insert_item, mark_all_read, upsert_remote_item,
+        RemoteItemUpsert, UpsertEntry,
+    };
     use crate::models::GetItemsParams;
     use rusqlite::Connection;
 
@@ -439,14 +449,28 @@ mod tests {
     #[test]
     fn pagination_is_stable_through_get_items() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         for i in 1..=5 {
-            insert_item(&conn, s.id, &item(&format!("g{i}"), "t", "x", i, false, false, false)).unwrap();
+            insert_item(
+                &conn,
+                s.id,
+                &item(&format!("g{i}"), "t", "x", i, false, false, false),
+            )
+            .unwrap();
         }
         // 给定：按时间从新到旧排序（published_at 5..1）
         // 当：以每页 2 条经公共 get_items 分页获取时
         let page = |offset| {
-            get_items(&conn, &GetItemsParams { limit: Some(2), offset: Some(offset), ..Default::default() }).unwrap()
+            get_items(
+                &conn,
+                &GetItemsParams {
+                    limit: Some(2),
+                    offset: Some(offset),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
         };
         let (p0, p1, p2) = (page(0), page(2), page(4));
         // 那么：各页平铺完整列表，无重叠且无遗漏
@@ -459,7 +483,8 @@ mod tests {
     #[test]
     fn like_fallback_matches_summary_and_author_through_get_items() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         insert_item(
             &conn,
             s.id,
@@ -484,7 +509,14 @@ mod tests {
         conn.execute("DROP TABLE items_fts", []).unwrap();
         // 当/那么：公共 get_items 经 warn 后回退到 LIKE，作者/摘要/正文/标题均命中
         for q in ["Austen", "unique-summary-xyz", "boring", "plain"] {
-            let found = get_items(&conn, &GetItemsParams { search: Some(q.into()), ..Default::default() }).unwrap();
+            let found = get_items(
+                &conn,
+                &GetItemsParams {
+                    search: Some(q.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             assert_eq!(found.len(), 1, "fallback should match {q}");
         }
     }
@@ -492,96 +524,277 @@ mod tests {
     #[test]
     fn fts_search_and_hidden_filter_through_get_items() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
 
-        insert_item(&conn, s.id, &item("g1", "Rust async guide", "<p>tokio runtime deep dive</p>", 100, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("g2", "cooking blog", "pasta recipe", 200, false, false, true)).unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item(
+                "g1",
+                "Rust async guide",
+                "<p>tokio runtime deep dive</p>",
+                100,
+                false,
+                false,
+                false,
+            ),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item(
+                "g2",
+                "cooking blog",
+                "pasta recipe",
+                200,
+                false,
+                false,
+                true,
+            ),
+        )
+        .unwrap();
 
         // FTS 通过 AND 组合分词跨标题和正文匹配
-        let found = get_items(&conn, &GetItemsParams { search: Some("tokio dive".into()), ..Default::default() }).unwrap();
+        let found = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("tokio dive".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].guid, "g1");
 
         // 隐藏文章排除在常规列表之外，但在 filter=3 时展示
         let all = get_items(&conn, &GetItemsParams::default()).unwrap();
         assert_eq!(all.len(), 1);
-        let hidden = get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap();
+        let hidden = get_items(
+            &conn,
+            &GetItemsParams {
+                filter: Some(3),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(hidden.len(), 1);
         assert_eq!(hidden[0].guid, "g2");
 
         // 全文更新通过触发器同步更新到 FTS 索引
         crate::db::set_item_content(&conn, found[0].id, "quantum computing", "quantum").unwrap();
-        let found2 = get_items(&conn, &GetItemsParams { search: Some("quantum".into()), ..Default::default() }).unwrap();
+        let found2 = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("quantum".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(found2.len(), 1);
 
         // 删除操作通过触发器同步清除 FTS 索引（从订阅源级联删除）
         crate::db::remove_source(&conn, s.id).unwrap();
-        let found3 = get_items(&conn, &GetItemsParams { search: Some("quantum".into()), ..Default::default() }).unwrap();
+        let found3 = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("quantum".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(found3.is_empty());
     }
 
     #[test]
     fn fts_quoting_is_literal_through_get_items() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
-        insert_item(&conn, s.id, &item("g1", "hello world guide", "plain body", 100, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("g2", "other", "unrelated", 200, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("q2", "say \"hi\" to me", "other", 300, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("g3", "spaced out guide", "plain", 400, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("qb", "a\"b token", "plain", 500, false, false, false)).unwrap();
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        insert_item(
+            &conn,
+            s.id,
+            &item(
+                "g1",
+                "hello world guide",
+                "plain body",
+                100,
+                false,
+                false,
+                false,
+            ),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("g2", "other", "unrelated", 200, false, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("q2", "say \"hi\" to me", "other", 300, false, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("g3", "spaced out guide", "plain", 400, false, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("qb", "a\"b token", "plain", 500, false, false, false),
+        )
+        .unwrap();
 
         // 分词以 AND 连接：多词经公共路径仅命中同时含两词者
-        let anded = get_items(&conn, &GetItemsParams { search: Some("hello world".into()), ..Default::default() }).unwrap();
+        let anded = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("hello world".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(anded.len(), 1);
         assert_eq!(anded[0].guid, "g1");
 
         // 含引号的输入经字面命中（转义后不破坏 MATCH）
-        let quoted = get_items(&conn, &GetItemsParams { search: Some("\"hi\"".into()), ..Default::default() }).unwrap();
+        let quoted = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("\"hi\"".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(quoted.len(), 1);
         assert_eq!(quoted[0].guid, "q2");
 
         // 裸引号分词整体转义为字面短语：FTS5 unicode61 不索引分隔符，
         // 故按短语匹配为空（不报错、不注入）；含引号的字面命中由上组 `"hi"` 覆盖
-        let bare = get_items(&conn, &GetItemsParams { search: Some("\"".into()), ..Default::default() }).unwrap();
-        assert!(bare.is_empty(), "bare quote should be neutralized, not injected");
+        let bare = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("\"".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            bare.is_empty(),
+            "bare quote should be neutralized, not injected"
+        );
 
         // 内嵌引号分词整体转义：a"b 按字面命中
-        let inner = get_items(&conn, &GetItemsParams { search: Some("a\"b".into()), ..Default::default() }).unwrap();
+        let inner = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("a\"b".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(inner.len(), 1);
         assert_eq!(inner[0].guid, "qb");
 
         // 首尾与连续空白被归一：多余空格仍按 AND 命中
-        let spaced = get_items(&conn, &GetItemsParams { search: Some("  spaced   out ".into()), ..Default::default() }).unwrap();
+        let spaced = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("  spaced   out ".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(spaced.len(), 1);
         assert_eq!(spaced[0].guid, "g3");
 
         // 注入被中和为字面短语：OR 注入命中 0 且不报错
-        let inj = get_items(&conn, &GetItemsParams { search: Some("hello\" OR \"1\"=\"1".into()), ..Default::default() }).unwrap();
+        let inj = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("hello\" OR \"1\"=\"1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(inj.is_empty(), "injection should be neutralized");
 
         // 空输入无表达式：返回常规列表而不报错
-        let empty = get_items(&conn, &GetItemsParams { search: Some("".into()), ..Default::default() }).unwrap();
+        let empty = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(empty.len(), 5);
         // 纯空白输入不报错、不注入：LIKE 字面无命中
-        let blank = get_items(&conn, &GetItemsParams { search: Some("   ".into()), ..Default::default() }).unwrap();
+        let blank = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("   ".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(blank.is_empty());
     }
 
     #[test]
     fn fts_rejection_falls_back_to_like_through_get_items() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
-        insert_item(&conn, s.id, &item("q1", "tokio deep dive", "plain body", 100, false, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("q2", "say \"hi\" to me", "other", 200, false, false, false)).unwrap();
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        insert_item(
+            &conn,
+            s.id,
+            &item(
+                "q1",
+                "tokio deep dive",
+                "plain body",
+                100,
+                false,
+                false,
+                false,
+            ),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("q2", "say \"hi\" to me", "other", 200, false, false, false),
+        )
+        .unwrap();
 
         // 给定：FTS 引号转义使任何用户输入都无法破坏 MATCH（见上），
         // 以缺失索引模拟 MATCH 真实拒绝；公共路径经 warn 后回退到 LIKE，结果正确
         conn.execute("DROP TABLE items_fts", []).unwrap();
-        let found = get_items(&conn, &GetItemsParams { search: Some("tokio".into()), ..Default::default() }).unwrap();
+        let found = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("tokio".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].guid, "q1");
         // 含引号的输入同样经 LIKE 字面命中
-        let quoted = get_items(&conn, &GetItemsParams { search: Some("\"hi\"".into()), ..Default::default() }).unwrap();
+        let quoted = get_items(
+            &conn,
+            &GetItemsParams {
+                search: Some("\"hi\"".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(quoted.len(), 1);
         assert_eq!(quoted[0].guid, "q2");
     }
@@ -589,19 +802,47 @@ mod tests {
     #[test]
     fn retention_cleanup_through_public_surface() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
         let now = crate::models::now_ts();
         let day: i64 = 86_400;
 
-        insert_item(&conn, s.id, &item("a", "old read", "x", now - 100 * day, true, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("b", "old starred", "x", now - 100 * day, false, true, false)).unwrap();
-        insert_item(&conn, s.id, &item("c", "recent read", "x", now - 10 * day, true, false, false)).unwrap();
-        insert_item(&conn, s.id, &item("d", "old hidden", "x", now - 100 * day, false, false, true)).unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("a", "old read", "x", now - 100 * day, true, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("b", "old starred", "x", now - 100 * day, false, true, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("c", "recent read", "x", now - 10 * day, true, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("d", "old hidden", "x", now - 100 * day, false, false, true),
+        )
+        .unwrap();
 
         // 30天保留策略：旧的未加星标文章（已读或隐藏）被删除，星标文章保留
         let deleted = cleanup_retention(&conn, 30, 0).unwrap();
         assert_eq!(deleted, 2);
-        let hidden_list = get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap();
+        let hidden_list = get_items(
+            &conn,
+            &GetItemsParams {
+                filter: Some(3),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(hidden_list.is_empty());
         let remaining = get_items(&conn, &GetItemsParams::default()).unwrap();
         assert_eq!(remaining.len(), 2);
@@ -610,7 +851,20 @@ mod tests {
 
         // 单源数量上限仅保留最新的 N 篇未加星标文章
         for i in 0..4 {
-            insert_item(&conn, s.id, &item(&format!("n{i}"), "recent", "x", now - i * 3600, false, false, false)).unwrap();
+            insert_item(
+                &conn,
+                s.id,
+                &item(
+                    &format!("n{i}"),
+                    "recent",
+                    "x",
+                    now - i * 3600,
+                    false,
+                    false,
+                    false,
+                ),
+            )
+            .unwrap();
         }
         // 未加星标集合 = c (10天前) + n0..n3 → 上限 3 保留 n0..n2，丢弃 n3 和 c
         let deleted = cleanup_retention(&conn, 0, 3).unwrap();
@@ -624,7 +878,8 @@ mod tests {
     #[test]
     fn upsert_remote_lww_and_monotonic_hidden_through_public_surface() {
         let conn = mem_db();
-        let s = crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
+        let s =
+            crate::db::insert_source(&conn, "https://e.example", "E", None, None).expect("source");
 
         // 首次 upsert 插入带有远端已读状态的数据行
         let inserted = upsert_remote_item(
@@ -692,9 +947,19 @@ mod tests {
         )
         .unwrap();
         assert!(!hide);
-        assert!(get_items(&conn, &GetItemsParams::default()).unwrap().is_empty());
+        assert!(get_items(&conn, &GetItemsParams::default())
+            .unwrap()
+            .is_empty());
         assert_eq!(
-            get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap().len(),
+            get_items(
+                &conn,
+                &GetItemsParams {
+                    filter: Some(3),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .len(),
             1
         );
         let replay = upsert_remote_item(
@@ -718,12 +983,25 @@ mod tests {
         assert!(!replay);
         // quiet 重放不回清：隐藏列表仍为 1
         assert_eq!(
-            get_items(&conn, &GetItemsParams { filter: Some(3), ..Default::default() }).unwrap().len(),
+            get_items(
+                &conn,
+                &GetItemsParams {
+                    filter: Some(3),
+                    ..Default::default()
+                }
+            )
+            .unwrap()
+            .len(),
             1
         );
 
         // 本地既有数据行（无远端 ID）通过 (source, url) 成功关联匹配
-        insert_item(&conn, s.id, &item("local", "local row", "x", 50, false, false, false)).unwrap();
+        insert_item(
+            &conn,
+            s.id,
+            &item("local", "local row", "x", 50, false, false, false),
+        )
+        .unwrap();
         conn.execute(
             "UPDATE items SET url='https://e.example/b' WHERE guid='local'",
             [],
@@ -753,7 +1031,11 @@ mod tests {
             .unwrap();
         assert_eq!(count, 2);
         let rid: Option<String> = conn
-            .query_row("SELECT remote_id FROM items WHERE guid='local'", [], |row| row.get(0))
+            .query_row(
+                "SELECT remote_id FROM items WHERE guid='local'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(rid.as_deref(), Some("def"));
     }
@@ -762,11 +1044,30 @@ mod tests {
     fn mark_all_read_through_get_items() {
         let conn = mem_db();
         let group = crate::db::create_group(&conn, "Test Group").expect("create group");
-        let source1 = crate::db::insert_source(&conn, "https://example.com/1", "Source 1", None, Some(group.id)).expect("insert source 1");
-        let source2 = crate::db::insert_source(&conn, "https://example.com/2", "Source 2", None, None).expect("insert source 2");
+        let source1 = crate::db::insert_source(
+            &conn,
+            "https://example.com/1",
+            "Source 1",
+            None,
+            Some(group.id),
+        )
+        .expect("insert source 1");
+        let source2 =
+            crate::db::insert_source(&conn, "https://example.com/2", "Source 2", None, None)
+                .expect("insert source 2");
 
-        insert_item(&conn, source1.id, &item("g1", "Title 1", "Content", 100, false, false, false)).unwrap();
-        insert_item(&conn, source2.id, &item("g2", "Title 2", "Content", 200, false, false, false)).unwrap();
+        insert_item(
+            &conn,
+            source1.id,
+            &item("g1", "Title 1", "Content", 100, false, false, false),
+        )
+        .unwrap();
+        insert_item(
+            &conn,
+            source2.id,
+            &item("g2", "Title 2", "Content", 200, false, false, false),
+        )
+        .unwrap();
 
         // 按订阅源标记已读
         let count = mark_all_read(&conn, Some("source"), Some(source1.id)).expect("mark by source");
@@ -780,7 +1081,14 @@ mod tests {
         let count = mark_all_read(&conn, None, None).expect("mark all read");
         assert_eq!(count, 2);
         // 行为断言经公共 get_items：未读过滤为空
-        let unread = get_items(&conn, &GetItemsParams { filter: Some(1), ..Default::default() }).unwrap();
+        let unread = get_items(
+            &conn,
+            &GetItemsParams {
+                filter: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(unread.is_empty());
     }
 }

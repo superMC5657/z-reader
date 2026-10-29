@@ -87,13 +87,27 @@ pub async fn ensure_session_with(
         return Ok(auth);
     }
     let host = sync_host(acct);
-    let cycle_disp = if cycle.is_empty() { String::new() } else { format!(" cycle={cycle}") };
-    let auth = match greader::login_with(http, &acct.server_url, &acct.username, &acct.password, crate::net::RequestContext::sync(cycle)).await
+    let cycle_disp = if cycle.is_empty() {
+        String::new()
+    } else {
+        format!(" cycle={cycle}")
+    };
+    let auth = match greader::login_with(
+        http,
+        &acct.server_url,
+        &acct.username,
+        &acct.password,
+        crate::net::RequestContext::sync(cycle),
+    )
+    .await
     {
         Ok(a) => a,
         Err(e) => {
             let error_kind = greader_err_kind(&e);
-            log::warn!("sync login failed{cycle_disp} host={host} error_kind={error_kind} reason {}", crate::utils::short_reason(&e.to_string()));
+            log::warn!(
+                "sync login failed{cycle_disp} host={host} error_kind={error_kind} reason {}",
+                crate::utils::short_reason(&e.to_string())
+            );
             return Err(e);
         }
     };
@@ -102,13 +116,24 @@ pub async fn ensure_session_with(
     Ok(auth)
 }
 
-async fn relogin(state: &AppState, http: &reqwest::Client, acct: &SyncAccount, cycle: &str) -> Result<String, GReaderError> {
+async fn relogin(
+    state: &AppState,
+    http: &reqwest::Client,
+    acct: &SyncAccount,
+    cycle: &str,
+) -> Result<String, GReaderError> {
     clear_session(state);
     ensure_session_with(state, http, acct, cycle).await
 }
 
 /// 同步失败记账 + warn 日志（原因经 `utils::short_reason` 收敛为单行）。
-fn log_sync_fail(report: &mut SyncReport, op_name: &str, cycle: &str, host: &str, e: &GReaderError) {
+fn log_sync_fail(
+    report: &mut SyncReport,
+    op_name: &str,
+    cycle: &str,
+    host: &str,
+    e: &GReaderError,
+) {
     let error_kind = greader_err_kind(e);
     report.failures += 1;
     record_fail(report, error_kind);
@@ -166,7 +191,11 @@ where
 /// 1. 将本地队列中的操作推送到服务端（优先推送队列）
 /// 2. 同步订阅列表（创建/更新订阅源与分组）
 /// 3. 增量拉取新增/更新条目
-pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> Result<SyncReport, String> {
+pub async fn run_with_cycle(
+    app: &AppHandle,
+    _background: bool,
+    cycle: &str,
+) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
         .sync_account
@@ -175,7 +204,9 @@ pub async fn run_with_cycle(app: &AppHandle, _background: bool, cycle: &str) -> 
     let state = app.state::<AppState>();
     let http = state.http_client();
     let host = sync_host(&acct);
-    let mut auth = ensure_session_with(&state, &http, &acct, cycle).await.map_err(|e| e.to_string())?;
+    let mut auth = ensure_session_with(&state, &http, &acct, cycle)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut report = SyncReport::default();
 
@@ -289,7 +320,10 @@ async fn push_queue(
         if e.action == SyncAction::MarkAllRead {
             stream_actions.push((e.id, e.target));
         } else {
-            by_action.entry(e.action).or_default().push((e.id, e.target));
+            by_action
+                .entry(e.action)
+                .or_default()
+                .push((e.id, e.target));
         }
     }
 
@@ -304,13 +338,22 @@ async fn push_queue(
         };
         for chunk in items.chunks(PUSH_BATCH) {
             let ids: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
-            greader::edit_tag_with(http, &acct.server_url, auth, &token, &ids, add, remove, ctx).await?;
+            greader::edit_tag_with(http, &acct.server_url, auth, &token, &ids, add, remove, ctx)
+                .await?;
             pushed_ids.extend(chunk.iter().map(|(id, _)| *id));
         }
     }
     for (id, stream) in &stream_actions {
-        greader::edit_tag_stream_with(http, &acct.server_url, auth, &token, stream, greader::STATE_READ, ctx)
-            .await?;
+        greader::edit_tag_stream_with(
+            http,
+            &acct.server_url,
+            auth,
+            &token,
+            stream,
+            greader::STATE_READ,
+            ctx,
+        )
+        .await?;
         pushed_ids.push(*id);
     }
 
@@ -396,7 +439,14 @@ impl PullFetch for LivePullFetch<'_> {
     }
 
     async fn fetch_contents(&self, ids: &[String]) -> Result<Vec<greader::GItem>, GReaderError> {
-        greader::contents_with(self.http, self.base, self.auth, ids, crate::net::RequestContext::sync(self.cycle)).await
+        greader::contents_with(
+            self.http,
+            self.base,
+            self.auth,
+            ids,
+            crate::net::RequestContext::sync(self.cycle),
+        )
+        .await
     }
 }
 
@@ -410,7 +460,12 @@ async fn sync_subscriptions(
     cycle: &str,
 ) -> Result<usize, GReaderError> {
     // Live 适配器经 `PullFetch` 缝合面取数；纯解析仍在 greader.rs（ADR-0002）。
-    let fetch = LivePullFetch { http, base: &acct.server_url, auth, cycle };
+    let fetch = LivePullFetch {
+        http,
+        base: &acct.server_url,
+        auth,
+        cycle,
+    };
     let subs = fetch.fetch_subscriptions().await?;
     apply_subscriptions(state, &subs).await
 }
@@ -448,8 +503,7 @@ async fn apply_subscriptions(
                 .map_err(GReaderError::Other)?
             {
                 Some(s) => Some(s),
-                None => db::get_source_by_url(&conn, &url)
-                    .map_err(GReaderError::Other)?,
+                None => db::get_source_by_url(&conn, &url).map_err(GReaderError::Other)?,
             };
             match existing {
                 Some(s) => {
@@ -539,7 +593,8 @@ fn apply_remote_item(
     engine: &crate::rules::RuleEngine,
     item: &greader::GItem,
 ) -> Result<Option<(bool, Option<String>)>, String> {
-    let Ok((source_id, group_id, source_url)) = resolve_pull_source(stream_map, &item.stream_id) else {
+    let Ok((source_id, group_id, source_url)) = resolve_pull_source(stream_map, &item.stream_id)
+    else {
         return Ok(None);
     };
     let stored_content = ammonia::clean(&item.content);
@@ -558,7 +613,11 @@ fn apply_remote_item(
         item.starred,
     );
     let (has_been_read, starred, hidden) = (verdict.has_been_read, verdict.starred, verdict.hidden);
-    let notify_title = if verdict.notify { Some(item.title.clone()) } else { None };
+    let notify_title = if verdict.notify {
+        Some(item.title.clone())
+    } else {
+        None
+    };
     let inserted = db::upsert_remote_item(
         conn,
         &db::RemoteItemUpsert {
@@ -593,7 +652,12 @@ async fn pull_items(
     // Live 适配器经 `PullFetch` 缝合面进入可注入编排核心；行为见 `pull_items_with`。
     // `cycle` 经 LivePullFetch context 透传到 greader sends（日志关联；拉取语义不变）。
     let host = sync_host(acct);
-    let fetch = LivePullFetch { http, base: &acct.server_url, auth, cycle };
+    let fetch = LivePullFetch {
+        http,
+        base: &acct.server_url,
+        auth,
+        cycle,
+    };
     pull_items_with(state, &fetch, cycle, &host).await
 }
 
@@ -617,7 +681,11 @@ async fn pull_items_with<F: PullFetch + Sync>(
             .map_err(GReaderError::Other)?
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
-        let ot = if ot > 0 { ot } else { crate::models::now_ts() - FIRST_SYNC_WINDOW_SECS };
+        let ot = if ot > 0 {
+            ot
+        } else {
+            crate::models::now_ts() - FIRST_SYNC_WINDOW_SECS
+        };
         let map = db::get_sources(&conn)
             .map_err(GReaderError::Other)?
             .into_iter()
@@ -644,7 +712,9 @@ async fn pull_items_with<F: PullFetch + Sync>(
         let items = fetch.fetch_contents(chunk).await?;
         let conn = state.db.lock().await;
         for item in items {
-            match apply_remote_item(&conn, &stream_map, &engine, &item).map_err(GReaderError::Other)? {
+            match apply_remote_item(&conn, &stream_map, &engine, &item)
+                .map_err(GReaderError::Other)?
+            {
                 // 未知流 Skip（政策见 `resolve_pull_source`）：沿用历史的静默 continue，
                 // 不计数、不记日志、不改变同步结果。
                 None => continue,
@@ -664,8 +734,12 @@ async fn pull_items_with<F: PullFetch + Sync>(
     // `greader.last_sync` 一律推进到 now（截断溢出 ID 本轮跳过；漂移接受项见 ADR-0002 后果）。
     {
         let conn = state.db.lock().await;
-        db::set_state(&conn, "greader.last_sync", &crate::models::now_ts().to_string())
-            .map_err(GReaderError::Other)?;
+        db::set_state(
+            &conn,
+            "greader.last_sync",
+            &crate::models::now_ts().to_string(),
+        )
+        .map_err(GReaderError::Other)?;
     }
     Ok((new_count, notified))
 }
@@ -704,10 +778,23 @@ mod tests {
         // 远端裁决唯一入口 `verdict_for_remote` 的行状态语义（不再经 Outcome 薄委托）：
         // 规则标记在服务端 LWW 之上叠加，hide 唯一折叠为已读，notify 不改行。
         // 设定：hide 规则命中，服务端为未读/未加星
-        let (_c, hide_engine) = mem_engine("hide-me-xyz", RuleTargetField::Content, RuleActionType::Hide);
+        let (_c, hide_engine) = mem_engine(
+            "hide-me-xyz",
+            RuleTargetField::Content,
+            RuleActionType::Hide,
+        );
         // 操作：远端路由一次裁决
         let v = crate::services::article::verdict_for_remote(
-            Some(&hide_engine), 1, None, "https://s.example", "t", "hide-me-xyz body", None, None, false, false,
+            Some(&hide_engine),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "hide-me-xyz body",
+            None,
+            None,
+            false,
+            false,
         );
         // 验证：隐藏与已读同时置位
         assert!(v.hidden && v.has_been_read);
@@ -718,16 +805,38 @@ mod tests {
         let quiet = crate::rules::RuleEngine::load(&conn).unwrap();
         // 操作：远端路由一次裁决
         let v = crate::services::article::verdict_for_remote(
-            Some(&quiet), 1, None, "https://s.example", "t", "plain", None, None, true, true,
+            Some(&quiet),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "plain",
+            None,
+            None,
+            true,
+            true,
         );
         // 验证：服务端状态原样保留
         assert!(v.has_been_read && v.starred && !v.hidden && !v.notify);
 
         // 设定：服务端为未读，仅匹配通知规则（无状态修改）
-        let (_c3, notify_engine) = mem_engine("notify-me-xyz", RuleTargetField::Content, RuleActionType::Notify);
+        let (_c3, notify_engine) = mem_engine(
+            "notify-me-xyz",
+            RuleTargetField::Content,
+            RuleActionType::Notify,
+        );
         // 操作：远端路由一次裁决
         let v = crate::services::article::verdict_for_remote(
-            Some(&notify_engine), 1, None, "https://s.example", "t", "notify-me-xyz body", None, None, false, false,
+            Some(&notify_engine),
+            1,
+            None,
+            "https://s.example",
+            "t",
+            "notify-me-xyz body",
+            None,
+            None,
+            false,
+            false,
         );
         // 验证：仅通知，行状态保持不变
         assert!(v.notify && !v.has_been_read && !v.hidden && !v.starred);
@@ -825,7 +934,10 @@ mod tests {
             }
         }
 
-        async fn fetch_contents(&self, ids: &[String]) -> Result<Vec<greader::GItem>, GReaderError> {
+        async fn fetch_contents(
+            &self,
+            ids: &[String],
+        ) -> Result<Vec<greader::GItem>, GReaderError> {
             Ok(self
                 .items
                 .iter()
@@ -852,7 +964,12 @@ mod tests {
     fn pull_seam_has_live_and_fixture_adapters() {
         // 设定：live（薄委托，本用例不发请求）与 fixture（内存）两种适配器
         let client = reqwest::Client::new();
-        let live = LivePullFetch { http: &client, base: "https://sync.example", auth: "t", cycle: "c-seam" };
+        let live = LivePullFetch {
+            http: &client,
+            base: "https://sync.example",
+            auth: "t",
+            cycle: "c-seam",
+        };
         let fixture = FixturePullFetch::empty();
         // 操作：同一泛型约束接纳两者（编译期即证明单缝合面）
         assert_is_pull_fetch(&live);
@@ -875,8 +992,8 @@ mod tests {
             next_page: std::sync::Mutex::new(0),
         };
         // 操作：经同一 `collect_pull_ids` 收集
-        let ids =
-            tauri::async_runtime::block_on(collect_pull_ids(&fixture, 123, "c-trunc", "h")).unwrap();
+        let ids = tauri::async_runtime::block_on(collect_pull_ids(&fixture, 123, "c-trunc", "h"))
+            .unwrap();
         // 验证：恰好在 MAX_PAGES 处截断（政策与历史一致；截断 warn 字符串不变）
         assert_eq!(ids.len(), MAX_PAGES);
     }
@@ -908,7 +1025,10 @@ mod tests {
             starred: false,
         };
         // 验证：Skip 决策（Ok(None)，无写行、无计数）
-        assert_eq!(apply_remote_item(&conn, &map, &engine, &ghost).unwrap(), None);
+        assert_eq!(
+            apply_remote_item(&conn, &map, &engine, &ghost).unwrap(),
+            None
+        );
         assert_eq!(crate::db::item_count(&conn).unwrap(), 0);
         // 操作：已知流条目（服务端未读叠加 quiet 引擎）
         let known = greader::GItem {
@@ -960,7 +1080,10 @@ mod tests {
         });
         // 设定：fixture 单页 3 id → 已知朴素 / 未知流 / 已知命中通知
         let fixture = FixturePullFetch {
-            id_pages: vec![(vec!["a1".to_string(), "b1".to_string(), "c1".to_string()], None)],
+            id_pages: vec![(
+                vec!["a1".to_string(), "b1".to_string(), "c1".to_string()],
+                None,
+            )],
             items: vec![
                 FixtureItem {
                     remote_id: "a1",
@@ -1041,10 +1164,14 @@ mod tests {
         assert_eq!(n, 2);
         tauri::async_runtime::block_on(async {
             let conn = state.db.lock().await;
-            let s1 = crate::db::get_source_by_remote_id(&conn, "feed/s1").unwrap().unwrap();
+            let s1 = crate::db::get_source_by_remote_id(&conn, "feed/s1")
+                .unwrap()
+                .unwrap();
             assert_eq!(s1.title, "Tech News");
             assert!(s1.group_id.is_some());
-            let s2 = crate::db::get_source_by_remote_id(&conn, "feed/s2").unwrap().unwrap();
+            let s2 = crate::db::get_source_by_remote_id(&conn, "feed/s2")
+                .unwrap()
+                .unwrap();
             assert_eq!(s2.title, "Plain");
         });
     }

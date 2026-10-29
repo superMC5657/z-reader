@@ -25,9 +25,9 @@ pub fn sanitize_url(raw_url: &str) -> (String, String) {
             .collect();
 
         let path = if !query_pairs.is_empty() {
-            u.query_pairs_mut().clear().extend_pairs(
-                query_pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-            );
+            u.query_pairs_mut()
+                .clear()
+                .extend_pairs(query_pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())));
             format!(
                 "{}{}",
                 u.path(),
@@ -127,28 +127,48 @@ pub struct RequestContext<'a> {
 
 impl<'a> RequestContext<'a> {
     pub fn new(kind: &'static str, cycle: &'a str, source_id: Option<i64>) -> Self {
-        Self { kind, cycle, source_id }
+        Self {
+            kind,
+            cycle,
+            source_id,
+        }
     }
 
     /// Sync (greader) requests: kind=`sync`, no source id.
     pub fn sync(cycle: &'a str) -> Self {
-        Self { kind: "sync", cycle, source_id: None }
+        Self {
+            kind: "sync",
+            cycle,
+            source_id: None,
+        }
     }
 
     /// Feed fetch requests.
     pub fn feed(cycle: &'a str, source_id: Option<i64>) -> Self {
-        Self { kind: "feed", cycle, source_id }
+        Self {
+            kind: "feed",
+            cycle,
+            source_id,
+        }
     }
 
     /// Favicon candidate requests (always tied to a source).
     pub fn favicon(cycle: &'a str, source_id: i64) -> Self {
-        Self { kind: "favicon", cycle, source_id: Some(source_id) }
+        Self {
+            kind: "favicon",
+            cycle,
+            source_id: Some(source_id),
+        }
     }
 
     /// Full-text extractor requests (canonical constructor; the no-cycle
     /// `extract_from_url` wrapper passes `""`, shape-identical to `bare`).
     pub fn extractor(cycle: &'a str) -> Self {
-        Self { kind: "extractor", cycle, source_id: None }
+        Self {
+            kind: "extractor",
+            cycle,
+            source_id: None,
+        }
     }
 
     /// Proxy probe requests.
@@ -157,13 +177,21 @@ impl<'a> RequestContext<'a> {
     /// Tracking: no in-tree caller; kept until `test_proxy` migrates to `fetch_text`.
     #[allow(dead_code)]
     pub fn proxy() -> RequestContext<'static> {
-        RequestContext { kind: "proxy", cycle: "", source_id: None }
+        RequestContext {
+            kind: "proxy",
+            cycle: "",
+            source_id: None,
+        }
     }
 
     /// Bare context for legacy callers without cycle correlation
     /// (log suffix omitted, byte-identical to the old `""`/`None` path).
     pub fn bare(kind: &'static str) -> RequestContext<'static> {
-        RequestContext { kind, cycle: "", source_id: None }
+        RequestContext {
+            kind,
+            cycle: "",
+            source_id: None,
+        }
     }
 }
 
@@ -402,7 +430,13 @@ pub async fn send_and_check_text(
     cycle: &str,
     source_id: Option<i64>,
 ) -> Result<String, String> {
-    fetch_text(RequestContext::new(kind, cycle, source_id), method, url, builder).await
+    fetch_text(
+        RequestContext::new(kind, cycle, source_id),
+        method,
+        url,
+        builder,
+    )
+    .await
 }
 
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
@@ -557,7 +591,10 @@ mod tests {
         // 给定：各构造器携带的 kind/cycle/source_id
         // 当：经 start_ctx 建日志时
         let ctx = RequestContext::sync("cyc12345");
-        assert_eq!((ctx.kind, ctx.cycle, ctx.source_id), ("sync", "cyc12345", None));
+        assert_eq!(
+            (ctx.kind, ctx.cycle, ctx.source_id),
+            ("sync", "cyc12345", None)
+        );
         let log = RequestLog::start_ctx(ctx, "GET", "https://x.example/api");
         // 那么：字段与 start_with 等价（形状逐字一致，仅来源收敛为 context）
         assert_eq!((log.kind, log.method), ("sync", "GET"));
@@ -571,7 +608,11 @@ mod tests {
         assert_eq!(feed.cycle, "cyc12345");
         assert_eq!(feed.source_id, Some(9));
         // bare 兼容形状：空 cycle/None（旧 ""/None 路径逐字一致）
-        let bare = RequestLog::start_ctx(RequestContext::bare("sync"), "POST", "https://x.example/api");
+        let bare = RequestLog::start_ctx(
+            RequestContext::bare("sync"),
+            "POST",
+            "https://x.example/api",
+        );
         assert_eq!(bare.cycle, "");
         assert_eq!(bare.source_id, None);
     }
