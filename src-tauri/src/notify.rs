@@ -38,6 +38,7 @@ fn clickable_toast(
             .title(title)
             .text1(body)
             .on_activated(move |_| {
+                log::info!("[APP] action=notify_click");
                 crate::tray::show_main_window(&handle);
                 let _ = handle.emit("notify-click", ());
                 Ok(())
