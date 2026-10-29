@@ -230,13 +230,13 @@ fn category_states(item: &Value) -> Vec<&str> {
 
 // ---------- 网络调用 ----------
 
-/// 网络层错误统一归类。"auth failed:" 前缀是 net.rs 重登路径与协议层之间的
-/// 隐式协议，识别点收敛于此（票 10 将把该往返类型化）。
-fn map_net_err(e: String) -> GReaderError {
-    if e.starts_with("auth failed:") {
-        GReaderError::Auth(e)
-    } else {
-        GReaderError::Other(e)
+/// 网络层错误统一归类。类型化的 [`crate::net::NetError`] 取代了历史
+/// "auth failed:" 前缀字符串往返，`GReaderError::Auth` 的 Display 保持
+/// 既有文案（"auth failed: HTTP <status>"）。
+fn map_net_err(e: crate::net::NetError) -> GReaderError {
+    match e {
+        crate::net::NetError::Auth(status) => GReaderError::Auth(format!("HTTP {status}")),
+        crate::net::NetError::Other(msg) => GReaderError::Other(msg),
     }
 }
 

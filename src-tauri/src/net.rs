@@ -368,6 +368,32 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     }
 }
 
+/// 检查式请求的错误分类。取代历史 "auth failed:" 前缀字符串往返——
+/// 上层（greader 协议层）match 枚举而不是嗅探前缀；`Display` 保持
+/// 历史单行文案逐字不变，跨 FFI（tauri command 返回）仍序列化为字符串。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetError {
+    /// 401/403：服务端明确拒绝凭据（重登重试后的最终失败）。
+    Auth(u16),
+    /// 其余失败：连接/超时/非 2xx/解码等，原文为简短单行原因。
+    Other(String),
+}
+
+impl std::fmt::Display for NetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetError::Auth(status) => write!(f, "auth failed: HTTP {status}"),
+            NetError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl From<NetError> for String {
+    fn from(e: NetError) -> Self {
+        e.to_string()
+    }
+}
+
 /// Single checked send interface: takes one [`RequestContext`], returns raw
 /// bytes after [`send_logged`] + status/auth check. Payload/auth/header/
 /// timeout semantics unchanged; text side applies `from_utf8_lossy`.
@@ -377,21 +403,21 @@ pub async fn fetch_bytes(
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, NetError> {
     let resp = send_logged(ctx, method, url, builder)
         .await
-        .map_err(|e| http_err_reason("fetch failed", &e))?;
+        .map_err(|e| NetError::Other(http_err_reason("fetch failed", &e)))?;
     let status = resp.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(format!("auth failed: HTTP {status}"));
+        return Err(NetError::Auth(status.as_u16()));
     }
     if !status.is_success() {
-        return Err(format!("HTTP {status}"));
+        return Err(NetError::Other(format!("HTTP {status}")));
     }
     resp.bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|e| http_err_reason("body failed", &e))
+        .map_err(|e| NetError::Other(http_err_reason("body failed", &e)))
 }
 
 /// Checked text convenience over [`fetch_bytes`] (lossy UTF-8, payload-identical
@@ -401,7 +427,7 @@ pub async fn fetch_text(
     method: &'static str,
     url: &str,
     builder: reqwest::RequestBuilder,
-) -> Result<String, String> {
+) -> Result<String, NetError> {
     Ok(String::from_utf8_lossy(&fetch_bytes(ctx, method, url, builder).await?).into_owned())
 }
 
@@ -424,6 +450,7 @@ pub async fn send_and_check_text(
         builder,
     )
     .await
+    .map_err(String::from)
 }
 
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
