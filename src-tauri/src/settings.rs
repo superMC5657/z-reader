@@ -79,6 +79,35 @@ pub fn clear_sync_secret(settings_path: &Path) -> Result<(), String> {
     write_secrets(settings_path, &store)
 }
 
+/// 读取凭据 sidecar 原文（不存在返回 None）。供恢复流程在改动前做现场快照。
+pub fn peek_secrets(settings_path: &Path) -> Option<String> {
+    std::fs::read_to_string(secrets_path(settings_path)).ok()
+}
+
+/// 删除凭据 sidecar（不存在视为已清空）。备份恢复流程用它兑现
+/// "恢复后需重填"：跨机/跨账户恢复不得把旧凭据静默水合到新账户上。
+pub fn clear_secrets(settings_path: &Path) -> Result<(), String> {
+    let path = secrets_path(settings_path);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 恢复流程的现场还原（尽力而为）：有快照则写回快照，无则确保删除。
+pub fn restore_secrets(settings_path: &Path, snapshot: Option<&str>) {
+    let path = secrets_path(settings_path);
+    match snapshot {
+        Some(text) => {
+            let _ = std::fs::write(&path, text);
+        }
+        None => {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 pub fn load(path: &Path) -> Settings {
     let mut s: Settings = read_json_safe(path, "settings corrupt");
     let secrets = read_secrets(path);

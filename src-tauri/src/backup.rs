@@ -307,23 +307,30 @@ pub async fn restore_from_archive(
     }
 
     // 仅在数据库切换成功后，才应用设置和网站图标。
-    // settings 承载账户与同步配置：拷贝失败则整体回滚到恢复前快照，
+    // settings 承载账户与同步配置：应用失败则整体回滚到恢复前快照，
     // 不允许出现"库已换而配置未换"的半完成状态。
+    // 凭据硬承诺"恢复后需重填"：恢复的 settings 一律经 scrub 清洗 inline
+    // 密码（旧版归档可能带明文），并删除本机 sidecar——load() 以 sidecar
+    // 优先，残留 sidecar 会把旧凭据静默水合到恢复后的账户上。
     let restored_settings = tmp_dir.join(SETTINGS_ENTRY);
     if restored_settings.exists() {
-        if let Err(e) = std::fs::copy(&restored_settings, settings_file) {
+        let apply = || -> Result<(), String> {
+            let text = std::fs::read_to_string(&restored_settings).map_err(|e| e.to_string())?;
+            let prev_secrets = crate::settings::peek_secrets(settings_file);
+            crate::settings::clear_secrets(settings_file)?;
+            if let Err(e) = std::fs::write(settings_file, scrub_settings_json(&text)) {
+                // settings 未写成：还原 sidecar 现场，再交由整体回滚
+                crate::settings::restore_secrets(settings_file, prev_secrets.as_deref());
+                return Err(e.to_string());
+            }
+            Ok(())
+        };
+        if let Err(e) = apply() {
             let mut guard = db.lock().await;
             // 先以内存占位连接丢弃对已换库的持有（干净关闭并收走其 WAL），
             // 再用快照覆盖 live 文件，最后由 rollback_live 重开原库。
             *guard = Connection::open_in_memory().map_err(|e| e.to_string())?;
-            let err = rollback_live(
-                &rollback,
-                db_path,
-                &staged,
-                &tmp_dir,
-                &mut guard,
-                e.to_string(),
-            );
+            let err = rollback_live(&rollback, db_path, &staged, &tmp_dir, &mut guard, e);
             return Err(err);
         }
     }
@@ -933,6 +940,217 @@ mod tests {
         assert!(std::fs::read_to_string(&settings_file)
             .unwrap()
             .contains("restored-456"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn restore_clears_secrets_and_scrubs_plaintext() {
+        // 给定：本机残留 sidecar + 含明文密码的 legacy 归档 settings
+        // （绕过 write_archive 的打包期 scrub，模拟旧版备份）。
+        // 恢复后必须：inline 明文被清洗、sidecar 被删除、load() 不再水合出密码。
+        let base = temp_dir("restore-secrets");
+        let live_dir = base.join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_path = live_dir.join("zreader.db");
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let src =
+            crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None)
+                .unwrap();
+        crate::db::insert_item(
+            &live_conn,
+            src.id,
+            &crate::db::UpsertEntry {
+                guid: "live-g1",
+                title: "live article",
+                url: None,
+                author: None,
+                published_at: 100,
+                content: Some("live body"),
+                summary: None,
+                snippet: Some("live"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        drop(live_conn);
+        let settings_file = base.join("settings.json");
+        std::fs::write(&settings_file, r#"{"marker":"live"}"#).unwrap();
+        let sidecar = settings_file.with_file_name("secrets.json");
+        std::fs::write(
+            &sidecar,
+            r#"{"sync_password":"old-pass","proxy_password":"old-proxy"}"#,
+        )
+        .unwrap();
+        let favicon_dir = base.join("favicons");
+
+        let staged_src = base.join("staged.db");
+        {
+            let c = crate::db::open(&staged_src).unwrap();
+            let s =
+                crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None)
+                    .unwrap();
+            crate::db::insert_item(
+                &c,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: "new-g1",
+                    title: "restored article",
+                    url: None,
+                    author: None,
+                    published_at: 200,
+                    content: Some("new body"),
+                    summary: None,
+                    snippet: Some("new"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        // 手工打包：DB 条目 + 带明文密码的 settings 条目（模拟 legacy 备份）
+        let archive = base.join("legacy.zreader.bak");
+        {
+            let f = std::fs::File::create(&archive).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zw.start_file(DB_ENTRY, opts).unwrap();
+            std::io::copy(&mut std::fs::File::open(&staged_src).unwrap(), &mut zw).unwrap();
+            zw.start_file(SETTINGS_ENTRY, opts).unwrap();
+            zw.write_all(
+                br#"{"marker":"restored","syncAccount":{"provider":"greader","serverUrl":"https://x.example","username":"u","password":"legacy-pass"},"proxyPassword":"legacy-proxy"}"#,
+            )
+            .unwrap();
+            zw.finish().unwrap();
+        }
+
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let db = tokio::sync::Mutex::new(live_conn);
+
+        // 当：恢复时
+        let ok = tauri::async_runtime::block_on(restore_from_archive(
+            &archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ));
+        assert!(ok.is_ok());
+
+        // 那么：inline 明文被清洗、sidecar 被删除、load() 无凭据水合
+        let raw = std::fs::read_to_string(&settings_file).unwrap();
+        assert!(!raw.contains("legacy-pass") && !raw.contains("legacy-proxy"));
+        assert!(raw.contains("restored"));
+        assert!(!sidecar.exists());
+        let loaded = crate::settings::load(&settings_file);
+        assert_eq!(
+            loaded.sync_account.as_ref().map(|a| a.password.as_str()),
+            Some("")
+        );
+        assert_eq!(loaded.proxy_password, "");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn restore_keeps_secrets_when_settings_absent() {
+        // 给定：本机 sidecar 存在 + 归档不含 settings.json
+        let base = temp_dir("restore-no-settings");
+        let live_dir = base.join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live_path = live_dir.join("zreader.db");
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let src =
+            crate::db::insert_source(&live_conn, "https://live.example/feed", "Live", None, None)
+                .unwrap();
+        crate::db::insert_item(
+            &live_conn,
+            src.id,
+            &crate::db::UpsertEntry {
+                guid: "live-g1",
+                title: "live article",
+                url: None,
+                author: None,
+                published_at: 100,
+                content: Some("live body"),
+                summary: None,
+                snippet: Some("live"),
+                image: None,
+                has_been_read: false,
+                starred: false,
+                hidden: false,
+            },
+        )
+        .unwrap();
+        drop(live_conn);
+        let settings_file = base.join("settings.json");
+        std::fs::write(&settings_file, r#"{"marker":"live"}"#).unwrap();
+        let sidecar = settings_file.with_file_name("secrets.json");
+        std::fs::write(&sidecar, r#"{"sync_password":"keep-pass"}"#).unwrap();
+        let favicon_dir = base.join("favicons");
+
+        let staged_src = base.join("staged.db");
+        {
+            let c = crate::db::open(&staged_src).unwrap();
+            let s =
+                crate::db::insert_source(&c, "https://new.example/feed", "Restored", None, None)
+                    .unwrap();
+            crate::db::insert_item(
+                &c,
+                s.id,
+                &crate::db::UpsertEntry {
+                    guid: "new-g1",
+                    title: "restored article",
+                    url: None,
+                    author: None,
+                    published_at: 200,
+                    content: Some("new body"),
+                    summary: None,
+                    snippet: Some("new"),
+                    image: None,
+                    has_been_read: false,
+                    starred: false,
+                    hidden: false,
+                },
+            )
+            .unwrap();
+        }
+        let archive = base.join("nosettings.zreader.bak");
+        write_archive(&staged_src, None, None, &archive).unwrap();
+
+        let live_conn = crate::db::open(&live_path).unwrap();
+        let db = tokio::sync::Mutex::new(live_conn);
+
+        // 当：恢复时
+        let ok = tauri::async_runtime::block_on(restore_from_archive(
+            &archive,
+            &live_path,
+            &db,
+            &settings_file,
+            &favicon_dir,
+        ));
+        // 那么：库已换新，但 settings 与 sidecar 原样保留（二者是配套状态）
+        assert!(ok.is_ok());
+        {
+            let guard = db.try_lock().expect("lock");
+            let items =
+                crate::db::get_items(&guard, &crate::models::GetItemsParams::default()).unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].guid, "new-g1");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&sidecar).unwrap(),
+            r#"{"sync_password":"keep-pass"}"#
+        );
+        assert!(std::fs::read_to_string(&settings_file)
+            .unwrap()
+            .contains("live"));
 
         let _ = std::fs::remove_dir_all(&base);
     }
