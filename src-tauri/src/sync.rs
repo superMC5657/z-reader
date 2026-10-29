@@ -143,44 +143,48 @@ fn log_sync_fail(
     );
 }
 
+/// 单次同步周期内贯穿所有 GReader 调用的伴随状态包，供 [`with_auth_retry`]
+/// 与重登录共享，避免九参列表。
+struct SyncCtx<'a> {
+    state: &'a AppState,
+    http: &'a reqwest::Client,
+    acct: &'a SyncAccount,
+    /// 当前会话 token；重登录成功后由 [`with_auth_retry`] 原地更新。
+    auth: &'a mut String,
+    cycle: &'a str,
+    host: &'a str,
+    report: &'a mut SyncReport,
+}
+
 /// 统一鉴权重试：执行 `op` 一次，401/403（`GReaderError::Auth`）时重登录一次再试，语义与旧 `retry_auth!` 宏一致。
 /// 成功返回 `Some(val)`；失败时经 [`log_sync_fail`] 记账并返回 `None`。
-#[allow(clippy::too_many_arguments)]
-async fn with_auth_retry<T, F, Fut>(
-    state: &AppState,
-    http: &reqwest::Client,
-    acct: &SyncAccount,
-    auth: &mut String,
-    cycle: &str,
-    host: &str,
-    op_name: &str,
-    report: &mut SyncReport,
-    op: F,
-) -> Option<T>
+async fn with_auth_retry<T, F, Fut>(ctx: &mut SyncCtx<'_>, op_name: &str, op: F) -> Option<T>
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = Result<T, GReaderError>>,
 {
-    match op(auth.clone()).await {
+    match op(ctx.auth.clone()).await {
         Ok(val) => Some(val),
-        Err(GReaderError::Auth(_)) => match relogin(state, http, acct, cycle).await {
-            Ok(new_auth) => {
-                *auth = new_auth;
-                match op(auth.clone()).await {
-                    Ok(val) => Some(val),
-                    Err(e) => {
-                        log_sync_fail(report, op_name, cycle, host, &e);
-                        None
+        Err(GReaderError::Auth(_)) => {
+            match relogin(ctx.state, ctx.http, ctx.acct, ctx.cycle).await {
+                Ok(new_auth) => {
+                    *ctx.auth = new_auth;
+                    match op(ctx.auth.clone()).await {
+                        Ok(val) => Some(val),
+                        Err(e) => {
+                            log_sync_fail(ctx.report, op_name, ctx.cycle, ctx.host, &e);
+                            None
+                        }
                     }
                 }
+                Err(e) => {
+                    log_sync_fail(ctx.report, op_name, ctx.cycle, ctx.host, &e);
+                    None
+                }
             }
-            Err(e) => {
-                log_sync_fail(report, op_name, cycle, host, &e);
-                None
-            }
-        },
+        }
         Err(e) => {
-            log_sync_fail(report, op_name, cycle, host, &e);
+            log_sync_fail(ctx.report, op_name, ctx.cycle, ctx.host, &e);
             None
         }
     }
@@ -210,74 +214,54 @@ pub async fn run_with_cycle(
 
     let mut report = SyncReport::default();
 
-    // 1. 推送队列中的本地操作（优先推送，以便后续拉取感知自身变更）
-    if let Some(n) = with_auth_retry(
-        &state,
-        &http,
-        &acct,
-        &mut auth,
+    let mut ctx = SyncCtx {
+        state: &state,
+        http: &http,
+        acct: &acct,
+        auth: &mut auth,
         cycle,
-        &host,
-        "sync push",
-        &mut report,
-        |auth_owned: String| {
-            let s = state.clone();
-            let h = http.clone();
-            let a = acct.clone();
-            let c = cycle.to_string();
-            async move { push_queue(&s, &h, &a, &auth_owned, &c).await }
-        },
-    )
+        host: &host,
+        report: &mut report,
+    };
+
+    // 1. 推送队列中的本地操作（优先推送，以便后续拉取感知自身变更）
+    if let Some(n) = with_auth_retry(&mut ctx, "sync push", |auth_owned: String| {
+        let s = state.clone();
+        let h = http.clone();
+        let a = acct.clone();
+        let c = cycle.to_string();
+        async move { push_queue(&s, &h, &a, &auth_owned, &c).await }
+    })
     .await
     {
-        report.pushed = n;
+        ctx.report.pushed = n;
     }
 
     // 2. 同步订阅源列表
-    if let Some(n) = with_auth_retry(
-        &state,
-        &http,
-        &acct,
-        &mut auth,
-        cycle,
-        &host,
-        "sync subscriptions",
-        &mut report,
-        |auth_owned: String| {
-            let s = state.clone();
-            let h = http.clone();
-            let a = acct.clone();
-            let c = cycle.to_string();
-            async move { sync_subscriptions(&s, &h, &a, &auth_owned, &c).await }
-        },
-    )
+    if let Some(n) = with_auth_retry(&mut ctx, "sync subscriptions", |auth_owned: String| {
+        let s = state.clone();
+        let h = http.clone();
+        let a = acct.clone();
+        let c = cycle.to_string();
+        async move { sync_subscriptions(&s, &h, &a, &auth_owned, &c).await }
+    })
     .await
     {
-        report.subscription_count = n;
+        ctx.report.subscription_count = n;
     }
 
     // 3. 增量拉取条目
-    if let Some((n, notified)) = with_auth_retry(
-        &state,
-        &http,
-        &acct,
-        &mut auth,
-        cycle,
-        &host,
-        "sync pull",
-        &mut report,
-        |auth_owned: String| {
-            let s = state.clone();
-            let h = http.clone();
-            let a = acct.clone();
-            let c = cycle;
-            async move { pull_items(&s, &h, &a, &auth_owned, c).await }
-        },
-    )
+    if let Some((n, notified)) = with_auth_retry(&mut ctx, "sync pull", |auth_owned: String| {
+        let s = state.clone();
+        let h = http.clone();
+        let a = acct.clone();
+        let c = cycle;
+        async move { pull_items(&s, &h, &a, &auth_owned, c).await }
+    })
     .await
     {
-        report.new_items = n;
-        report.notified = notified;
+        ctx.report.new_items = n;
+        ctx.report.notified = notified;
     }
 
     // 单行汇总同步摘要：在单行中输出推送 + 订阅 + 拉取数量（不输出分阶段详情，通知仅输出数量，仅在存在失败时细分失败类型）。
@@ -525,8 +509,13 @@ async fn apply_subscriptions(
     Ok(count)
 }
 
-/// 同步订阅源的本地标识：(source_id, group_id, source_url)。
-type SourceIdentity = (i64, Option<i64>, String);
+/// 同步订阅源的本地标识：本地行 id、所属分组 id 与源 URL。
+#[derive(Debug, Clone)]
+struct SourceIdentity {
+    source_id: i64,
+    group_id: Option<i64>,
+    source_url: String,
+}
 
 /// 未知 stream_id 的命名决策点（政策显式化，同步结果不变）。
 ///
@@ -593,8 +582,7 @@ fn apply_remote_item(
     engine: &crate::rules::RuleEngine,
     item: &greader::GItem,
 ) -> Result<Option<(bool, Option<String>)>, String> {
-    let Ok((source_id, group_id, source_url)) = resolve_pull_source(stream_map, &item.stream_id)
-    else {
+    let Ok(ident) = resolve_pull_source(stream_map, &item.stream_id) else {
         return Ok(None);
     };
     let stored_content = ammonia::clean(&item.content);
@@ -602,9 +590,9 @@ fn apply_remote_item(
     // 远端路由经 Verdict 模块一次裁决：合并体原文交模块统一清洗匹配，直接收 Verdict。
     let verdict = crate::services::article::verdict_for_remote(
         Some(engine),
-        *source_id,
-        *group_id,
-        source_url,
+        ident.source_id,
+        ident.group_id,
+        &ident.source_url,
         &item.title,
         &item.content,
         item.author.as_deref(),
@@ -622,7 +610,7 @@ fn apply_remote_item(
         conn,
         &db::RemoteItemUpsert {
             remote_id: &item.remote_id,
-            source_id: *source_id,
+            source_id: ident.source_id,
             title: &item.title,
             url: item.url.as_deref(),
             author: item.author.as_deref(),
@@ -691,8 +679,12 @@ async fn pull_items_with<F: PullFetch + Sync>(
             .into_iter()
             .filter_map(|s| {
                 s.remote_id.map(|r| {
-                    let ctx = (s.id, s.group_id, s.url.clone());
-                    (r, ctx)
+                    let ident = SourceIdentity {
+                        source_id: s.id,
+                        group_id: s.group_id,
+                        source_url: s.url.clone(),
+                    };
+                    (r, ident)
                 })
             })
             .collect();
@@ -1008,7 +1000,11 @@ mod tests {
         let engine = crate::rules::RuleEngine::load(&conn).unwrap();
         let map: std::collections::HashMap<String, SourceIdentity> = [(
             "feed/known".to_string(),
-            (s.id, None, "https://s.example/feed".to_string()),
+            SourceIdentity {
+                source_id: s.id,
+                group_id: None,
+                source_url: "https://s.example/feed".to_string(),
+            },
         )]
         .into_iter()
         .collect();
