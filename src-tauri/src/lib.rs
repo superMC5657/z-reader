@@ -59,7 +59,32 @@ pub fn run() {
             let db_path = data_dir.join("zreader.db");
             let conn = db::open(&db_path)?;
             let settings = settings::load(&settings::settings_path(app.handle())?);
-            let http = net::build_http_client(&settings);
+            let http = match net::build_http_client(&settings) {
+                Ok(c) => c,
+                Err(e) => {
+                    // 手改配置文件导致代理非法：绝不静默直连，显式告知降级。
+                    log::error!(
+                        "[APP] action=build_http_client failed reason={} fallback=direct",
+                        crate::utils::short_reason(&e)
+                    );
+                    use tauri_plugin_notification::NotificationExt;
+                    let zh = crate::utils::is_zh_locale(&settings.locale);
+                    let body = if zh {
+                        format!("代理配置非法：{e}，已按直连运行，请在设置中修正")
+                    } else {
+                        format!(
+                            "Invalid proxy config: {e}. Running direct until fixed in Settings."
+                        )
+                    };
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title("ZReader")
+                        .body(&body)
+                        .show();
+                    reqwest::Client::default()
+                }
+            };
             app.manage(AppState {
                 db: Mutex::new(conn),
                 db_path,

@@ -454,9 +454,10 @@ pub fn validate_proxy(settings: &Settings) -> Result<(), String> {
 
 /// 根据用户的代理配置构建共享的 HTTP 客户端。
 ///
-/// 注意：无效的手动代理 URL 在此处会静默回退至直连；设置保存与
-/// 连通性测试路径已通过 [`validate_proxy`] 进行了前置校验，因此该分支仅覆盖手动修改配置文件的情况。
-pub fn build_http_client(settings: &Settings) -> reqwest::Client {
+/// manual 模式下代理 URL 为空或非法时返回 Err——绝不静默回退直连
+/// （设置保存与连通性测试路径已由 [`validate_proxy`] 前置校验，Err 只覆盖
+/// 手改配置文件后未重新保存的情况，由调用方显式上报）。
+pub fn build_http_client(settings: &Settings) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; ZReader/0.3)")
         .timeout(std::time::Duration::from_secs(30));
@@ -467,21 +468,22 @@ pub fn build_http_client(settings: &Settings) -> reqwest::Client {
         "manual" => {
             let url = settings.proxy_url.trim();
             if url.is_empty() {
-                builder = builder.no_proxy();
-            } else if let Ok(mut proxy) = reqwest::Proxy::all(url) {
-                if !settings.proxy_username.is_empty() {
-                    proxy = proxy.basic_auth(&settings.proxy_username, &settings.proxy_password);
-                }
-                builder = builder.proxy(proxy);
-            } else {
-                builder = builder.no_proxy();
+                return Err("manual proxy URL is empty".into());
             }
+            let mut proxy =
+                reqwest::Proxy::all(url).map_err(|e| format!("invalid proxy URL: {e}"))?;
+            if !settings.proxy_username.is_empty() {
+                proxy = proxy.basic_auth(&settings.proxy_username, &settings.proxy_password);
+            }
+            builder = builder.proxy(proxy);
         }
         // "system"：保持 reqwest 默认行为（环境变量 + 操作系统代理集成）。
         _ => {}
     }
 
-    builder.build().unwrap_or_default()
+    builder
+        .build()
+        .map_err(|e| format!("http client build failed: {e}"))
 }
 
 #[cfg(test)]
@@ -498,10 +500,18 @@ mod tests {
 
     #[test]
     fn builds_for_all_modes() {
-        // 所有模式都必须生成可用的客户端（或默认回退），绝不能 panic。
-        let _ = build_http_client(&settings("system", ""));
-        let _ = build_http_client(&settings("none", ""));
-        let _ = build_http_client(&settings("manual", ""));
+        // system/none 恒成功；manual 空/非法 URL 必须 Err（绝不静默直连回退）。
+        assert!(build_http_client(&settings("system", "")).is_ok());
+        assert!(build_http_client(&settings("none", "")).is_ok());
+        assert_eq!(
+            build_http_client(&settings("manual", "")).unwrap_err(),
+            "manual proxy URL is empty"
+        );
+        assert!(build_http_client(&settings("manual", "not a url"))
+            .unwrap_err()
+            .starts_with("invalid proxy URL:"));
+        assert!(build_http_client(&settings("manual", "http://127.0.0.1:7890")).is_ok());
+        assert!(build_http_client(&settings("manual", "socks5://127.0.0.1:1080")).is_ok());
     }
 
     #[test]

@@ -474,7 +474,16 @@ pub async fn save_settings(
     let locale_changed = old.locale != settings.locale;
     settings_io::save(&path, &settings)?;
     if proxy_changed {
-        state.set_http_client(crate::net::build_http_client(&settings));
+        match crate::net::build_http_client(&settings) {
+            Ok(c) => state.set_http_client(c),
+            Err(e) => {
+                // validate_proxy 已前置通过，此处理论不可达；保留旧客户端并留日志。
+                log::error!(
+                    "[CMD] action=save_settings client rebuild failed reason={}",
+                    crate::utils::short_reason(&e)
+                );
+            }
+        }
     }
     if locale_changed {
         // 托盘菜单标签在创建时固化；刷新托盘使语言切换在主窗口外部也能即时生效。
@@ -554,7 +563,7 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
         .map(str::trim)
         .filter(|u| !u.is_empty())
         .unwrap_or("https://example.com");
-    let client = crate::net::build_http_client(&settings);
+    let client = crate::net::build_http_client(&settings)?;
     let start = std::time::Instant::now();
     let req = client.get(url).timeout(std::time::Duration::from_secs(10));
     if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req, "", None).await {
