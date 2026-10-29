@@ -46,11 +46,9 @@ fn enqueue_sync_action(
 /// 从未同步的分组（无 remote）与空 remote_id 皆为 None。
 fn resolve_mark_all_stream(
     scope: Option<&str>,
-    scope_id: Option<i64>,
     source_remote: Option<&str>,
     group_remote: Option<&str>,
 ) -> Option<String> {
-    let _ = scope_id;
     match scope {
         Some("source") => source_remote.filter(|t| !t.is_empty()).map(String::from),
         Some("group") => group_remote.filter(|t| !t.is_empty()).map(String::from),
@@ -376,7 +374,6 @@ pub async fn mark_all_read(
         };
         if let Some(target) = resolve_mark_all_stream(
             scope.as_deref(),
-            scope_id,
             source_remote.as_deref(),
             group_remote.as_deref(),
         ) {
@@ -662,7 +659,7 @@ pub async fn sync_now(
 ) -> Result<serde_json::Value, String> {
     log::info!("[CMD] action=sync_now");
     let cycle = crate::net::new_cycle();
-    let r = crate::sync::run_with_cycle(&app, false, &cycle).await?;
+    let r = crate::sync::run_with_cycle(&app, &cycle).await?;
     let settings = settings_io::load(&settings_io::settings_path(&app)?);
     {
         let conn = state.db.lock().await;
@@ -974,64 +971,44 @@ mod tests {
         let reading = crate::greader::STREAM_READING_LIST;
         // 缺省与 all → reading-list
         assert_eq!(
-            resolve_mark_all_stream(None, None, None, None).as_deref(),
+            resolve_mark_all_stream(None, None, None).as_deref(),
             Some(reading)
         );
         assert_eq!(
-            resolve_mark_all_stream(Some("all"), None, None, None).as_deref(),
+            resolve_mark_all_stream(Some("all"), None, None).as_deref(),
             Some(reading)
         );
         // 未知 scope → None
         assert_eq!(
-            resolve_mark_all_stream(Some("bogus"), Some(1), Some("feed/1"), Some("g")),
+            resolve_mark_all_stream(Some("bogus"), Some("feed/1"), Some("g")),
             None
         );
         // source：有/无/空
         assert_eq!(
-            resolve_mark_all_stream(Some("source"), Some(7), Some("feed/7"), None).as_deref(),
+            resolve_mark_all_stream(Some("source"), Some("feed/7"), None).as_deref(),
             Some("feed/7")
         );
+        assert_eq!(resolve_mark_all_stream(Some("source"), None, None), None);
         assert_eq!(
-            resolve_mark_all_stream(Some("source"), Some(7), None, None),
-            None
-        );
-        assert_eq!(
-            resolve_mark_all_stream(Some("source"), Some(7), Some(""), None),
+            resolve_mark_all_stream(Some("source"), Some(""), None),
             None
         );
         // group：有/无/空（从未同步组无 remote → None 跳过入队）
         assert_eq!(
-            resolve_mark_all_stream(Some("group"), Some(9), None, Some("user/-/label/G"))
-                .as_deref(),
+            resolve_mark_all_stream(Some("group"), None, Some("user/-/label/G")).as_deref(),
             Some("user/-/label/G")
         );
-        assert_eq!(
-            resolve_mark_all_stream(Some("group"), Some(9), None, None),
-            None
-        );
-        assert_eq!(
-            resolve_mark_all_stream(Some("group"), Some(9), None, Some("")),
-            None
-        );
+        assert_eq!(resolve_mark_all_stream(Some("group"), None, None), None);
+        assert_eq!(resolve_mark_all_stream(Some("group"), None, Some("")), None);
         // source 忽略 group 侧，group 忽略 source 侧
         assert_eq!(
-            resolve_mark_all_stream(
-                Some("source"),
-                Some(7),
-                Some("feed/7"),
-                Some("user/-/label/G")
-            )
-            .as_deref(),
+            resolve_mark_all_stream(Some("source"), Some("feed/7"), Some("user/-/label/G"))
+                .as_deref(),
             Some("feed/7")
         );
         assert_eq!(
-            resolve_mark_all_stream(
-                Some("group"),
-                Some(9),
-                Some("feed/7"),
-                Some("user/-/label/G")
-            )
-            .as_deref(),
+            resolve_mark_all_stream(Some("group"), Some("feed/7"), Some("user/-/label/G"))
+                .as_deref(),
             Some("user/-/label/G")
         );
     }

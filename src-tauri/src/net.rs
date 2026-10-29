@@ -171,19 +171,6 @@ impl<'a> RequestContext<'a> {
         }
     }
 
-    /// Proxy probe requests.
-    /// (Kept for future context callers; `commands::test_proxy` still uses the
-    /// legacy `send_and_check_text("proxy", .., "", None)` wrapper — out of scope.)
-    /// Tracking: no in-tree caller; kept until `test_proxy` migrates to `fetch_text`.
-    #[allow(dead_code)]
-    pub fn proxy() -> RequestContext<'static> {
-        RequestContext {
-            kind: "proxy",
-            cycle: "",
-            source_id: None,
-        }
-    }
-
     /// Bare context for legacy callers without cycle correlation
     /// (log suffix omitted, byte-identical to the old `""`/`None` path).
     pub fn bare(kind: &'static str) -> RequestContext<'static> {

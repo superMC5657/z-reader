@@ -120,7 +120,7 @@ impl RuleEngine {
         self.total_rules == 0
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.total_rules
     }

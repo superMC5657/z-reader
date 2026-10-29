@@ -44,16 +44,6 @@ pub fn run_retention_policy(
     deleted
 }
 
-/// 执行数据保留策略清理（`run_retention_policy` 的同语义别名，接收数值型天数）。
-pub fn run_retention_policy_days(
-    conn: &rusqlite::Connection,
-    days: u32,
-    max_items: u32,
-    vacuum_threshold: usize,
-) -> usize {
-    run_retention_policy(conn, days, max_items, vacuum_threshold)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,7 +104,7 @@ mod tests {
         );
 
         // 30 天窗口：仅删除超期的未加星标已读 1 篇；阈值取极大值避免 VACUUM。
-        let deleted = run_retention_policy_days(&conn, 30, 0, usize::MAX);
+        let deleted = run_retention_policy(&conn, 30, 0, usize::MAX);
         assert_eq!(deleted, 1);
         assert_eq!(crate::db::item_count(&conn).unwrap(), 2);
     }
@@ -136,7 +126,7 @@ mod tests {
         assert_eq!(deleted, 1);
 
         // 阈值极大：同样删除但跳过 VACUUM，行为一致（经由别名入口覆盖）。
-        let deleted2 = run_retention_policy_days(&conn, 0, 2, usize::MAX);
+        let deleted2 = run_retention_policy(&conn, 0, 2, usize::MAX);
         assert_eq!(deleted2, 1);
     }
 }

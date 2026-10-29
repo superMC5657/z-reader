@@ -268,44 +268,6 @@ async fn refresh_one_source(
     out
 }
 
-/// 刷新目标组装（纯）：全量或按 `ids` 子集映射为任务单元。
-/// 唯一实现收归刷新 Module 的 `build_targets` Interface；此处为薄委托，
-/// 直接消费 `RefreshTarget`（不再经元组适配）。
-fn build_targets(
-    sources: &[crate::models::Source],
-    ids: Option<&[i64]>,
-) -> Vec<crate::services::source::RefreshTarget> {
-    crate::services::source::build_targets(sources, ids)
-}
-
-/// 是否弹出聚合桌面通知（纯）：仅后台周期且（新文章命中开关或规则通知非空）时为真。
-/// 唯一实现收归刷新 Module 的 `should_notify` Interface；此处为薄委托。
-fn should_notify(
-    background: bool,
-    notify_on_new: bool,
-    new_count: usize,
-    notified: &[String],
-) -> bool {
-    crate::services::source::should_notify(background, notify_on_new, new_count, notified)
-}
-
-/// 通知正文（纯，沿用既有 zh/en 文案）：空标题时为聚合计数，非空时取前 3 预览 + 余数。
-/// 唯一实现收归刷新 Module 的 `notify_body` Interface；此处为薄委托。
-fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String {
-    crate::services::source::notify_body(locale, new_count, titles)
-}
-/// 将单个订阅源的刷新结果累加到刷新周期总计中。
-/// 唯一实现收归刷新 Module 的 `merge_outcome` Interface；此处为薄委托。
-fn merge_outcome(
-    total_new: &mut usize,
-    failures: &mut usize,
-    notified: &mut Vec<String>,
-    fail_kinds: &mut std::collections::HashMap<String, usize>,
-    out: SourceRefreshOutcome,
-) {
-    crate::services::source::merge_outcome(total_new, failures, notified, fail_kinds, out)
-}
-
 /// 抓取所有（或选定的）订阅源，将新条目送入规则引擎处理、
 /// 存储条目、刷新缺失的站点图标、应用保留策略并同步托盘红点徽标。向前端发送 fetch-progress / fetch-done 事件。
 ///
@@ -332,7 +294,7 @@ pub async fn refresh_all_sources(
         .is_some_and(|a| a.provider == "greader")
     {
         log::info!("refresh start cycle={cycle} mode={mode} sync=true");
-        let report = sync::run_with_cycle(&app, background, &cycle).await?;
+        let report = sync::run_with_cycle(&app, &cycle).await?;
         let kinds = report.fail_kinds.clone();
         (
             report.new_items,
@@ -360,7 +322,7 @@ pub async fn refresh_all_sources(
         let targets: Vec<crate::services::source::RefreshTarget> = {
             let conn = state.db.lock().await;
             let all = db::get_sources(&conn)?;
-            build_targets(&all, ids.as_deref())
+            crate::services::source::build_targets(&all, ids.as_deref())
         };
         let dir = refresh_favicon_dir(&app)?;
         let feed_count = targets.len();
@@ -401,7 +363,7 @@ pub async fn refresh_all_sources(
             std::collections::HashMap::new();
         while let Some(res) = set.join_next().await {
             match res {
-                Ok(out) => merge_outcome(
+                Ok(out) => crate::services::source::merge_outcome(
                     &mut total_new,
                     &mut failures,
                     &mut notified,
@@ -444,7 +406,12 @@ pub async fn refresh_all_sources(
             "fetch-done",
             serde_json::json!({ "newItems": total_new, "failures": failures, "background": true, "sync": is_sync }),
         );
-        if should_notify(background, settings.notify_on_new, total_new, &notified) {
+        if crate::services::source::should_notify(
+            background,
+            settings.notify_on_new,
+            total_new,
+            &notified,
+        ) {
             notify_new_articles(&app, &settings, total_new, &notified);
         }
     } else {
@@ -469,13 +436,14 @@ fn notify_new_articles(
     new_count: usize,
     rule_titles: &[String],
 ) {
-    let body = notify_body(&settings.locale, new_count, rule_titles);
+    let body = crate::services::source::notify_body(&settings.locale, new_count, rule_titles);
     notify::show_toast(app, "ZReader", &body);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::source::{build_targets, notify_body, should_notify};
 
     #[test]
     fn merge_outcome_folds_totals() {
@@ -505,7 +473,7 @@ mod tests {
         let mut fail_kinds: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for out in outcomes {
-            merge_outcome(
+            crate::services::source::merge_outcome(
                 &mut total,
                 &mut failures,
                 &mut notified,
@@ -563,7 +531,7 @@ mod tests {
         let mut fail_kinds: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for out in outcomes {
-            merge_outcome(
+            crate::services::source::merge_outcome(
                 &mut total,
                 &mut failures,
                 &mut notified,

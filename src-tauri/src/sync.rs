@@ -195,11 +195,7 @@ where
 /// 1. 将本地队列中的操作推送到服务端（优先推送队列）
 /// 2. 同步订阅列表（创建/更新订阅源与分组）
 /// 3. 增量拉取新增/更新条目
-pub async fn run_with_cycle(
-    app: &AppHandle,
-    _background: bool,
-    cycle: &str,
-) -> Result<SyncReport, String> {
+pub async fn run_with_cycle(app: &AppHandle, cycle: &str) -> Result<SyncReport, String> {
     let settings = crate::settings::load(&crate::settings::settings_path(app)?);
     let acct = settings
         .sync_account
