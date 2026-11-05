@@ -1,11 +1,9 @@
 //! 云同步账户会话顺序 Module（无 AppHandle）。
 //!
-//! 收敛 `sync_login` / `sync_logout` 的持久化与内存会话顺序：
+//! `sync_login` / `sync_logout` 的持久化与内存会话顺序：
 //! login 在 subscriptions 成功后才 save；logout 按
 //! save(None)→clear_sync_secret→clear_session→queue_clear 全序执行。
 //! 入参仅为 settings 路径 + Connection + 会话钩子，便于无 AppHandle 单测。
-
-#![allow(dead_code)]
 
 /// login 收尾：subscriptions 成功后才保存账户（调用方保证先网络后 save 的顺序）。
 pub fn complete_login(

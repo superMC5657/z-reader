@@ -1,20 +1,16 @@
 //! 数据库访问层（窄 re-export 壳：零行为、无 SQL、无逻辑）。
 //!
-//! 深度收敛于各域 Module，尤以 `items` 为条目 cohesive interface
-//!（查询/upsert/保留/vacuum：`get_items`/`insert_item`/`upsert_remote_item`/
-//! `cleanup_retention`/`vacuum`，含 Monotonic Hidden CASE 与 FTS/LIKE 回退；
-//! SQL 逐字不变，本地 SQLite 为 UI 唯一数据源 ADR-0002）。
-//! 本文件仅做 flat `crate::db::X` 重导出（`mod` 私有，深路径不再暴露；
-//! 后门（`fts_match_query`/`get_items_impl`/`migrate`）已移除，
-//! 测试一律经公共 `get_items`/`upsert_remote_item`/`cleanup_retention` 行为进入）。
+//! 深度收敛于各域 Module，本地 SQLite 为 UI 唯一数据源（ADR-0002）：
 //!
 //! - `schema`：open/migrate/版本与 rusqlite 类型转换；
 //! - `catalog`：分组与订阅源目录（含远端对齐 lookup）；
-//! - `items`：文章条目、FTS5 查询与 LIKE 回退、远端 upsert 对齐、统计与保留策略；
+//! - `items`：文章条目、FTS5 查询与 LIKE 回退、远端 upsert 对齐、统计与保留策略
+//!   （含 Monotonic Hidden CASE）；
 //! - `rules`：正则规则 CRUD；
 //! - `sync`：同步队列与状态游标。
 //!
-//! 调用方 `crate::db::X` / `db::X` 路径经由重导出保持可用。
+//! 各域公共 interface 经 `pub use X::*` 平铺重导出，调用方一律走 `crate::db::X`；
+//! 深路径（`db::items::X`）不公开，内部实现不经此暴露。
 
 mod catalog;
 mod items;
@@ -22,9 +18,7 @@ mod rules;
 mod schema;
 mod sync;
 
-// 重导出兼容：调用方 `crate::db::X` / `db::X` 路径保持可用，SQL 语义逐字不变。
-// 窄壳：仅重导出各域公共 interface（glob 下无重名符号）；深 `db::items::X` 路径不再公开，
-// 内部实现（FTS MATCH 构造、FTS/LIKE 分支开关、私有 migrate）不再经此泄漏。
+// 窄壳：仅重导出各域公共 interface（glob 下无重名符号）。
 pub use catalog::*;
 pub use items::*;
 pub use rules::*;
@@ -619,7 +613,7 @@ mod tests {
 
     #[test]
     fn fts_match_query_quotes_and_injection() {
-        // 行为版（经公共 get_items；后门 fts_match_query 已移除，
+        // 行为版（经公共 get_items；
         // canonical 断言见 items::tests::fts_quoting_is_literal_through_get_items）：
         // 分词 AND + 引号转义 + 空白归一 + 注入中和，一律经查询行为验证。
         let conn = Connection::open_in_memory().expect("init db");
@@ -716,7 +710,7 @@ mod tests {
         .unwrap();
 
         // 给定：FTS 引号转义使任何用户输入都无法破坏 MATCH（见上），
-        // 以缺失索引模拟 MATCH 真实拒绝；拒绝本身为内部细节，不再经后门断言，
+        // 以缺失索引模拟 MATCH 真实拒绝；拒绝本身为内部细节，
         // 公共路径经 warn 后回退到 LIKE，结果正确
         //（canonical 覆盖见 items::tests::fts_rejection_falls_back_to_like_through_get_items）
         conn.execute("DROP TABLE items_fts", []).unwrap();

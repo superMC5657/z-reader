@@ -40,13 +40,15 @@
 - `[NET]`: 网络请求与响应生命周期，采用标准 HTTP 格式：
   - `GET https://sspai.com/post/114638 -> 200 OK (1265ms, 44.5 KB) [extractor]`
   - `GET https://example.com/feed -> ERR: connection timed out (10000ms) [feed]`
-- `[FEED]`: 订阅源刷新生命周期，只记 id 与聚合计数：
-  - `refresh start mode=… feeds=…`（单周期开始，debug）
-  - `feed refreshed id=… new=…` / `feed up to date id=…`（逐源成功，debug）
-  - `feed fetch failed id=… reason …` / `feed store failed id=… reason …`（失败，warn，原因首行 160 截断）
-  - `refresh done mode=… feeds=… new=… failures=… elapsed=…ms`（单周期聚合，info，全周期只此一条）
+- `[FEED]`: 逐源刷新生命周期，只记 id/host 与聚合计数：
+  - `feed refreshed cycle=… id=… host=… new=… fetch_ms=… store_ms=… favicon_ms=… elapsed_ms=…` /
+    `feed up to date cycle=… id=… host=… …`（逐源成功，info）
+  - `feed fetch failed cycle=… id=… host=… error_kind=… fetch_ms=… reason …` /
+    `feed store failed cycle=… id=… host=… error_kind=… reason …`（失败，warn，原因首行 160 截断）
 - `[SYNC]`: 云端同步引擎步骤（登录、拉取、推送队列、对账）。
-- `[APP]`: 应用核心生命周期与系统级事件。
+- `[APP]`: 应用核心生命周期与系统级事件（刷新周期开始/结束单行汇总、托盘与通知事件等）。
+
+其余后端模块的日志行以模块路径短名显示（如 `tray`、`backup`、`settings`、`services::storage`、`db::items`）。
 
 ---
 
@@ -59,10 +61,10 @@
 [2026-09-16 22:02:37] [DEBUG] [NET] GET https://sspai.com/post/114638 -> 200 OK (1265ms, 44.5 KB) [extractor]
 [2026-09-16 22:02:37] [ INFO] [CMD] action=fetch_full_content ok id=24 chars=4520
 [2026-09-16 22:02:59] [ INFO] [UI] Manual refresh triggered (2 feeds)
-[2026-09-16 22:02:59] [DEBUG] [FEED] refresh start mode=manual feeds=2
+[2026-09-16 22:02:59] [ INFO] [APP] refresh start cycle=3f9a21bc mode=manual sync=false feeds=2
 [2026-09-16 22:02:59] [DEBUG] [NET] GET https://feeds.appinn.com/appinns/ [feed]
-[2026-09-16 22:03:00] [DEBUG] [FEED] feed refreshed id=3 new=0
-[2026-09-16 22:03:00] [ INFO] [FEED] refresh done mode=manual feeds=2 new=0 failures=0 elapsed=1054ms
+[2026-09-16 22:03:00] [ INFO] [FEED] feed refreshed cycle=3f9a21bc id=3 host=feeds.appinn.com new=0 fetch_ms=1054 store_ms=2 favicon_ms=8 elapsed_ms=1064
+[2026-09-16 22:03:00] [ INFO] [APP] refresh done cycle=3f9a21bc mode=manual sync=false feeds=2 new=0 failures=0 notified=0 elapsed_ms=1054ms
 ```
 
 ---

@@ -115,9 +115,6 @@ fn has_auth_token(s: &str) -> bool {
 
 /// Single request-context for all net sends: bundles `kind` + `cycle` + `source_id`
 /// so callers pass one context value instead of separate strings/options.
-/// Log line shapes via [`RequestLog`] are byte-identical; this only threads
-/// real values to the point where logs are emitted (previously greader/extractor
-/// hardcoded `""`/`None` so cycle correlation silently dropped).
 #[derive(Debug, Clone, Copy)]
 pub struct RequestContext<'a> {
     pub kind: &'static str,
@@ -126,14 +123,6 @@ pub struct RequestContext<'a> {
 }
 
 impl<'a> RequestContext<'a> {
-    pub fn new(kind: &'static str, cycle: &'a str, source_id: Option<i64>) -> Self {
-        Self {
-            kind,
-            cycle,
-            source_id,
-        }
-    }
-
     /// Sync (greader) requests: kind=`sync`, no source id.
     pub fn sync(cycle: &'a str) -> Self {
         Self {
@@ -161,18 +150,8 @@ impl<'a> RequestContext<'a> {
         }
     }
 
-    /// Full-text extractor requests (canonical constructor; the no-cycle
-    /// `extract_from_url` wrapper passes `""`, shape-identical to `bare`).
-    pub fn extractor(cycle: &'a str) -> Self {
-        Self {
-            kind: "extractor",
-            cycle,
-            source_id: None,
-        }
-    }
-
-    /// Bare context for legacy callers without cycle correlation
-    /// (log suffix omitted, byte-identical to the old `""`/`None` path).
+    /// 无周期上下文的单发请求（全文提取、代理测试、订阅列表拉取）：
+    /// 日志行省略 `cycle=`/`id=` 后缀。
     pub fn bare(kind: &'static str) -> RequestContext<'static> {
         RequestContext {
             kind,
@@ -188,15 +167,14 @@ pub struct RequestLog {
     pub host: String,
     pub path: String,
     pub start: std::time::Instant,
-    /// 8 字符周期 ID；为空时在日志行中省略（保持向后兼容）。
+    /// 8 字符周期 ID；为空时在日志行中省略。
     pub cycle: String,
     /// 订阅源 ID；None 表示省略。
     pub source_id: Option<i64>,
 }
 
 impl RequestLog {
-    /// Context-carrying constructor: single-context entry point.
-    /// Byte-identical to [`RequestLog::start_with`] (delegates to it).
+    /// 单上下文入口：由 [`RequestContext`] 构造请求日志。
     pub fn start_ctx(ctx: RequestContext<'_>, method: &'static str, url: &str) -> Self {
         Self::start_with(ctx.kind, method, url, ctx.cycle, ctx.source_id)
     }
@@ -229,7 +207,7 @@ impl RequestLog {
         }
     }
 
-    /// ` cycle=abcd1234 id=7` —— 当没有周期 ID / 订阅源 ID 时为空（旧调用方兼容）。
+    /// ` cycle=abcd1234 id=7` —— 没有周期 ID / 订阅源 ID 时为空串。
     fn suffix(cycle: &str, source_id: Option<i64>) -> String {
         let mut s = String::new();
         if !cycle.is_empty() {
@@ -267,8 +245,8 @@ impl RequestLog {
         let suffix = self.suffix_self();
 
         if status.is_success() {
-            // 订阅源抓取成功降级为 debug（减少日志量）；lib.rs 中每个源的
-            // INFO 日志已包含目标与耗时。
+            // 订阅源抓取成功降级为 debug（减少日志量）；每个源的
+            // INFO 日志（services::source）已包含目标与耗时。
             // favicon/其他类型保持 debug。
             log::debug!(
                 "{} {} -> {} ({elapsed_ms}ms{bytes_disp}) [{}]{suffix}",
@@ -327,9 +305,8 @@ impl RequestLog {
     }
 }
 
-/// Single logged send interface: takes one [`RequestContext`] instead of
-/// separate `kind`/`cycle`/`source_id` strings. Log shapes byte-identical
-/// (delegates to [`RequestLog::start_ctx`]/`finish`/`finish_err`).
+/// Single logged send interface: takes one [`RequestContext`], logs the request
+/// lifecycle via [`RequestLog::start_ctx`]/`finish`/`finish_err`, returns the raw response.
 pub async fn send_logged(
     ctx: RequestContext<'_>,
     method: &'static str,
@@ -368,9 +345,9 @@ pub fn http_err_reason(prefix: &str, e: &reqwest::Error) -> String {
     }
 }
 
-/// 检查式请求的错误分类。取代历史 "auth failed:" 前缀字符串往返——
-/// 上层（greader 协议层）match 枚举而不是嗅探前缀；`Display` 保持
-/// 历史单行文案逐字不变，跨 FFI（tauri command 返回）仍序列化为字符串。
+/// 检查式请求的错误分类：`Auth` 为 401/403 鉴权失败，`Other` 为其余失败
+/// 的简短单行原因。上层（greader 协议层）match 枚举而非嗅探前缀字符串；
+/// 跨 FFI（tauri command 返回）经 `Display` 序列化为字符串。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetError {
     /// 401/403：服务端明确拒绝凭据（重登重试后的最终失败）。
@@ -395,8 +372,7 @@ impl From<NetError> for String {
 }
 
 /// Single checked send interface: takes one [`RequestContext`], returns raw
-/// bytes after [`send_logged`] + status/auth check. Payload/auth/header/
-/// timeout semantics unchanged; text side applies `from_utf8_lossy`.
+/// bytes after [`send_logged`] + status/auth check.
 /// 抓取阶段错误前缀为 `fetch failed`，正文流式错误前缀为 `body failed`。
 pub async fn fetch_bytes(
     ctx: RequestContext<'_>,
@@ -420,8 +396,7 @@ pub async fn fetch_bytes(
         .map_err(|e| NetError::Other(http_err_reason("body failed", &e)))
 }
 
-/// Checked text convenience over [`fetch_bytes`] (lossy UTF-8, payload-identical
-/// to the old `send_and_check_text` path).
+/// Checked text convenience over [`fetch_bytes`]（lossy UTF-8）。
 pub async fn fetch_text(
     ctx: RequestContext<'_>,
     method: &'static str,
@@ -429,28 +404,6 @@ pub async fn fetch_text(
     builder: reqwest::RequestBuilder,
 ) -> Result<String, NetError> {
     Ok(String::from_utf8_lossy(&fetch_bytes(ctx, method, url, builder).await?).into_owned())
-}
-
-/// 发送请求并在 HTTP 成功时返回文本正文（`builder` 已由调用方基于共享
-/// `Client` 构造并设置好超时，因此超时/代理/日志行为与 [`send_logged`] 一致）。
-/// 401/403 映射为鉴权错误以便上层刷新会话，其余非 2xx 返回 `HTTP <status>`。
-/// 无周期上下文时 `cycle=""`、`source_id=None`（旧调用方兼容：经 context 薄包装）。
-pub async fn send_and_check_text(
-    kind: &'static str,
-    method: &'static str,
-    url: &str,
-    builder: reqwest::RequestBuilder,
-    cycle: &str,
-    source_id: Option<i64>,
-) -> Result<String, String> {
-    fetch_text(
-        RequestContext::new(kind, cycle, source_id),
-        method,
-        url,
-        builder,
-    )
-    .await
-    .map_err(String::from)
 }
 
 /// 在保存或测试前验证手动代理 URL，以便拼写错误能够明确报错，
@@ -573,7 +526,7 @@ mod tests {
         assert_eq!(classify_error("unauthorized"), "auth");
         assert_eq!(classify_error("Forbidden"), "auth");
         // 给定：含 auth 子串但非独立 token 的词
-        // 当/那么：不再误伤为 auth
+        // 那么：不归为 auth
         assert_eq!(classify_error("author Alice not found"), "other");
         assert_eq!(classify_error("oauth handshake timed out"), "timeout");
         // 其他分支保持原样
@@ -603,7 +556,7 @@ mod tests {
         assert!(log.path.contains("token=***"));
         assert_eq!(log.cycle, "abc12345");
         assert_eq!(log.source_id, Some(7));
-        // 给定：无周期上下文（旧调用方兼容形状）
+        // 给定：无周期上下文
         let bare = RequestLog::start_with("sync", "POST", "https://x.example/api", "", None);
         assert_eq!(bare.cycle, "");
         assert_eq!(bare.source_id, None);
@@ -620,7 +573,7 @@ mod tests {
             ("sync", "cyc12345", None)
         );
         let log = RequestLog::start_ctx(ctx, "GET", "https://x.example/api");
-        // 那么：字段与 start_with 等价（形状逐字一致，仅来源收敛为 context）
+        // 那么：字段与 start_with 等价
         assert_eq!((log.kind, log.method), ("sync", "GET"));
         assert_eq!(log.cycle, "cyc12345");
         assert_eq!(log.source_id, None);
@@ -631,7 +584,7 @@ mod tests {
         );
         assert_eq!(feed.cycle, "cyc12345");
         assert_eq!(feed.source_id, Some(9));
-        // bare 兼容形状：空 cycle/None（旧 ""/None 路径逐字一致）
+        // bare：空 cycle/None，日志行省略后缀
         let bare = RequestLog::start_ctx(
             RequestContext::bare("sync"),
             "POST",

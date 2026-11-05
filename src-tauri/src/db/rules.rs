@@ -1,4 +1,4 @@
-//! 正则规则 CRUD（零行为变更：由 db.rs 按域拆分而来，SQL 逐字不变）。
+//! 正则规则 CRUD。
 
 use rusqlite::{params, Connection, Row};
 

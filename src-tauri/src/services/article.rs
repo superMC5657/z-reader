@@ -7,7 +7,7 @@
 //! 单一推导契约（Single derivation）：
 //! - 唯一公开入口为 [`verdict_for_local`] / [`verdict_for_remote`]；内部推导链
 //!   `normalize_body → evaluate_normalized → merge_outcome_with_server → derive_verdict`
-//!   均为私有，调用方不得直接构造 `Outcome`（不再提供 `evaluate_*` 系列公开包装）。
+//!   均为私有，调用方不得直接构造 `Outcome`。
 //! - 折叠 + OR 语义恒定：`has_been_read = server_read || mark_read || hide`
 //!   （hide→已读唯一折叠）；`starred = server_starred || star`（服务端 LWW 之上的叠加）。
 //! - Monotonic Hidden（与持久层同契约）：`verdict.hidden` 只反映本次规则命中；
@@ -37,16 +37,15 @@ pub struct Verdict {
 
 /// 提取 HTML 或富文本内容的纯文本摘要，修剪首尾空白并截取前 200 个字符。
 ///
-/// 对齐 `feed.rs`、`sync.rs` 与 `extractor.rs` 的摘要截取逻辑。
+/// 全文摘要截取的唯一实现（调用方：feed、sync、全文抓取命令）。
 pub fn snippet_of(html: &str) -> String {
     let text = html_to_text(html);
     text.trim().chars().take(200).collect::<String>()
 }
 
-/// 摘要选源的唯一收口：summary 优先，回退到 content，行为与历史一致。
+/// 摘要选源的唯一收口：summary 优先，回退到 content。
 ///
-/// `feed` 传双源（content + summary），`sync` 传合并体（`GItem.content`）配 `None`，
-/// 输出与此前各调用方手写的 `summary.unwrap_or(content)` 完全一致，仅收拢位置。
+/// `feed` 传双源（content + summary），`sync` 传合并体（`GItem.content`）配 `None`。
 pub fn snippet_for(content: &str, summary: Option<&str>) -> String {
     snippet_of(summary.unwrap_or(content))
 }
@@ -54,7 +53,7 @@ pub fn snippet_for(content: &str, summary: Option<&str>) -> String {
 /// 将双源原文拼成单路归一化文本（未清洗）：`content + " " + summary`。
 ///
 /// Adapter 只做 wire→原文翻译并交出该文本，清洗（`html_to_text`）统一在模块内完成。
-/// 任一源缺失时退化为单源；双缺失为空串。不再区分 content-only 与 concat 两条老路。
+/// 任一源缺失时退化为单源；双缺失为空串。
 fn normalize_body(content: Option<&str>, summary: Option<&str>) -> String {
     match (content, summary) {
         (Some(c), Some(s)) => format!("{c} {s}"),
@@ -116,7 +115,7 @@ fn merge_outcome_with_server(
 /// 双路共用的唯一 Interface（私有）：归一化单文本评估 + 折叠 + 服务端 OR，一次得出 `Verdict`。
 ///
 /// `body_raw` 为已拼好的归一化原文；本地路由传 `false/false` 作为服务端状态，
-/// 远端路由传入 `GItem` 的已读/加星。公开入口只收 `Verdict`，不再手写 `||hide`。
+/// 远端路由传入 `GItem` 的已读/加星。公开入口只收 `Verdict`。
 fn derive_verdict(
     engine: Option<&RuleEngine>,
     source_id: i64,

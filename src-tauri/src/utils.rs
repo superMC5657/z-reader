@@ -2,8 +2,6 @@
 //!
 //! 包含无状态的日志格式化、路径解析、URL 预处理与本地化判断等辅助函数。
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::Path;
 

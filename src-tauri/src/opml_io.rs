@@ -73,7 +73,7 @@ fn walk_outline(
     let group_id = if name.is_empty() {
         parent_group
     } else {
-        // 复用共享的建组辅助：已存在则直接复用，仅在新建时计数（排重语义不变）。
+        // 复用共享的建组辅助：已存在则直接复用，仅在新建时计数。
         let already_exists = db::get_groups(conn)?
             .iter()
             .any(|g| g.name.as_str() == name);

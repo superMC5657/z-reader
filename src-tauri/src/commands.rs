@@ -18,7 +18,6 @@ pub(crate) fn favicon_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// 有同步账户时将条目操作入队待推送；纯本地模式直接跳过。
-/// 收敛 `mark_read` / `star` 两处的 `if acct.is_some()` 内联分支，语义不变。
 /// 缺 remote_id 的条目由 `db::enqueue_item_actions` 静默跳过（计数返回）；
 /// 部分跳过时仅记 debug，不阻断主流程。
 /// 保持为同步函数：`&Connection` 非 `Sync`，跨 `await` 持有会使命令 future 非 `Send`。
@@ -441,7 +440,7 @@ pub async fn fetch_full_content(state: State<'_, AppState>, id: i64) -> Result<(
 async fn fetch_full_content_inner(state: &AppState, id: i64, link: &str) -> Result<usize, String> {
     let client = state.http_client();
     let content = crate::extractor::extract_from_url(&client, link).await?;
-    let snippet = crate::extractor::snippet_of(&content);
+    let snippet = crate::services::article::snippet_of(&content);
     let chars = content.chars().count();
     let conn = state.db.lock().await;
     db::set_item_content(&conn, id, &content, &snippet)?;
@@ -563,7 +562,11 @@ pub async fn test_proxy(settings: Settings, target: Option<String>) -> Result<u6
     let client = crate::net::build_http_client(&settings)?;
     let start = std::time::Instant::now();
     let req = client.get(url).timeout(std::time::Duration::from_secs(10));
-    if let Err(msg) = crate::net::send_and_check_text("proxy", "GET", url, req, "", None).await {
+    if let Err(msg) =
+        crate::net::fetch_text(crate::net::RequestContext::bare("proxy"), "GET", url, req)
+            .await
+            .map_err(String::from)
+    {
         log::warn!(
             "[CMD] action=test_proxy failed reason={}",
             crate::utils::short_reason(&msg)
@@ -600,7 +603,12 @@ pub async fn sync_login(
     let auth = crate::sync::ensure_session_with(&state, &http, &acct, "")
         .await
         .map_err(|e| e.to_string())?;
-    let subs = crate::greader::subscriptions(&http, &acct.server_url, &auth)
+    let subs = crate::greader::subscriptions_with(
+        &http,
+        &acct.server_url,
+        &auth,
+        crate::net::RequestContext::bare("sync"),
+    )
         .await
         .map_err(|e| {
             let msg = e.to_string();
@@ -651,7 +659,7 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<serde_json::Value
 
 /// 手动执行一次同步周期。
 /// Manual sync entry; refresh single-entry split (ADR-0002) stays in `refresh_all_sources`.
-/// Post-cycle retention reuses refresh Module seam; push-first + local SQLite sole UI source unchanged.
+/// Post-cycle retention reuses refresh Module seam; push-first per ADR-0002.
 #[tauri::command]
 pub async fn sync_now(
     app: AppHandle,
@@ -1096,7 +1104,7 @@ mod tests {
     fn scope_display_fromstr_roundtrip() {
         use crate::models::RuleSourceScope;
         use std::str::FromStr;
-        // 往返：all / source:7 / group:9（线上传形不变）
+        // 往返：all / source:7 / group:9
         assert_eq!(
             RuleSourceScope::from_str("all").unwrap(),
             RuleSourceScope::All

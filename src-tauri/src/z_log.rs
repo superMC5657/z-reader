@@ -95,11 +95,9 @@ pub fn init() -> tauri::plugin::TauriPlugin<tauri::Wry> {
                     "net" => "NET",
                     "sync" => "SYNC",
                     "feed" => "FEED",
-                    "db" => "DB",
+                    "services::source" => "FEED",
+                    "lib" => "APP",
                     "z_log" => "LOG",
-                    "extractor" => "EXTRACT",
-                    "rules" => "RULES",
-                    "opml_io" => "OPML",
                     other => other,
                 }
             } else if target == "zreader_lib" {

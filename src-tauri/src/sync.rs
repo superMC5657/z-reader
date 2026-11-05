@@ -156,7 +156,7 @@ struct SyncCtx<'a> {
     report: &'a mut SyncReport,
 }
 
-/// 统一鉴权重试：执行 `op` 一次，401/403（`GReaderError::Auth`）时重登录一次再试，语义与旧 `retry_auth!` 宏一致。
+/// 统一鉴权重试：执行 `op` 一次，401/403（`GReaderError::Auth`）时重登录一次再试。
 /// 成功返回 `Some(val)`；失败时经 [`log_sync_fail`] 记账并返回 `None`。
 async fn with_auth_retry<T, F, Fut>(ctx: &mut SyncCtx<'_>, op_name: &str, op: F) -> Option<T>
 where
@@ -275,7 +275,7 @@ pub async fn run_with_cycle(app: &AppHandle, cycle: &str) -> Result<SyncReport, 
 }
 
 /// 将本地操作队列消耗并推送到服务端。推送成功的条目将被删除；途中发生失败时剩余条目保留在队列中（重复推送已应用的修改是幂等的）。
-/// `cycle` 仅用于网络日志关联（经 context 透传到 greader sends；payload/编排不变）。
+/// `cycle` 仅用于网络日志关联（经 context 透传到 greader sends）。
 async fn push_queue(
     state: &AppState,
     http: &reqwest::Client,
@@ -344,44 +344,43 @@ async fn push_queue(
     Ok(pushed_ids.len())
 }
 
-// ==================== 拉取管线 Fetch 缝合（candidate 3） ====================
+// ==================== 拉取管线 Fetch 缝合 ====================
 //
 // Pull 模块拥有完整拉取管线：stream_map → ids → contents → verdict → upsert → cursor，
-// 网络抓取收敛到 `PullFetch` 一个注入点之后：
-// - live 适配器 `LivePullFetch`：对 `greader::{subscriptions, stream_ids, contents}`
-//   的薄委托（调用形状与历史一致；纯解析 `parse_*` / `normalize_item_id` 不动，
-//   ADR-0002“协议层与引擎分离”保持）；
+// 网络抓取收敛到 `PullFetch` 一个注入点：
+// - live 适配器 `LivePullFetch`：对 `greader::{subscriptions_with, stream_ids_with, contents_with}`
+//   的薄委托；纯解析 `parse_*` / `normalize_item_id` 在 greader 协议层，
+//   ADR-0002“协议层与引擎分离”。
 // - fixture 适配器（`#[cfg(test)] FixturePullFetch`，见本文件测试模块）：内存分页 +
 //   内存条目，与 live 实现同一 trait——换适配器即换数据源，无需改编排，是真实接缝。
-// 政策（行为零变更，ADR-0003 日志字符串逐字保留）：
+// 政策（ADR-0003 日志格式）：
 // - MAX_PAGES 截断 vs 游标推进：见 `collect_pull_ids` 与 `pull_items_with` 的游标注释；
-// - 未知 stream_id：见 `UnknownStreamDecision::Skip`（沿用历史的静默 continue）；
-// - 逐条落盘链经 P2 Verdict 唯一入口 `verdict_for_remote`：见 `apply_remote_item`。
-// 本缝合不碰 `run_with_cycle` / `push_queue` / `with_auth_retry`（推送优先与 LWW 不变），
-// 不碰刷新生命周期与 Verdict 推导内部；`db` 侧 SQL 一字未动。
+// - 未知 stream_id：见 `UnknownStreamDecision::Skip`（静默 continue）；
+// - 逐条落盘链经 Verdict 唯一入口 `verdict_for_remote`：见 `apply_remote_item`。
+// 本缝合不碰 `run_with_cycle` / `push_queue` / `with_auth_retry`（推送优先与 LWW），
+// 不碰刷新生命周期与 Verdict 推导内部。
 
 /// 拉取管线的抓取面：订阅列表、增量 ID 分页、条目正文三段抓取（单一注入点）。
 ///
 /// live 与 fixture 为其两种实现（ADR-0002：本地 SQLite 仍是 UI 唯一数据源，
 /// 此处只换“远端从哪来”，落盘与裁决路径唯一且不变）。
 pub trait PullFetch {
-    /// 订阅列表（语义与 `greader::subscriptions` 一致）。
+    /// 订阅列表（语义与 `greader::subscriptions_with` 一致）。
     async fn fetch_subscriptions(&self) -> Result<Vec<greader::GSubscription>, GReaderError>;
     /// reading-list 增量 ID 单页：`ot` 为 `greader.last_sync` 游标或首同步回溯值；
-    /// 返回单页 ID 与 continuation，语义与 `greader::stream_ids` 一致。
+    /// 返回单页 ID 与 continuation，语义与 `greader::stream_ids_with` 一致。
     async fn fetch_ids_page(
         &self,
         ot: i64,
         continuation: Option<&str>,
     ) -> Result<(Vec<String>, Option<String>), GReaderError>;
-    /// 按 ID 块取正文（语义与 `greader::contents` 一致；ID 规范化仍在 greader 侧完成，
-    /// fixture 直接构造 `GItem` 以绕过线格式——纯解析函数不受影响）。
+    /// 按 ID 块取正文（语义与 `greader::contents_with` 一致；ID 规范化仍在 greader 侧完成；
+    /// fixture 直接构造 `GItem` 绕过线格式）。
     async fn fetch_contents(&self, ids: &[String]) -> Result<Vec<greader::GItem>, GReaderError>;
 }
 
 /// Live 抓取适配器：`PullFetch` 在生产路径的唯一实现，
-/// 对 greader 网络调用的薄委托（调用形状与历史逐字一致；`cycle` 仅经
-/// context 透传到 greader sends 做日志关联，抓取语义/编排不变）。
+/// 对 greader 网络调用的薄委托；`cycle` 经 context 透传到 greader sends 做日志关联。
 pub struct LivePullFetch<'a> {
     pub http: &'a reqwest::Client,
     pub base: &'a str,
@@ -431,7 +430,7 @@ impl PullFetch for LivePullFetch<'_> {
 }
 
 /// 将服务端的订阅源更新或插入到本地分组/订阅源中。本地存在但服务端不存在的订阅源保持不变。
-/// `cycle` 仅用于网络日志关联（经 LivePullFetch context 透传；对账/落盘不变）。
+/// `cycle` 仅用于网络日志关联（经 LivePullFetch context 透传）。
 async fn sync_subscriptions(
     state: &AppState,
     http: &reqwest::Client,
@@ -518,15 +517,15 @@ struct SourceIdentity {
 /// 背景（ADR-0002 §3）：远端条目按 `origin.streamId` 回填本地订阅源；订阅对账
 /// (`sync_subscriptions`) 与拉取是同一周期内先后两步，若某流尚未在本地建源
 /// （对账尚未覆盖、远端已删源、或本地库从零重建），`stream_map` 中查无此流。
-/// 决策：`Skip`——静默跳过该条目（不写行、不计数、不记日志），与历史的 bare
-/// `continue` 逐字同义；刻意不打日志，避免大同步周期刷屏（ADR-0003 噪声预算）。
+/// 决策：`Skip`——静默跳过该条目（不写行、不计数、不记日志）；刻意不打日志，
+/// 避免大同步周期刷屏（ADR-0003 噪声预算）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnknownStreamDecision {
     Skip,
 }
 
 /// 未知流解析：命中返回本地标识，缺失以 `Err(UnknownStreamDecision::Skip)` 显式表达跳过。
-/// 调用方以 `let Ok(..) else { continue }` 应用该决策（语义即历史的静默 continue）。
+/// 调用方以 `let Ok(..) else { continue }` 应用该决策。
 fn resolve_pull_source<'m>(
     stream_map: &'m std::collections::HashMap<String, SourceIdentity>,
     stream_id: &str,
@@ -536,9 +535,9 @@ fn resolve_pull_source<'m>(
 
 /// 增量 ID 收集：分页遍历 reading-list 流（不过滤未读：已知条目的状态变更也必须被感知到）。
 ///
-/// 截断政策（与历史逐字一致）：至多 `MAX_PAGES` 页；触发上限且 continuation 仍 pending 时，
+/// 截断政策：至多 `MAX_PAGES` 页；触发上限且 continuation 仍 pending 时，
 /// 超出窗口的 ID 在当前周期跳过——游标仍在 `pull_items_with` 尾部推进到 now
-/// （接受项见 ADR-0002 后果：极端窗口漂移；日志字符串保持逐字不变）。
+/// （接受项见 ADR-0002 后果：极端窗口漂移）。
 async fn collect_pull_ids<F: PullFetch + Sync>(
     fetch: &F,
     ot: i64,
@@ -565,7 +564,7 @@ async fn collect_pull_ids<F: PullFetch + Sync>(
     Ok(ids)
 }
 
-/// 单条远端条目的落盘链（P2 Verdict 接口唯一入口，链条与历史逐字一致）：
+/// 单条远端条目的落盘链（Verdict 接口唯一入口）：
 /// `ammonia::clean` → `snippet_for` → `verdict_for_remote` → `upsert_remote_item`
 /// （推导 + 折叠 + 服务端 OR 在 Verdict 模块内一次完成；行级 hidden 单调由
 /// `db::upsert_remote_item` 的 SQL CASE 落盘保证，本函数只透传本次 `hidden`）。
@@ -647,7 +646,7 @@ async fn pull_items(
 
 /// 拉取管线的可注入编排核心：stream_map → ids → contents → verdict → upsert → cursor。
 ///
-/// - 上下文装载（`greader.last_sync` 游标 / `stream_map` / 规则引擎）与历史逐字一致；
+/// - 上下文装载（`greader.last_sync` 游标 / `stream_map` / 规则引擎）；
 ///   首同步无游标时回溯 `FIRST_SYNC_WINDOW_SECS`（180 天，ADR-0002 §3）；
 /// - ID 与正文两段抓取经 `PullFetch` 注入（live 与 fixture 同一路径）；
 /// - 逐条落盘经 `apply_remote_item`（P2 Verdict 唯一入口；未知流 Skip 政策见
@@ -695,7 +694,7 @@ async fn pull_items_with<F: PullFetch + Sync>(
 
     let mut new_count = 0usize;
     let mut notified: Vec<String> = Vec::new();
-    // contents 按 CONTENTS_BATCH 分块（请求体大小政策；与历史行为一致）。
+    // contents 按 CONTENTS_BATCH 分块（请求体大小政策）。
     for chunk in ids.chunks(CONTENTS_BATCH) {
         let items = fetch.fetch_contents(chunk).await?;
         let conn = state.db.lock().await;
@@ -703,8 +702,7 @@ async fn pull_items_with<F: PullFetch + Sync>(
             match apply_remote_item(&conn, &stream_map, &engine, &item)
                 .map_err(GReaderError::Other)?
             {
-                // 未知流 Skip（政策见 `resolve_pull_source`）：沿用历史的静默 continue，
-                // 不计数、不记日志、不改变同步结果。
+                // 未知流 Skip（政策见 `resolve_pull_source`）：不计数、不记日志、不改变同步结果。
                 None => continue,
                 Some((inserted, notify_title)) => {
                     if let Some(title) = notify_title {
@@ -718,7 +716,7 @@ async fn pull_items_with<F: PullFetch + Sync>(
         }
     }
 
-    // 游标政策（与历史逐字一致）：无论是否触发 MAX_PAGES 截断、无论本轮拉到与否，
+    // 游标政策：无论是否触发 MAX_PAGES 截断、无论本轮拉到与否，
     // `greader.last_sync` 一律推进到 now（截断溢出 ID 本轮跳过；漂移接受项见 ADR-0002 后果）。
     {
         let conn = state.db.lock().await;
@@ -763,7 +761,7 @@ mod tests {
 
     #[test]
     fn rule_flags_apply_on_top_of_server_state() {
-        // 远端裁决唯一入口 `verdict_for_remote` 的行状态语义（不再经 Outcome 薄委托）：
+        // 远端裁决唯一入口 `verdict_for_remote` 的行状态语义：
         // 规则标记在服务端 LWW 之上叠加，hide 唯一折叠为已读，notify 不改行。
         // 设定：hide 规则命中，服务端为未读/未加星
         let (_c, hide_engine) = mem_engine(
@@ -982,7 +980,7 @@ mod tests {
         // 操作：经同一 `collect_pull_ids` 收集
         let ids = tauri::async_runtime::block_on(collect_pull_ids(&fixture, 123, "c-trunc", "h"))
             .unwrap();
-        // 验证：恰好在 MAX_PAGES 处截断（政策与历史一致；截断 warn 字符串不变）
+        // 验证：恰好在 MAX_PAGES 处截断
         assert_eq!(ids.len(), MAX_PAGES);
     }
 

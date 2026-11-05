@@ -1,4 +1,4 @@
-//! 分组与订阅源目录（含远端对齐 lookup；零行为变更：由 db.rs 按域拆分而来，SQL 逐字不变）。
+//! 分组与订阅源目录（含远端对齐 lookup）。
 
 use crate::models::{Group, Source};
 use rusqlite::{params, Connection, OptionalExtension, Row};

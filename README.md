@@ -45,21 +45,24 @@ src/                      Vue 3 前端工程
   components/feed/        卡片 / 杂志 / 列表视图组件
   components/article/     阅读视图与正文渲染
   components/nav/         侧边栏导航与分组树
-  stores/                 Pinia 状态管理 (app / data / ui)
+  stores/                 Pinia 状态管理 (app / data)
   lib/                    Tauri IPC 封装与辅助工具
 src-tauri/                Tauri 2 后端 (Rust)
   src/commands.rs         IPC 命令分发门面
-  src/db.rs               SQLite 存储引擎 (WAL、FTS5、索引、查询)
+  src/db.rs + db/         SQLite 存储引擎 (WAL、FTS5、索引、查询)
+  src/services/           业务服务层 (文章裁决、刷新生命周期、保留策略、同步鉴权)
   src/feed.rs             网络抓取、Feed 格式解析与入库
   src/greader.rs          Google Reader 协议客户端
   src/sync.rs             云端双向同步编排引擎
   src/rules.rs            正则自动化规则匹配与回填引擎
-  src/net.rs              网络客户端构建与代理管理
+  src/net.rs              网络客户端构建、代理管理与请求生命周期日志
   src/settings.rs         配置读写与独立凭据管理 (secrets.json)
   src/backup.rs           数据归档流式备份与原子恢复
   src/extractor.rs        网页全文 Readability 提取
   src/opml_io.rs          OPML 规范化导入与导出
+  src/notify.rs           桌面原生通知
   src/tray.rs             系统托盘与全局事件联动
+  src/z_log.rs            统一日志架构 (轮转、保留、脱敏)
   src/lib.rs              应用生命周期、并发刷新池与后台任务
 ```
 

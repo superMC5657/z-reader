@@ -2,11 +2,9 @@
 //!
 //! 本模块拥有条目域的全部深度：查询（`get_items` 经 FTS5 + LIKE 回退）、
 //! 写入（`insert_item` 新建、`upsert_remote_item` 远端对齐）、保留（`cleanup_retention`）
-//! 与整理（`vacuum`）。SQL 语义逐字不变（含 Monotonic Hidden `CASE` 与 FTS/LIKE 回退）。
-//! `db.rs` 仅为窄 re-export 壳（flat `crate::db::X`），深度均收敛于此；删除壳不带走任何实现。
-//! 本地 SQLite 为 UI 唯一数据源（ADR-0002 local-SQLite-sole-UI-source，本模块加强之）。
-//!
-//! 零行为变更：由 db.rs 按域拆分而来，SQL 逐字不变。
+//! 与整理（`vacuum`；含 Monotonic Hidden `CASE` 与 FTS/LIKE 回退）。
+//! `db.rs` 仅为窄 re-export 壳（flat `crate::db::X`），深度均收敛于此。
+//! 本地 SQLite 为 UI 唯一数据源（ADR-0002 local-SQLite-sole-UI-source）。
 
 use crate::models::Item;
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -110,7 +108,7 @@ fn fts_match_query(q: &str) -> Option<String> {
 }
 
 /// FTS 尝试 + LIKE 回退的内部实现：`allow_fts` 仅为 `get_items` 的内部开关，
-/// 私有实现细节（cohesive interface 内部），SQL 语义逐字不变。
+/// 私有实现细节（cohesive interface 内部）。
 fn get_items_impl(
     conn: &Connection,
     p: &crate::models::GetItemsParams,

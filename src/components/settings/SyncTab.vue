@@ -77,7 +77,7 @@ async function doSyncNow() {
 }
 
 function askSyncDisconnect() {
-  // 断开确认走面板全局 ConfirmModal（面板内与删源/删规则同一确认面），不再自建弹框副本。
+  // 断开确认走面板全局 ConfirmModal（面板内与删源/删规则同一确认面）。
   requestDestructiveConfirm(requestConfirm, {
     title: t('settings.sync.disconnect'),
     message: t('settings.sync.confirmDisconnect'),

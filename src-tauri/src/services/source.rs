@@ -1,10 +1,9 @@
 //! 订阅源刷新生命周期 Module：唯一的单源与周期生命周期拥有者。
 //!
 //! 锁纪律契约（唯一出处）：`await` 网络段绝不跨持 `db` 锁；仅存库/标记状态/图标路径写入的
-//! 短暂临界区内加锁。本模块之外不再重复描述该纪律。
+//! 短暂临界区内加锁。
 //!
-//! 两段式 Interface：[`FetchSpec`]（抓取）与 [`StoreSpec`]（存库）共同覆盖原 10 字段上下文
-//!（`source_id` 两端共享）；[`refresh_single_source`] 为便捷入口（内部分两段调用），
+//! 两段式 Interface：[`FetchSpec`]（抓取）与 [`StoreSpec`]（存库）（`source_id` 两端共享）；[`refresh_single_source`] 为便捷入口（内部分两段调用），
 //! [`store_parsed`] 为存库段入口（跳过抓取：store→标状态→补图标，供 `add_source` 复用已预检的
 //! `ParsedFeed`）。
 //!
@@ -12,10 +11,8 @@
 //! cycle→targets→fan-out→merge→retention→notify 的全部决策 Seam
 //!（[`REFRESH_CONCURRENCY`] bound、[`build_targets`]、[`merge_outcome`]、
 //! [`should_notify`]/[`notify_body`]、[`apply_refresh_retention`]）；
-//! `feed` 的抓取/存库/图标仅为 Adapter，经由本 Module 的 Seam 调用，调用方不再直连 Adapter；
+//! `feed` 的抓取/存库/图标仅为 Adapter，调用方一律经由本 Module 的 Seam 调用；
 //! `lib.rs` 仅保留 cycle-ID 生成与 sync/本地单入口分流（ADR-0002）及事件/托盘/通知的薄 Adapter。
-
-#![allow(dead_code)]
 
 use crate::feed::ParsedFeed;
 
@@ -71,7 +68,7 @@ pub struct RefreshSingleSourceContext<'a> {
     /// 缺图标时的写入目录；`None` 表示跳过补抓（调用方无目录时）。
     pub favicon_dir: Option<&'a std::path::Path>,
     pub allow_third_party: bool,
-    /// 刷新周期 ID；为空时与旧调用方行为一致（日志中省略）。
+    /// 刷新周期 ID；为空时在日志行中省略。
     pub cycle: &'a str,
 }
 
@@ -200,7 +197,7 @@ pub async fn store_parsed(
 /// 1. 抓取与解析（fetch 段，纯网络，不持锁）；
 /// 2. 存库段（store→标状态→补图标，见 [`store_parsed`]）。
 ///
-/// 成功时输出与旧单源刷新一致的 INFO 分段耗时日志
+/// 成功时输出 INFO 分段耗时日志
 ///（`fetch_ms` / `store_ms` / `favicon_ms` / `elapsed_ms`，仅主机名）；
 /// 绝不向上抛出抓取/存库的业务失败：失败时标记该源为失败状态并返回
 /// `Ok(Outcome { failed: true, error_kind })`；
@@ -278,10 +275,10 @@ pub async fn refresh_single_source(
 // ---------- 刷新周期 Interface（单一入口簇：targets→fan-out bound→merge→retention→notify 决策） ----------
 
 /// 刷新周期 fan-out 的有界并发上限（semaphore bound；与 JoinSet fan-in 配对）。
-/// 唯一出处：`lib.rs` 的周期循环经由此 Seam 取值，不再各自硬编码。
+/// 唯一出处：`lib.rs` 的周期循环经由此 Seam 取值。
 pub const REFRESH_CONCURRENCY: usize = 6;
 
-/// 刷新目标（纯）：全量或按 `ids` 子集映射的任务单元，替代调用方的临时元组。
+/// 刷新目标（纯）：全量或按 `ids` 子集映射的任务单元。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefreshTarget {
     pub id: i64,
@@ -378,8 +375,8 @@ pub fn notify_body(locale: &str, new_count: usize, titles: &[String]) -> String 
 }
 
 /// 刷新路径的保留策略 Seam：阈值语义固定为 200（删除数严格大于 200 时执行 VACUUM）。
-/// 调用方（`lib.rs` 周期收尾、`commands.rs::sync_now`）经由此 Seam 进入存储服务，
-/// 不再各自硬编码阈值；手动立即清理（阈值 0）不经此 Seam，直连存储服务。
+/// 调用方（`lib.rs` 周期收尾、`commands.rs::sync_now`）经由此 Seam 进入存储服务；
+/// 手动立即清理（阈值 0）不经此 Seam，直连存储服务。
 pub fn apply_refresh_retention(conn: &rusqlite::Connection, days: u32, max_items: u32) -> usize {
     crate::services::storage::run_retention_policy(conn, days, max_items, 200)
 }

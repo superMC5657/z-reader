@@ -175,18 +175,8 @@ async fn background_refresh(app: tauri::AppHandle) {
 }
 
 /// 刷新周期中允许的最大并发订阅源抓取数。
-/// 唯一出处为刷新生命周期 Module 的 [`crate::services::source::REFRESH_CONCURRENCY`] Seam；
-/// 此处仅为单入口分流循环的薄引用，不再各自硬编码。
+/// 唯一出处为刷新生命周期 Module 的 [`crate::services::source::REFRESH_CONCURRENCY`]。
 const REFRESH_CONCURRENCY: usize = crate::services::source::REFRESH_CONCURRENCY;
-
-/// 后台刷新链路的站点图标目录解析。
-///
-/// 与新增订阅源（`commands::add_source`）、手动刷新图标（`commands::refresh_favicon`）
-/// 共用 `commands::favicon_dir` 作为唯一的目录拼接点，本模块内统一经由此辅助函数
-/// 获取，避免各处重复手写 `join("favicons")`。
-fn refresh_favicon_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    crate::commands::favicon_dir(app)
-}
 
 /// 单个刷新任务的数据（事件所需最小字段 + 业务输入）；不携带 `AppHandle`/`background`，
 /// 生命周期渗漏由调用方显式参数承担。
@@ -324,7 +314,7 @@ pub async fn refresh_all_sources(
             let all = db::get_sources(&conn)?;
             crate::services::source::build_targets(&all, ids.as_deref())
         };
-        let dir = refresh_favicon_dir(&app)?;
+        let dir = crate::commands::favicon_dir(&app)?;
         let feed_count = targets.len();
         log::info!("refresh start cycle={cycle} mode={mode} sync=false feeds={feed_count}");
 
@@ -579,7 +569,7 @@ mod tests {
         ];
         // 当：全量时
         let full = build_targets(&all, None);
-        // 那么：保持输入顺序全映射（直接消费 RefreshTarget，不再经元组）
+        // 那么：保持输入顺序全映射
         assert_eq!(
             full,
             vec![

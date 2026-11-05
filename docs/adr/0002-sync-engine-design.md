@@ -1,7 +1,7 @@
 # ADR-0002: 云同步引擎设计（推送优先队列 + 服务端权威拉取 + LWW）
 
 - 状态：Accepted（2026-09）；决策 4 的凭据存储部分 Partially superseded by ADR-0004（2026-10）
-- 关联：docs/PHASE_2_ROADMAP.md Phase 2.3、docs/adr/0004-secrets-sidecar.md
+- 关联：docs/adr/0004-secrets-sidecar.md
 
 ## 背景
 

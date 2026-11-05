@@ -2,8 +2,6 @@
 //!
 //! 包含历史文章清理与保留策略（retention policy）以及数据库压缩整理（vacuum）逻辑。
 
-#![allow(dead_code)]
-
 /// 执行数据保留策略清理并根据阈值决定是否执行数据库压缩（VACUUM）。
 ///
 /// 对齐 `lib.rs::refresh_all_sources`、`commands.rs::sync_now` 及
@@ -11,13 +9,13 @@
 /// 1. 按保留天数 `days`（`0` 表示跳过时间窗口清理）结合单源条目上限 `max_items`
 ///    （`0` 表示不设上限），清理未加星标的已读/隐藏文章；
 /// 2. 若删除的文章总数**严格大于** `vacuum_threshold`，则触发 SQLite `VACUUM`
-///    整理数据库空间（后台刷新/同步传 `200`，手动立即清理传 `0`，阈值语义不变）；
+///    整理数据库空间（后台刷新/同步传 `200`，手动立即清理传 `0`）；
 /// 3. 返回本次清理删除的文章总数；清理失败时记录 warn 并返回 `0`。
 ///
 /// Retention seam Adapter: refresh cycle enters via `services::source::apply_refresh_retention` (threshold 200);
-/// manual cleanup enters directly with threshold 0. Threshold semantics unchanged.
+/// manual cleanup enters directly with threshold 0.
 /// 存储入口经窄壳 flat `crate::db::{cleanup_retention, vacuum}` 进入条目 cohesive interface
-///（`db::items` 拥有查询/upsert/保留/整理全部深度，SQL 逐字不变；ADR-0002 唯一源加强）。
+///（`db::items` 拥有查询/upsert/保留/整理全部深度）。
 pub fn run_retention_policy(
     conn: &rusqlite::Connection,
     days: u32,
@@ -125,7 +123,7 @@ mod tests {
         let deleted = run_retention_policy(&conn, 0, 3, 0);
         assert_eq!(deleted, 1);
 
-        // 阈值极大：同样删除但跳过 VACUUM，行为一致（经由别名入口覆盖）。
+        // 阈值极大：同样删除但跳过 VACUUM。
         let deleted2 = run_retention_policy(&conn, 0, 2, usize::MAX);
         assert_eq!(deleted2, 1);
     }

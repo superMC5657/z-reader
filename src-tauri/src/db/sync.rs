@@ -1,4 +1,4 @@
-//! 云同步队列与状态游标（零行为变更：由 db.rs 按域拆分而来，SQL 逐字不变）。
+//! 云同步队列与状态游标。
 
 use crate::models::SyncAction;
 use rusqlite::{params, Connection, OptionalExtension};

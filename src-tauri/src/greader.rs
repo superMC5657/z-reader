@@ -230,9 +230,8 @@ fn category_states(item: &Value) -> Vec<&str> {
 
 // ---------- 网络调用 ----------
 
-/// 网络层错误统一归类。类型化的 [`crate::net::NetError`] 取代了历史
-/// "auth failed:" 前缀字符串往返，`GReaderError::Auth` 的 Display 保持
-/// 既有文案（"auth failed: HTTP <status>"）。
+/// 网络层错误统一归类：`GReaderError::Auth` 的 Display 为
+/// "auth failed: HTTP <status>"。
 fn map_net_err(e: crate::net::NetError) -> GReaderError {
     match e {
         crate::net::NetError::Auth(status) => GReaderError::Auth(format!("HTTP {status}")),
@@ -265,8 +264,7 @@ async fn read_authed(
         .map_err(map_net_err)
 }
 
-/// Context-carrying login: `ctx` carries the sync cycle for log correlation
-/// (payload/auth/header logic unchanged).
+/// Context-carrying login: `ctx` carries the sync cycle for log correlation.
 pub async fn login_with(
     client: &reqwest::Client,
     base: &str,
@@ -300,14 +298,6 @@ pub async fn get_token_with(
         return Err(GReaderError::Other("empty edit-tag token".into()));
     }
     Ok(token)
-}
-
-pub async fn subscriptions(
-    client: &reqwest::Client,
-    base: &str,
-    auth: &str,
-) -> Result<Vec<GSubscription>, GReaderError> {
-    subscriptions_with(client, base, auth, RequestContext::bare("sync")).await
 }
 
 /// Context-carrying subscriptions fetch (see [`login_with`]).
