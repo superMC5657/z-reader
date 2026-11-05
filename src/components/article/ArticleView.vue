@@ -22,11 +22,11 @@ const data = useDataStore()
 const app = useAppStore()
 
 // 自动抓取控制器：失败集合只活在当前视图实例里，不进 store、不持久化。
-// 选择纪元令牌直连 data store：同 id 重选只推进纪元不换 id，陈旧在途抓取照样丢弃。
+// 选择纪元直连 data store：同 id 重选只推进纪元不换 id，陈旧在途抓取照样丢弃。
 const autoFetch = createArticleAutoFetch({
   fetchFullContent,
   getSelectedId: () => data.selectedId,
-  getSelectionToken: () => data.nextSelectionToken(),
+  getSelectionEpoch: () => data.currentSelectionEpoch(),
   reloadItem: (id: number) => data.selectItem(id),
   reloadList: () => {
     data.loadItems().catch(() => {})

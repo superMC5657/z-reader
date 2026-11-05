@@ -212,21 +212,21 @@ describe('选择纪元与 autofetch 守卫共用深度', () => {
   it('selectItem 推进 selectionEpoch，供守卫做 id 之外的陈旧判定', async () => {
     commandHandlers.set('get_item', async (args: any) => makeItem({ id: args?.id, hasBeenRead: true }))
     const store = useDataStore()
-    expect(store.nextSelectionToken()).toBe(0)
+    expect(store.currentSelectionEpoch()).toBe(0)
     await store.selectItem(1)
-    expect(store.nextSelectionToken()).toBe(1)
+    expect(store.currentSelectionEpoch()).toBe(1)
     await store.selectItem(2)
-    expect(store.nextSelectionToken()).toBe(2)
+    expect(store.currentSelectionEpoch()).toBe(2)
     expect(store.selectedId).toBe(2)
   })
 
-  it('同 id 重选推进纪元：在途抓取结果被纪元令牌丢弃且不记失败', async () => {
+  it('同 id 重选推进纪元：在途抓取结果被纪元判定丢弃且不记失败', async () => {
     const fetchGate = gate<void>()
-    let token = 1
+    let epoch = 1
     const deps = {
       fetchFullContent: vi.fn(() => fetchGate.promise),
       getSelectedId: vi.fn(() => 5),
-      getSelectionToken: vi.fn(() => token),
+      getSelectionEpoch: vi.fn(() => epoch),
       reloadItem: vi.fn(async () => undefined),
       reloadList: vi.fn(),
     }
@@ -234,7 +234,7 @@ describe('选择纪元与 autofetch 守卫共用深度', () => {
 
     const p = ctl.execute(5, false)
     // 抓取在途时同文重选：id 不变但纪元推进。
-    token = 2
+    epoch = 2
     fetchGate.resolve()
     await p
 

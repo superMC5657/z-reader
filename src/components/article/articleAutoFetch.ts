@@ -14,11 +14,10 @@ export interface ArticleAutoFetchDeps {
   fetchFullContent: (id: number) => Promise<unknown>
   getSelectedId: () => number | null
   /**
-   * 可选的选择纪元令牌（data store 的 selectionEpoch）：与 selectedId 双保险。
-   * 不传时退化为纯 id 判定，行为与原来逐行等价；传入后即使同 id 重选
-   * （纪元推进但 id 不变）也能丢弃陈旧在途结果。
+   * 选择纪元（data store 的 selectionEpoch）：与 selectedId 双保险，
+   * 同 id 重选（纪元推进但 id 不变）也能丢弃陈旧在途结果。
    */
-  getSelectionToken?: () => number
+  getSelectionEpoch: () => number
   reloadItem: (id: number) => Promise<unknown>
   reloadList: () => void
 }
@@ -47,19 +46,15 @@ export function shouldAutoFetchArticle(
  *
  * 陈旧语义与 data store 的 paint+rollback+reload 共用一个深度：
  * 抓取是“读后写”（fetchFullContent 落库再重读），写真相仍归 data，
- * 这里只保证陈旧在途结果永不盖回当前视图（id 令牌 + 纪元令牌）。
+ * 这里只保证陈旧在途结果永不盖回当前视图（selectedId + 选择纪元双判定）。
  */
 export function createArticleAutoFetch(deps: ArticleAutoFetchDeps) {
   const fetching = ref(false)
   const error = ref('')
   const failedIds = ref(new Set<number>())
 
-  function isStaleResult(id: number, token: number | undefined): boolean {
-    if (deps.getSelectedId() !== id) return true
-    if (token !== undefined && deps.getSelectionToken && deps.getSelectionToken() !== token) {
-      return true
-    }
-    return false
+  function isStaleResult(id: number, epoch: number): boolean {
+    return deps.getSelectedId() !== id || deps.getSelectionEpoch() !== epoch
   }
 
   function onItemChange(next: Item | null | undefined): Promise<void> | undefined {
@@ -70,25 +65,32 @@ export function createArticleAutoFetch(deps: ArticleAutoFetchDeps) {
   }
 
   async function execute(id: number, manual: boolean): Promise<void> {
+    // 单飞兜底：控制器同时只允许一个在途抓取。自动路径由 shouldAutoFetchArticle
+    // 的 fetching 条件把关，手动路径由模板 :disabled 把关，这里兜住未来新调用方，
+    // 避免双在途交叠（先结算方的 finally 会提前复位后者的 fetching）。
+    if (fetching.value) return
     if (manual) {
       failedIds.value.delete(id)
     }
-    const token = deps.getSelectionToken?.()
+    const epoch = deps.getSelectionEpoch()
     fetching.value = true
     error.value = ''
     try {
       await deps.fetchFullContent(id)
       // 若用户在抓取期间已切换到其它文章（或同文重选推进了纪元），丢弃陈旧结果。
-      if (isStaleResult(id, token)) return
+      if (isStaleResult(id, epoch)) return
       await deps.reloadItem(id)
       deps.reloadList()
     } catch (e) {
-      if (!isStaleResult(id, token)) {
+      if (!isStaleResult(id, epoch)) {
         error.value = String(e)
         failedIds.value.add(id)
       }
     } finally {
-      if (!isStaleResult(id, token)) fetching.value = false
+      // fetching 是视图局部的在途状态，不是抓取结果：无论结果是否陈旧都必须复位。
+      // 控制器自身的 reloadItem（selectItem）会推进纪元，若复位也挂在陈旧判定下，
+      // 每次成功抓取都会被误判为"用户切走"，fetching 永久悬挂 → 刷新按钮转圈不停。
+      fetching.value = false
     }
   }
 

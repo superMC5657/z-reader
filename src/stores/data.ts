@@ -85,7 +85,7 @@ export const useDataStore = defineStore('data', {
     loadingMore: false,
     hasMore: true,
     search: '',
-    /** selectItem 进入次数：autofetch 陈旧守卫的共享令牌源（只增不减）。 */
+    /** selectItem 进入次数：autofetch 陈旧守卫的共享纪元源（只增不减）。 */
     selectionEpoch: 0,
     /** flag 写与 reload 的统一单调序列：写 paint 时取值，reload 开始时快照。 */
     opSeq: 0,
@@ -258,8 +258,8 @@ export const useDataStore = defineStore('data', {
       }
       this.confirmFlagWrite(item.id, 'starred', seq)
     },
-    /** 当前选择纪元：autofetch 控制器可选的陈旧令牌源（与 selectedId 双保险）。 */
-    nextSelectionToken(): number {
+    /** 当前选择纪元：autofetch 控制器的陈旧判定源（与 selectedId 双保险）。 */
+    currentSelectionEpoch(): number {
       return this.selectionEpoch
     },
     /**
