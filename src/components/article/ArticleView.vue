@@ -34,7 +34,6 @@ const autoFetch = createArticleAutoFetch({
 })
 const fetchingFull = autoFetch.fetching
 const extractError = autoFetch.error
-const failedFetchIds = autoFetch.failedIds
 
 const item = computed(() => data.selectedItem)
 const source = computed(() => (item.value ? data.sourceById(item.value.sourceId) : undefined))

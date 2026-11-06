@@ -38,18 +38,6 @@ function toggleViewConfig(bit: number, val: boolean) {
     app.patch({ viewConfigs: app.s.viewConfigs & ~bit })
   }
 }
-
-// 取值范围（钳位/回落）由 settings store 的 validate 半区唯一拥有，
-// tab 只做薄适配传原值，不在模板与脚本里各备一份 clamp。
-function adjustUiScale(delta: number) {
-  const cur = app.s.uiScale || 100
-  app.patch({ uiScale: cur + delta })
-}
-
-function adjustFontSize(delta: number) {
-  const cur = app.s.fontSize || 16
-  app.patch({ fontSize: cur + delta })
-}
 </script>
 
 <template>
