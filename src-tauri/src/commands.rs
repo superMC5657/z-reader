@@ -609,15 +609,15 @@ pub async fn sync_login(
         &auth,
         crate::net::RequestContext::bare("sync"),
     )
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            log::warn!(
-                "sync login subscriptions failed reason {}",
-                crate::utils::short_reason(&msg)
-            );
-            msg
-        })?;
+    .await
+    .map_err(|e| {
+        let msg = e.to_string();
+        log::warn!(
+            "sync login subscriptions failed reason {}",
+            crate::utils::short_reason(&msg)
+        );
+        msg
+    })?;
 
     let path = settings_io::settings_path(&app)?;
     // subscriptions 成功后才 save（顺序收 Module）。
